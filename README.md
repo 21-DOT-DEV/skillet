@@ -1,2 +1,2 @@
-# skillet
+# 🍳 skillet
 SKILL.md Evaluation Toolkit

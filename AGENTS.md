@@ -1,0 +1,129 @@
+# AGENTS.md (skillet)
+
+`skillet` — the **SKILL.md Evaluation Toolkit** — is a public, open-source, multi-harness Swift
+CLI for eval-driven development (EDD) of agent skills: capture real runs, turn hand-fixes into
+structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
+
+> **Status: greenfield.** As of this writing the repository contains design and planning artifacts
+> only — there is **no Swift code, no `Package.swift`, no tests, and no CI yet**. Everything under
+> "Planned" below is agreed *intent*, not shipped fact. Do not run build/test commands or assume
+> modules/commands exist until the corresponding roadmap phase lands. Update this file as each
+> phase is completed.
+
+## Source-of-truth documents (read these first)
+
+- **`skillet-design.md`** — the product spec. Authoritative for *what skillet does*: product
+  principles P1–P10, settled decisions D1–D7, command surface (§6), file formats (§7), gates
+  engine (§8), harness abstraction (§9), package architecture (§11), distribution (§12), v1 scope
+  (§13), open questions (§14).
+- **`ROADMAP.md`** (+ `docs/roadmap/phase-*.md`) — the phase plan. Authoritative for *sequence and
+  priority*. Phase 1 is the walking skeleton; do the earliest incomplete phase unless told
+  otherwise.
+- **`.specify/memory/constitution.md`** — the development charter. **Authoritative for *how we
+  build* skillet** (7 principles, MUST/SHOULD/MAY, governance). When in doubt about a development
+  practice, the constitution governs — do not duplicate its principles here; read it.
+
+Contributing, security disclosure, and code of conduct are handled at the org level:
+[`21-DOT-DEV/.github`](https://github.com/21-DOT-DEV/.github) (`CONTRIBUTING.md`, `SECURITY.md`,
+`CODE_OF_CONDUCT.md`). There are intentionally no repo-local copies.
+
+## Binding conventions (true now, even before code exists)
+
+These are real rules from the constitution + design decisions. Follow them in any code you write,
+from the first commit.
+
+- **Language**: Swift 6 with strict concurrency (`swiftLanguageModes: [.v6]`), Swift Package
+  Manager.
+- **Sanctioned dependencies only** (adding any other requires a constitutional amendment):
+  `swift-argument-parser`, `swift-yaml` (YAML 1.2 — config + evidence frontmatter; *not* Yams, and
+  there is **no TOML dependency**), `swift-subprocess`, plus the standard library. JSON/SARIF/frozen
+  formats use Foundation `Codable` (no added dependency). Secret scanning uses a vendored
+  `betterleaks` (MIT) companion. The cache MAY use system SQLite.
+- **`swift-subprocess` is the only sanctioned way to launch a process** — no `Foundation.Process`,
+  no raw `posix_spawn`. All process execution lives in the effectful layers.
+- **`EDDCore` is pure and synchronous** — it spawns nothing and performs no I/O beyond its inputs.
+  Everything probabilistic or effectful (model calls, processes, network, filesystem) lives behind
+  a protocol *above* `EDDCore`, and is record/replayable.
+- **Repo files are the only state.** All workflow state is recomputable from committed files under
+  `evaluations/`. A `.skillet/` cache MAY accelerate but MUST NOT originate state (deleting it
+  loses nothing).
+- **Config is YAML** (`skillet.yaml`). `config set` rewrites targeted lines in place
+  (swift-yaml does not preserve comments on re-emit). YAML is for human-editable *policy*, never
+  *behavior* (design §7.6).
+- **Frozen boundary formats are contracts**: `evals.json`, `trigger-eval.json`, `benchmark.json`,
+  SARIF 2.1.0, and session bundles never break — enforced by golden fixtures. Enumerate *all*
+  decoded fields in goldens and round-trip unknown keys. `--json` payloads carry a `schema` field
+  and are additive within a major. Exit codes are a stable API. Human TTY output is *not* an API.
+- **Every command** offers `--json`, supports `-h`/`--help`, ends by suggesting the next sensible
+  command, and fails with a message stating what/why/the fixing command.
+- **License**: repo ships **MIT** (`LICENSE`); design §14 recommends Apache-2.0 — unresolved, see
+  constitution › Deferred Decisions.
+
+## Boundaries (distilled from the constitution's MUST-NOTs — act on these)
+
+- **Never auto-commit. Ever.** skillet never runs `git commit`. The only way a live `SKILL.md` is
+  modified is the explicit, opt-in `suggest --apply` content-anchored path, which refuses a dirty
+  tree and stops short of the commit. `iterate` operates only in throwaway worktrees.
+- **Never emit, log, or commit secrets** (credentials, tokens, keys) — not in output, errors, or
+  the corpus. `capture` redacts before writing and **fails closed** if the scanner can't run. Run
+  the scanner offline/detection-only; never enable its network validation.
+- **No telemetry; no network calls** except to providers the user explicitly configured.
+- **Do not add a dependency** (runtime or dev) without a constitutional amendment.
+- **Do not break a frozen format, bundle field, exit code, or `--json` schema** without a major
+  version bump and migration notes.
+- **Do not auto-probe other applications' private caches/binaries** (the harness ban policy).
+- **Tests before implementation** (TDD); changes to graded behavior must cite evidence and a
+  proving (previously-failing) eval.
+
+## Planned (per `ROADMAP.md` — agreed intent, NOT yet built)
+
+Treat everything in this section as a target to build toward, not as existing functionality.
+
+### Package architecture (design §11)
+
+```
+skillet (Package.swift, Swift 6, strict concurrency)
+EDDCore (pure)
+  → TraceKit
+  → { HarnessKit, JudgeKit, ScoreKit, LintKit, CorpusKit }
+  → AnalysisKit / RunKit / IterateKit
+  → skilletCLI   (swift-argument-parser; wiring only, ~≤50 lines per command)
+```
+
+`EDDCore` (domain types · gates engine · scorer↔judge contradiction join · pass^k aggregation ·
+golden-tested boundary codecs) is pure/synchronous; effectful kits sit above it.
+
+### Command surface (design §6) — lights up across phases
+
+`init`, `doctor`, `lint`, `run` (behavior + trigger axes, `--ab`, `--matrix`), `capture`
+(`--from-checkpoint`, `--preserve-feedback`), `friction`, `triage`, `next` (`--strict`), `suggest`
+(`--apply`), `iterate` (`--apply`), `baseline compare|matrix`, `report` (TTY + HTML), `migrate`,
+`grade`, `score`, `bundle`, `hooks install`, `harness` (`info`, `which --search`).
+
+### Adapters (v1)
+
+`claude-code`, `opencode`, `direct-api`, `replay`.
+
+### Platforms & testing (design §11–§12)
+
+macOS 14+ and current Ubuntu LTS. Testing strategy: pure unit + property tests for
+`EDDCore`/`TraceKit`; golden files for boundary codecs; `HarnessReplay` fixtures for pipelines; one
+opt-in, env-gated live smoke job per adapter in CI — everything else runs free, and free
+deterministic gates run before any paid one.
+
+### Roadmap phases
+
+Phase 1 (walking skeleton) → 2 (measurement & static gates) → 3 (discovery/evidence) → 4 (error
+analysis) → 5 (computable runbook / `next`) → 6 (fix suggestion & iteration) → 7 (multi-harness
+matrix) → 8 (beyond v1). See `ROADMAP.md` and `docs/roadmap/`.
+
+## Maintenance (sync contract)
+
+- This file describes **current reality**. When a roadmap phase lands, move the now-true parts from
+  *Planned* into *Binding conventions* / a new *Commands* section, and update the status banner.
+- Keep this file in sync with `.specify/memory/constitution.md`: when a constitutional principle,
+  the sanctioned-dependency list, a boundary contract, or a command/flag changes, update the
+  relevant section here. **Do not duplicate the constitution's principle text** — reference it; the
+  constitution remains authoritative for development principles, this file for operational
+  onboarding.
+- Add real `Commands` (e.g. `swift build`, `swift test`) only once they actually work.

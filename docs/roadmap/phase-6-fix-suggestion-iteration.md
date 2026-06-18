@@ -1,0 +1,88 @@
+# Phase 6 — Fix Suggestion & Safe Iteration (Northstar gap #2)
+
+**Status:** PLANNED
+**Horizon:** Next
+**Last Updated:** 2026-06-17
+
+## Goal
+
+Close the loop: draft minimal, surgical `SKILL.md` edits from *observed* evidence,
+prove them by A/B in a throwaway worktree, and let a human land them — skillet
+never commits. This is the Northstar's #2 value gap (AI-assisted fix suggestion)
+and the *Suggest → Apply → Re-measure* arc. Drafting is constrained to discovered
+failures, never imagined ones.
+
+## Key Features
+
+1. Draft edit proposals (CLI: `skillet suggest`) — PLANNED · Ported
+   - Purpose & user value: From the failure taxonomy, the cited `SKILL.md`
+     passages, and corrective-turn excerpts, the judge drafts *minimal surgical*
+     content-anchored `EditProposal`s — generalize from feedback, prefer deleting
+     dead prose and extracting to `references/`, explain the why. Nothing is
+     applied.
+   - Northstar: gap #2 made executable.
+   - Success metrics:
+     - `suggest <skill> --from <evidence-id>` emits `EditProposal`s (`current_excerpt` → `proposed_text`, `rationale`, `addresses`) to `.skillet/proposals/`.
+     - Proposals draft only against observed evidence; each records its `motivation` evidence ids.
+   - Dependencies: findings (Phase 4), evidence (Phase 3), judge (Phase 2).
+   - Confidence: Medium — design §6.1 `suggest`, §7.3.
+
+2. Safe apply to the working tree (CLI: `skillet suggest --apply[=<indices>]`) — PLANNED · Net-new
+   - Purpose & user value: Materialize a reviewed proposal into your working tree
+     via content-anchored application (exact-once match, refuse-on-ambiguity,
+     fail-loud on drift) — refusing a dirty tree and stopping short of the commit.
+     The deliberate, safer P5 amendment.
+   - Northstar: gap #2 (automates the apply step the human used to do by hand).
+   - Success metrics:
+     - `suggest --apply=<i>` writes selected edits to the working tree, refuses a dirty tree, and never commits.
+     - An anchor that matches zero or >1 times aborts loudly with a remedy.
+   - Dependencies: proposals (F1), content-anchored `EditApply` engine.
+   - Confidence: Medium — design §6.1 `suggest`, §7.3.
+
+3. Prove a proposal by A/B (CLI: `skillet iterate --proposals <f> --apply <indices>`) — PLANNED · Ported
+   - Purpose & user value: Apply a proposal subset into a *throwaway git worktree*
+     (the live skill untouched), run the pinned suite at k, and print the per-eval
+     `pass^k` delta against the baseline — proving the fix before any human lands
+     it.
+   - Northstar: gap #2 (the "prove it" half) + loop integrity.
+   - Success metrics:
+     - `iterate` reports before/after `pass^k` at observed k with no regressions to call a proposal proven.
+     - Any regression discards the worktree and exits `1`, emitting nothing unless `--keep-worktree`.
+   - Dependencies: runner (Phase 1), proposals (F1), worktree lifecycle.
+   - Confidence: Medium — design §6.1 `iterate`, §10.
+
+4. Mark evidence proven (CLI: `skillet iterate --mark`) — PLANNED · Net-new
+   - Purpose & user value: On a clean, regression-free A/B, advance the linked
+     friction event to `proven` — an explicit, auditable state write, provisional
+     until judge calibration clears.
+   - Northstar: loop integrity (closes the evidence lifecycle honestly).
+   - Success metrics:
+     - `iterate --mark` sets `proven` only with zero pass^k regression *and* no unresolved contradiction on the affected evals.
+   - Dependencies: iterate (F3), evidence lifecycle (Phase 3), contradiction join (Phase 4).
+   - Confidence: Medium — design §6.1 `iterate`, §8.
+
+## Dependencies & Sequencing
+
+- Local ordering: `suggest` (F1) → `iterate` proves (F3) → `--mark` (F4); safe
+  apply (F2) is the human's landing step after a proven A/B.
+- Cross-phase: depends on Phase 5 (`eval new` produced the failing eval and the
+  proposal's motivation), Phase 4 (the contradiction gate), and Phase 1 (the runner
+  `iterate` re-measures through).
+
+## Phase Metrics & Success Criteria
+
+- This phase is successful when: a maintainer goes from a corroborated finding to a
+  drafted, A/B-proven, regression-free proposal — and lands it with a single
+  explicit `--apply` while skillet never touches the commit.
+
+## Risks & Assumptions
+
+- The `suggest`/`iterate` engines and content-anchored apply are ported; the
+  `--apply` convention is the net-new P5 amendment.
+- Suggestion quality depends on the judge; calibration is bounded by the
+  contradiction gate until a human-label set exists (Phase 8).
+
+## Phase Change Log
+
+- 2026-06-17: Phase created and spotlighted as its own phase (Northstar gap #2),
+  sequenced ahead of the harness matrix within Next.

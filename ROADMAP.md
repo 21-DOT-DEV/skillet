@@ -1,6 +1,6 @@
 # Product Roadmap — skillet
 
-**Version:** v1.1.0
+**Version:** v1.2.0
 **Last Updated:** 2026-06-18
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
@@ -57,7 +57,8 @@ derived from `skillet-design.md` and an external best-practice cross-reference
   grounded judge, scorers, flaky hygiene, record/replay, the full free
   static-gate catalog, and TTY/HTML reporting.
 - **Phase 3 (Next):** Record production sessions and human friction as
-  structured, greppable evidence — the raw material for error analysis.
+  structured, greppable evidence (secret-sanitized on capture) — the raw material
+  for error analysis.
 - **Phase 4 (Next):** Mine the corpus into a routed failure taxonomy,
   contradictions first — error analysis *before* codification.
 - **Phase 5 (Next):** The gates engine + `skillet next` — "git status for EDD":
@@ -135,6 +136,10 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 
 ## Change Log
 
+- v1.2.0 (2026-06-18): MINOR — added **capture secret-sanitization** to Phase 3 (F7):
+  redact-in-place before write, bundled `betterleaks` (MIT) run offline, fail-closed
+  when unavailable. Closes the commit-secrets footgun; extends design §12 privacy
+  (§6.1/§7.2/§11/§12 updated, doc → v0.4).
 - v1.1.0 (2026-06-18): MINOR — added **user-authored declarative YAML lint rules**
   to Phase 8 (F11) — a bounded, ReDoS-guarded extensibility capability — governed by
   the new design §7.6 "YAML usage policy" (litmus test + verdict table). No existing

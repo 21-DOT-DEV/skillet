@@ -2,7 +2,7 @@
 
 **Status:** PLANNED
 **Horizon:** Next
-**Last Updated:** 2026-06-17
+**Last Updated:** 2026-06-18
 
 ## Goal
 
@@ -81,10 +81,24 @@ and never blocks (design P4).
    - Dependencies: evidence format (F4).
    - Confidence: Low — design §6.1 `migrate`; depends on a predecessor log this repo can't verify. `needs-research`
 
+7. Capture secret-sanitization (CLI: `skillet capture` redact-by-default, `--fail-on-secret`) — PLANNED · Net-new
+   - Purpose & user value: Stop captured evidence from leaking credentials into the
+     committed corpus — capture scans the transcript/diff/bodies and **redacts secrets
+     in place** before writing, so the raw secret never enters the repo. Closes a real
+     footgun (committing `.env`/tokens/keys) the prior privacy note didn't cover.
+   - Northstar: loop integrity (a trustworthy, safely-shareable corpus).
+   - Success metrics:
+     - A planted AWS key / GitHub token / private key in a session is redacted to a typed marker (`[REDACTED:…]`) in the committed bundle; the raw value appears nowhere in the repo.
+     - Default redacts and emits a review report without blocking (P4); `--fail-on-secret` exits non-zero for CI; if the scanner can't run, capture fails closed (never writes an unsanitized bundle).
+     - A false positive is silenced with a one-line allowlist/path exemption; redaction provenance is recorded in `session-meta.json`.
+   - Dependencies: capture (F1); bundled `betterleaks` run via `swift-subprocess` (Phase 1 process seam).
+   - Confidence: Medium — design §6.1 `capture`, §12; engine choice (betterleaks, MIT) per the secrets-scanner cross-reference.
+   - Notes: betterleaks is the bundled default behind a swappable, version-pinned seam (gitleaks fallback; TruffleHog BYO-only — AGPL + network). Runs offline (validation off).
+
 ## Dependencies & Sequencing
 
 - Local ordering: capture (F1) → checkpoint modes (F2) and bundles (F3); evidence
-  format (F4) → friction suite (F5) → migration (F6).
+  format (F4) → friction suite (F5) → migration (F6). Secret-sanitization (F7) runs inside the capture write path (F1/F2), before any bundle is committed.
 - Cross-phase: this corpus feeds Phase 4 (Error Analysis) and Phase 5 (the gates
   engine reads friction/findings). `--preserve-feedback` (F2) is required for
   Phase 8's Track B axial coding.
@@ -105,3 +119,6 @@ and never blocks (design P4).
 - 2026-06-17: Phase created. Placed before Error Analysis and the Computable
   Runbook to honor the error-analysis-first ordering (capture evidence before
   analyzing or codifying it).
+- 2026-06-18: Added F7 (capture secret-sanitization — redact-in-place, bundled
+  betterleaks, fail-closed). Closes the commit-secrets footgun; design §6.1/§12.
+  Roadmap MINOR → v1.2.0.

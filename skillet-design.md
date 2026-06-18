@@ -3,12 +3,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.3 — for review |
+| **Status** | Draft v0.4 — for review |
 | **Name** | `skillet` (settled — SKILL · E · T, the *SKILL.md Evaluation Toolkit*); EDD remains the methodology's name |
 | **Deliverable** | Public, open-source, multi-harness Swift CLI |
 | **Supersedes** | The repo-private `swift-skill-eval` tool + the Python trigger harness |
 | **Decision provenance** | §2 — every load-bearing choice here was settled in the design Q&A |
-| **Revision log** | v0.3 (2026-06-18): config format moved TOML→YAML (adopt `swift-yaml`, drop the TOML dependency); standardized all process execution on `swift-subprocess`; added §7.5 artifact & file-format reference and the §7.6 YAML usage policy. v0.2: renamed to `skillet`; applied the cross-implementation review (findings 1.1–4.7 + appendices); P5 amended; proposal format changed to content-anchored edits. v0.1: initial design |
+| **Revision log** | v0.4 (2026-06-18): added `capture` secret-sanitization — redact-in-place before write, bundled `betterleaks` (MIT) run offline via `swift-subprocess`, fail-closed when unavailable; extended §12 privacy to secrets-in-evidence (touches §6.1, §7.2, §11, §12). v0.3 (2026-06-18): config format moved TOML→YAML (adopt `swift-yaml`, drop the TOML dependency); standardized all process execution on `swift-subprocess`; added §7.5 artifact & file-format reference and the §7.6 YAML usage policy. v0.2: renamed to `skillet`; applied the cross-implementation review (findings 1.1–4.7 + appendices); P5 amended; proposal format changed to content-anchored edits. v0.1: initial design |
 
 ---
 
@@ -253,6 +253,7 @@ Free, fast self-check, run implicitly (in relevant-subset form) before any paid 
 - error-tier `lint` findings (§6.1 `skillet lint`) surface here too — the free gate runs before any paid one
 - every artifact in `evaluations/` validates against its schema; boundary formats checked against golden expectations; unexpected `fixtures/**` diffs warned (A/B integrity, §9.2)
 - `git` present (needed by `iterate`)
+- the bundled secret scanner (`betterleaks`, §6.1) resolves and runs **detection-only** — skillet never passes `--validation`, so `capture` sanitization stays offline
 
 `--paid` adds one canary trial per harness: a trivial prompt that asserts a known `references/` file is readable from inside the harness. Exit `3` on any failure, each with a remedy line.
 
@@ -324,6 +325,8 @@ skillet capture --skill <skill> --slug <slug>
 ```
 
 The Discover step's recorder. The adapter (capability: `sessionCapture`) locates the native session — `--last` means "the one I just finished" — exports it, normalizes it to a Trace, and writes a session bundle to `evaluations/<skill>/sessions/<date>-<slug>.*` in the frozen bundle layout, **plus** an additive `*.trace.json` (the normalized form; additive files are permitted by the bundle's append-only policy, §7.2). Runs the deterministic scorers to produce the bundle's SARIF — renamed by role at capture time: producer skills' emitted findings become `*.audit-baseline.sarif`, consumer-side scans become `*.audit-input.sarif` (§7.2), with directionality enforced by `bundle verify`.
+
+**Secret sanitization (before write).** Production sessions leak credentials — `.env` contents, tokens, auth headers, keys echoed in command output — and capture commits the bundle, so the pipeline scans the transcript, diff, and bodies *before writing* and **redacts in place** with typed markers (`[REDACTED:aws-key]`). The raw secret never enters the repo; it remains only in the harness's native session store, which capture reads but does not commit. The default scanner is **bundled `betterleaks`** (MIT — vendored per platform/arch and run via `swift-subprocess`, §11; version-pinned, behind a swappable seam), run **detection-only and fully offline** (local BPE tokenization); `betterleaks`'s optional validation — its only network step — is off by default, irrelevant to redaction, and never enabled by skillet (§12, P8). Capture stays non-blocking (P4) — it redacts and prints a **redaction report** for the human to review before committing (P5); `--fail-on-secret` makes it fail-closed for CI (exit `1`). False positives are silenced via `betterleaks`'s own allowlist plus a skillet path exemption (`sanitize.exempt_paths`), and every redaction appears in the report, so an exemption is a one-line fix. If the scanner cannot run, capture **fails closed** with a remedy rather than writing an unsanitized bundle. Redaction provenance (scanner, version, count) is recorded in the bundle's `session-meta.json` (§7.2).
 
 Two capture modes matter for the loop. `--from-checkpoint [last|<match>]` slices the transcript at a saved checkpoint *before* the session finishes — the real corpus carries two-stage lineages (an in-progress capture plus a `-completed` sibling of the same work). `--preserve-feedback` keeps every corrective turn from the first checkpoint to EOF instead of trimming to the final state — this is the open-coding signal `triage --code-feedback` (§9.3) depends on; without it Track B starves.
 
@@ -541,7 +544,7 @@ The committed `evaluations/` tree is the database (P2). `.skillet/` is an accele
 | `trigger-eval.json` — `{query, should_trigger}` pairs | skill-creator's optimizer | Same |
 | `benchmark.json` | The Python eval-viewer reads exact field names | Opaque contract: `skillet` writes byte-level-compatible structure, verified by golden files. Additive: `executor_binary_version` joins `model`/`judge_prompt_version`, so a cross-run pass-rate delta is attributable to a harness change vs a skill change |
 | `*.audit-baseline.sarif` (producer) **and** `*.audit-input.sarif` (consumer) | SARIF 2.1.0 consumers; the audit→articles handoff; the `baseline` drift engine reads the producer side | Real standard; scorers emit valid 2.1.0. Capture renames by role (§6.1); `bundle verify` enforces directionality. The `fixtures verify` invariant (`expected ⊆ actual` + `allowedExtraRuleIds`) is defined over these |
-| Session bundles + `session-meta.json` — `{id, skill, skill_version, model, harness, captured_at, schema_version}` | Existing corpus | **Append-only**: never rename/remove/retype anything; new *files* in the bundle (e.g. `*.trace.json`) are permitted; field additions bump `schema_version`. `"unknown"` is a defined sentinel (counted separately, never poisons diversity readings) |
+| Session bundles + `session-meta.json` — `{id, skill, skill_version, model, harness, captured_at, schema_version, sanitization?}` | Existing corpus | **Append-only**: never rename/remove/retype anything; new *files* in the bundle (e.g. `*.trace.json`) are permitted; field additions bump `schema_version`. `"unknown"` is a defined sentinel (counted separately, never poisons diversity readings) |
 
 Enforcement is mechanical, not aspirational: `Tests/Golden/boundary/` holds canonical fixture files; CI fails if `skillet`'s codecs produce or reject anything the goldens don't. Two corollaries the predecessor learned the hard way: the goldens must enumerate **all** decoded fields (an omitted field — like `timeout_seconds` — is an unenforced freeze), and codecs must **round-trip unknown keys** rather than dropping them on re-encode, or "additive-only" is a policy the tool itself violates.
 
@@ -873,7 +876,7 @@ skilletCLI → { IterateKit, AnalysisKit, RunKit, RenderKit }
 
 **Testing strategy.** `EDDCore`/`TraceKit`: pure unit tests incl. property tests on the gates engine. Boundary codecs: golden files (§7.2). Pipelines end-to-end: `HarnessReplay` fixtures recorded from real harnesses. One opt-in, env-gated live smoke job per adapter in CI; everything else runs free.
 
-**Dependency policy.** `swift-argument-parser`, `swift-yaml` (the 21-DOT-DEV YAML 1.2 parser/emitter for config and evidence frontmatter — it **replaces Yams**, and because config is now YAML there is **no TOML dependency**), `swift-subprocess` (the swiftlang async/await process API; see below), and the standard library; JSON, SARIF, and the frozen boundary formats use Foundation `Codable`, adding no dependency. `swift-yaml` vendors `yaml-cpp` and builds it natively via SwiftPM (no system dependencies, no unsafe flags). All shelling-out is confined to the effectful layers — `EDDCore` spawns nothing — and goes through **`swift-subprocess`**, the *single* sanctioned way to launch a process (no `Foundation.Process`, no raw `posix_spawn`): harness CLIs, the judge, and `git` (worktree/status; no libgit2 binding) all run through it, each adapter's environment contract (§10) supplied as the subprocess's explicit environment and the per-trial watchdog (SIGTERM → grace → SIGKILL, §10) mapped onto its graceful→forceful teardown. SQLite via the system library for the cache only.
+**Dependency policy.** `swift-argument-parser`, `swift-yaml` (the 21-DOT-DEV YAML 1.2 parser/emitter for config and evidence frontmatter — it **replaces Yams**, and because config is now YAML there is **no TOML dependency**), `swift-subprocess` (the swiftlang async/await process API; see below), and the standard library; JSON, SARIF, and the frozen boundary formats use Foundation `Codable`, adding no dependency. `swift-yaml` vendors `yaml-cpp` and builds it natively via SwiftPM (no system dependencies, no unsafe flags). All shelling-out is confined to the effectful layers — `EDDCore` spawns nothing — and goes through **`swift-subprocess`**, the *single* sanctioned way to launch a process (no `Foundation.Process`, no raw `posix_spawn`): harness CLIs, the judge, `git` (worktree/status; no libgit2 binding), and the vendored secret scanner (`betterleaks`, §6.1) all run through it, each adapter's environment contract (§10) supplied as the subprocess's explicit environment and the per-trial watchdog (SIGTERM → grace → SIGKILL, §10) mapped onto its graceful→forceful teardown. SQLite via the system library for the cache only.
 
 ---
 
@@ -881,7 +884,7 @@ skilletCLI → { IterateKit, AnalysisKit, RunKit, RenderKit }
 
 **Platforms.** macOS 14+ and Linux (current Ubuntu LTS) from day one — CI in this repo *is* the Linux user.
 
-**Channels.** GitHub Releases (prebuilt binaries per platform/arch), Homebrew tap, Mint, and `swift build` from source. One binary, no runtime dependencies beyond `git` for `iterate`.
+**Channels.** GitHub Releases (prebuilt binaries per platform/arch), Homebrew tap, Mint, and `swift build` from source. The skillet binary carries no library runtime dependencies; it bundles one vendored companion — `betterleaks` (MIT), per platform/arch, for `capture` secret-sanitization (§6.1) — and requires `git` for `iterate`.
 
 **Stability tiers** (documented in the README, enforced by tests):
 
@@ -893,7 +896,7 @@ skilletCLI → { IterateKit, AnalysisKit, RunKit, RenderKit }
 | Command names & documented flags | Semver: breaking ⇒ major bump (pre-1.0: minor, with CHANGELOG migration notes) |
 | Human TTY output | No promise — explicitly not an API (P7) |
 
-**Privacy.** No telemetry, no network calls except the providers the user configured.
+**Privacy.** No telemetry, no network calls except the providers the user configured — and the bundled `betterleaks` runs with validation disabled, so secret-scanning never phones home (§6.1). Privacy also means *secrets never enter the committed corpus*: `capture` redacts credentials in place before writing a bundle (§6.1), so a raw secret stays only in the harness's own session store, never in the repo.
 
 ---
 

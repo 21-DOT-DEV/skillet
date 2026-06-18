@@ -1,6 +1,6 @@
 # Product Roadmap — skillet
 
-**Version:** v1.0.1
+**Version:** v1.1.0
 **Last Updated:** 2026-06-18
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
@@ -67,8 +67,8 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 - **Phase 7 (Next):** Run the same suite across multiple agents and print a
   per-harness `pass^k` portability table.
 - **Phase 8 (Later):** Track B axial coding, more adapters, the remaining lint
-  rules, real spend numbers, a judge↔human-label calibration harness — plus the
-  explicit non-goals.
+  rules, **user-authored (YAML) lint rules**, real spend numbers, a judge↔human-label
+  calibration harness — plus the explicit non-goals.
 
 ## Product-Level Metrics & Success Criteria
 
@@ -135,6 +135,10 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 
 ## Change Log
 
+- v1.1.0 (2026-06-18): MINOR — added **user-authored declarative YAML lint rules**
+  to Phase 8 (F11) — a bounded, ReDoS-guarded extensibility capability — governed by
+  the new design §7.6 "YAML usage policy" (litmus test + verdict table). No existing
+  phases or priorities changed.
 - v1.0.1 (2026-06-18): PATCH — config file is now `skillet.yaml` (was
   `skillet.toml`) in Phase 1 references, matching the design decision to adopt YAML
   via the `swift-yaml` package and drop the TOML dependency. No phases, features,

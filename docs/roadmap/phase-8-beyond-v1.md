@@ -2,7 +2,7 @@
 
 **Status:** FUTURE
 **Horizon:** Later
-**Last Updated:** 2026-06-17
+**Last Updated:** 2026-06-18
 
 ## Goal
 
@@ -40,8 +40,9 @@ the explicit non-goals so scope stays honest.
 6. The 7 roadmap lint rules — FUTURE · Net-new
    - Purpose & user value: Extend the catalog (name↔directory match, reserved
      `anthropic-*`/`claude-*` prefixes, third-person what+when voice, ALWAYS/NEVER
-     density, reference-extraction candidates, dead reference links). Confidence:
-     Medium — design §6.1 `lint`.
+     density, reference-extraction candidates, dead reference links). Several
+     collapse into **data rules** once F11 lands; the semantic ones (voice,
+     extraction) stay Swift. Confidence: Medium — design §6.1 `lint`.
 
 7. Variance dashboards — FUTURE · Net-new
    - Purpose & user value: Visualize `pass^k` variance across historical runs so
@@ -63,6 +64,16 @@ the explicit non-goals so scope stays honest.
       contradiction alarm — addressing the documented judge-overconfidence and
       criteria-drift risks. Confidence: Low — net-new, not in the v1 design; added
       from the best-practice cross-reference. `needs-research`
+
+11. User-authored declarative lint rules (YAML) — FUTURE · Net-new
+    - Purpose & user value: Let maintainers add repo-local `SKILL-Lxxx` rules as
+      data — a regex / threshold / presence matcher in YAML — without recompiling,
+      so teams encode and share house style the way Vale and Semgrep do.
+    - Success metrics:
+      - A rule is a fixed, code-backed *kind* (`match` / `absence` / `occurrence` / `length` / `file-exists`) + pattern + scope + tier + message, riding the same SARIF emit + `lint.disable` exemption machinery as built-in rules.
+      - Patterns run on a linear-time engine (or a per-match timeout) and rule files are schema-validated on read — no ReDoS, and no `script:` escape hatch (that's a Swift rule).
+    - Confidence: Medium — precedent (Vale, Semgrep) + the design's §7.6 YAML usage policy; bounded by its litmus test and tripwire.
+    - Notes: Governed by design §7.6; repo-local rule IDs use a reserved range (e.g. `L2xx`). Subsumes the data-expressible subset of F6.
 
 ## Non-Goals (explicitly out of scope)
 
@@ -88,3 +99,5 @@ the explicit non-goals so scope stays honest.
 - 2026-06-17: Phase created from the design §13 v1.x + Later columns and the
   explicit non-goals; added the judge↔human-label calibration harness (F10) from
   the best-practice cross-reference as a `needs-research` item.
+- 2026-06-18: Added F11 (user-authored declarative YAML lint rules), governed by
+  the new design §7.6 YAML usage policy; noted the F6 overlap. Roadmap MINOR → v1.1.0.

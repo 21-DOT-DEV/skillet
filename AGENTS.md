@@ -9,6 +9,10 @@ structured evidence, and ship a `SKILL.md` edit only after a previously-failing 
 > "Planned" below is agreed *intent*, not shipped fact. Do not run build/test commands or assume
 > modules/commands exist until the corresponding roadmap phase lands. Update this file as each
 > phase is completed.
+>
+> **Architecture finalized, not built:** design §11 was refined — the `skillet` executable owns the
+> full ArgumentParser command tree (there is **no `skilletCLI` library target**) and **`ProjectKit`**
+> is added — but **no Swift code, `Package.swift`, or tests exist yet**; these remain target-state specs.
 
 ## Source-of-truth documents (read these first)
 
@@ -39,6 +43,12 @@ from the first commit.
   there is **no TOML dependency**), `swift-subprocess`, plus the standard library. JSON/SARIF/frozen
   formats use Foundation `Codable` (no added dependency). Secret scanning uses a vendored
   `betterleaks` (MIT) companion. The cache MAY use system SQLite.
+- **Dependency notes (implementation reality):** `swift-yaml` has **no tagged release** and its
+  `YAML` product needs **C++ interop** in the consumer, so it is pinned by revision and isolated to a
+  YAML-codec seam (the pure core stays interop-free), wired in only when that codec lands — not up
+  front. `swift-system` (`FilePath`) is a **test-only** transitive dep of `swift-subprocess` (the
+  integration-test binary harness), adding no shipped runtime dep and needing no amendment. Known-good
+  pins: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system` 1.5.0.
 - **`swift-subprocess` is the only sanctioned way to launch a process** — no `Foundation.Process`,
   no raw `posix_spawn`. All process execution lives in the effectful layers.
 - **`EDDCore` is pure and synchronous** — it spawns nothing and performs no I/O beyond its inputs.
@@ -85,13 +95,18 @@ Treat everything in this section as a target to build toward, not as existing fu
 skillet (Package.swift, Swift 6, strict concurrency)
 EDDCore (pure)
   → TraceKit
-  → { HarnessKit, JudgeKit, ScoreKit, LintKit, CorpusKit }
-  → AnalysisKit / RunKit / IterateKit
-  → skilletCLI   (swift-argument-parser; wiring only, ~≤50 lines per command)
+  → { HarnessKit, JudgeKit, ScoreKit, LintKit, CorpusKit, ProjectKit }
+  → AnalysisKit / RunKit / IterateKit / RenderKit
+  → skillet (executable)   (swift-argument-parser; ALL commands + wiring, ~≤50 lines
+                            each; NO separate skilletCLI library target)
 ```
 
 `EDDCore` (domain types · gates engine · scorer↔judge contradiction join · pass^k aggregation ·
-golden-tested boundary codecs) is pure/synchronous; effectful kits sit above it.
+golden-tested boundary codecs) is pure/synchronous; effectful kits sit above it. The `skillet`
+executable is the top wiring layer (no `skilletCLI` library); `ProjectKit` is the filesystem-effect
+home for discovery / config I/O / `init` scaffolding, kept out of the executable so it stays
+unit-testable. Business logic lives in the kits (one unit-test target each); the CLI surface is
+tested via an `IntegrationTests` target that runs the built binary. CorpusKit is a Phase-3 kit.
 
 ### Command surface (design §6) — lights up across phases
 
@@ -109,7 +124,13 @@ golden-tested boundary codecs) is pure/synchronous; effectful kits sit above it.
 macOS 14+ and current Ubuntu LTS. Testing strategy: pure unit + property tests for
 `EDDCore`/`TraceKit`; golden files for boundary codecs; `HarnessReplay` fixtures for pipelines; one
 opt-in, env-gated live smoke job per adapter in CI — everything else runs free, and free
-deterministic gates run before any paid one.
+deterministic gates run before any paid one. **One unit-test target per kit** (each kit provably
+importable/testable in isolation). Because all ArgumentParser logic lives in the `skillet`
+executable, the CLI surface is exercised by an **`IntegrationTests`** target that runs the **built
+binary** via `swift-subprocess`: test-bundle-relative binary discovery (+ `SKILLET_TEST_BINARY`
+override), per-test temp-dir isolation for parallel safety, and Swift Testing tags separating the
+free suite from env-gated live runs. **Test files: 300-line soft cap** (split suites; extract
+`TestHarness`/fixture helpers).
 
 ### Roadmap phases
 

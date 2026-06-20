@@ -1,7 +1,10 @@
 <!--
 Sync Impact Report:
-- Version: N/A → 1.0.0 (Initial constitution)
-- Change Type: Initial creation
+- Version: 1.0.0 → 1.1.0 (Verifiable documentation)
+- Change Type: MINOR — materially expanded guidance under Principle VII (Open Source
+  Excellence): documentation examples and "true now" claims become CI-verifiable, with a
+  P7-aligned guard against treating human/TTY output as a doc contract, plus a review-threshold
+  staleness practice. No principle added or removed.
 - Scope: skillet repository (/Users/csjones/Developer/skillet) — the SKILL.md Evaluation Toolkit, a public, open-source, multi-harness Swift CLI for eval-driven development (EDD) of agent skills
 - Orientation: This constitution governs HOW WE DEVELOP skillet (engineering process and
   non-negotiable development standards). It is orthogonal to — and deliberately distinct from —
@@ -282,6 +285,18 @@ readable code lower friction for both human contributors and the agents that wil
 - **MUST** document every public type and command and keep documentation in sync with behavior.
 - **MUST** apply KISS and DRY; readability over cleverness.
 - **MUST NOT** let documentation drift from shipped behavior (stale docs are a defect).
+- **SHOULD** make documentation verifiable rather than aspirational — the doc analogue of TDD:
+  code and CLI examples in `README.md` and `AGENTS.md` SHOULD be exercised in CI (compiled, or
+  run with exit-code / `--json` assertions), and internal links SHOULD be link-checked, so a
+  broken example or claim fails the build like any other test.
+- **SHOULD** keep `AGENTS.md`'s "commands true now" claims machine-checked — a CI job SHOULD
+  confirm every documented command exists and exits sanely, since an agent acting on a false
+  claim is the highest-cost documentation defect.
+- **MUST NOT** assert exact human/TTY output as a documentation contract (Principle IV, P7):
+  example verification checks exit codes and `--json` payloads only, never the prose a command
+  prints — otherwise doc-tests calcify output that is explicitly not an API.
+- **SHOULD** carry a review threshold on narrative docs and treat past-threshold prose as a
+  drift finding to re-review (the prose analogue of golden-test freezing for contracts).
 - **SHOULD** provide issue/PR templates and respond to contributions promptly and respectfully.
 - **SHOULD** document the stability tiers (frozen formats, exit codes, `--json`, command/flag
   semver, no-promise TTY) prominently.
@@ -337,17 +352,27 @@ binds them (e.g., the sanctioned-dependency list in Principle VI).
 - **Language**: Swift 6 (strict concurrency)
 - **Build**: Swift Package Manager
 - **CLI framework**: `swift-argument-parser`
-- **Config / evidence frontmatter**: `swift-yaml` (YAML 1.2; replaces Yams; no TOML dependency)
+- **Config / evidence frontmatter**: `swift-yaml` (YAML 1.2; replaces Yams; no TOML dependency) —
+  no tagged release yet (pin by revision); its `YAML` product needs C++ interop, so it is confined
+  to an isolated codec seam to keep the pure core interop-free, and wired only when that codec lands
 - **Process execution**: `swift-subprocess` (sole sanctioned launcher)
+- **Test-only transitive dep**: `swift-system` (`FilePath`) — surfaced via `swift-subprocess` to the
+  `IntegrationTests` binary harness only; no shipped runtime dependency, so no amendment is required
 - **JSON / SARIF / frozen formats**: Foundation `Codable` (no added dependency)
 - **Secret scanning**: vendored `betterleaks` (MIT), per platform/arch, offline detection-only
 - **Cache**: system SQLite (cache only)
-- **Testing**: Swift Testing / unit + property tests; golden fixtures; `HarnessReplay` fixtures
+- **Testing**: Swift Testing / unit + property tests; golden fixtures; `HarnessReplay` fixtures.
+  One unit-test target per kit (each kit testable in isolation); an `IntegrationTests` target drives
+  the built binary via `swift-subprocess` (the command surface lives in the executable). Test files
+  carry a 300-line soft cap (split suites; extract harness/fixture helpers)
 
 ### Package Architecture (design §11)
 
-`EDDCore` (pure) → TraceKit → { HarnessKit, JudgeKit, ScoreKit, LintKit, CorpusKit } →
-AnalysisKit / RunKit / IterateKit → `skilletCLI` (wiring only, ~≤50 lines per command).
+`EDDCore` (pure) → TraceKit → { HarnessKit, JudgeKit, ScoreKit, LintKit, CorpusKit, ProjectKit } →
+AnalysisKit / RunKit / IterateKit → the `skillet` executable (ALL ArgumentParser commands +
+wiring, ~≤50 lines per command). There is **no separate `skilletCLI` library target** — the
+executable itself is the top wiring layer. `ProjectKit` owns project discovery, config I/O, and
+`init` scaffolding (filesystem effects kept out of the executable so they remain unit-testable).
 
 ### Adapters (v1)
 
@@ -434,11 +459,17 @@ constitution is the development-principle layer. They are kept in sync, not dupl
 
 ## Version History
 
-**Version**: 1.0.0
+**Version**: 1.1.0
 **Ratified**: 2026-06-18
-**Last Amended**: 2026-06-18
+**Last Amended**: 2026-06-19
 
 **Changelog**:
+- **1.1.0** (2026-06-19): MINOR amendment — Principle VII (Open Source Excellence) gains
+  verifiable-documentation practices: `README.md`/`AGENTS.md` examples SHOULD be CI-exercised,
+  AGENTS.md "true now" command claims SHOULD be machine-checked, documentation verification MUST
+  NOT assert exact human/TTY output (P7-aligned), and narrative docs SHOULD carry a re-review
+  threshold. Establishes the documentation analogue of the project's TDD discipline without
+  forcing literal red-green TDD onto prose. No principle added or removed.
 - **1.0.0** (2026-06-18): Initial constitution. Seven development-governance principles with
   three-tier enforcement, 21-DOT-DEV (BDFL) governance, contract/security-relevant change
   protocols, and a stability-tier table. Principles refactored after best-practice research to
@@ -462,7 +493,7 @@ product principles (P) / decisions (D) and external best practice.
 | IV. Human- & Agent-First, Composable CLI | P1, P3, P6, P7; D2 | clig.dev (human-first, discovery, robustness); AGENTS.md convention |
 | V. Cross-Platform CI & Quality Gates | P8, P9; §10, §11, §12 | Flaky-test hygiene; free-before-paid spend discipline |
 | VI. Security, Privacy & Dependency Hygiene | P5, P9; D6; §6.1, §11, §12 | Supply-chain minimalism; secret-scanning fail-closed |
-| VII. Open Source Excellence | D1; §12 | Open-source norms; roadmap-as-experiments |
+| VII. Open Source Excellence | D1; §12 | Open-source norms; roadmap-as-experiments; verifiable-docs / doctest & link-checking; docs-as-code |
 
 **Settled decisions (D1–D7)** remain product invariants owned by the design doc; this constitution
 assumes them and does not relitigate them.

@@ -122,6 +122,29 @@ tool its first user.
   need only discovery.
 - Cross-phase: F5/F6 are reused by Phases 3, 4, 6, 7; F8 by Phase 2's reporting.
 
+## Package targets (Phase 1)
+
+The walking skeleton stands up the §11 architecture as a **Phase-1 subset** of targets, with the
+strict downward DAG enforced from the first commit (later phases add kits, not re-layering):
+
+- **`EDDCore`** (pure) — exit codes, `--json` schema envelope, `EDDError`, pass^k aggregation,
+  `evals.json`/`benchmark.json` boundary codecs (F1, F4, F7, F8).
+- **`TraceKit`** — normalized `Trace`/`Turn` model behind the `HarnessAdapter` seam (F5).
+- **`HarnessKit`** — `HarnessAdapter`, `Workspace`, `HarnessClaudeCode`, `HarnessReplay` (F5, F6);
+  **`JudgeKit`** — `Judge`, text judge, `ReplayJudge` (F7).
+- **`RunKit`** — trial planner, run records, pass^k (F7).
+- **`LintKit`** — error-tier `SKILL-Lxxx` subset (F4); **`RenderKit`** — TTY tables + versioned JSON
+  encoders (F1); **`ProjectKit`** — project discovery, config I/O, `init` scaffolding (F1–F3).
+- **`skillet`** (executable) — the full ArgumentParser command tree + wiring for
+  `init`/`doctor`/`lint`/`run`. No `skilletCLI` library.
+
+**Deferred:** `ScoreKit` (Phase 2), `CorpusKit`/capture (Phase 3), `AnalysisKit` (Phase 4),
+`IterateKit` (Phase 6). `swift-yaml` is wired only when `EDDCore`'s config codec body lands (no
+tagged release + C++-interop; see AGENTS.md › Dependency notes).
+
+**Tests:** one unit-test target per kit + an `IntegrationTests` target driving the built binary via
+`swift-subprocess` (isolated temp dirs, Swift Testing tags); 300-line soft cap on test files.
+
 ## Phase Metrics & Success Criteria
 
 - This phase is successful when: in a fresh checkout of a real skills repo, a new

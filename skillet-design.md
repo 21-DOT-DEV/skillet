@@ -815,7 +815,8 @@ skillet (Package.swift, Swift 6, strict concurrency)
 ├── EDDCore        domain types · gates engine · scorer↔judge contradiction join ·
 │                  pass^k aggregation (observed-k) · boundary codecs (golden-tested) ·
 │                  evidence graph
-│                  deps: Foundation, swift-yaml — NO subprocess, NO network
+│                  deps: Foundation (swift-yaml only via an isolated codec seam,
+│                  see Dependency policy below) — NO subprocess, NO network
 ├── TraceKit       Trace/Turn/skillInvocations model · corrective-turn heuristics
 │                  (text-pattern; diff-revert detector is v1.x)
 ├── CorpusKit      session bundles: WRITE + read · provenance stamping · SARIF
@@ -842,14 +843,19 @@ skillet (Package.swift, Swift 6, strict concurrency)
 │                  regression guard + auto-revert
 ├── RenderKit      TTY tables/styling (NO_COLOR-aware) · versioned JSON encoders ·
 │                  HTML report writer
-└── skilletCLI     swift-argument-parser commands — wiring only, ≤ ~50 lines each
+├── ProjectKit     project discovery (walk to skillet.yaml/.git) · -C resolution ·
+│                  config load/save (via EDDCore codec) · `init` scaffolding —
+│                  filesystem effects, kept OUT of the executable so they stay unit-testable
+└── skillet        executable target — ALL swift-argument-parser commands + wiring
+                   (≤ ~50 lines each); renders errors. There is NO separate skilletCLI
+                   library: the executable itself is the top wiring layer
 ```
 
 **Dependency rule:** a strictly downward DAG —
 
 ```
-skilletCLI → { IterateKit, AnalysisKit, RunKit, RenderKit }
-       → { HarnessKit, JudgeKit, ScoreKit, LintKit, CorpusKit }
+skillet (executable) → { IterateKit, AnalysisKit, RunKit, RenderKit }
+       → { HarnessKit, JudgeKit, ScoreKit, LintKit, CorpusKit, ProjectKit }
        → TraceKit → EDDCore
 ```
 
@@ -870,13 +876,15 @@ skilletCLI → { IterateKit, AnalysisKit, RunKit, RenderKit }
 
 **Two lifecycles, two types, on purpose.** `Workspace` (HarnessKit) is the per-trial fixture sandbox — created and destroyed around one harness process. `Worktree` (IterateKit) is the per-proposal copy of the *skill repo* — created around one A/B experiment. They are distinct types with distinct owners precisely so neither can be misused for the other.
 
-**Error model.** One typed `EDDError` hierarchy; every case carries `exitCode`, a human message, and a `remedy` line. `skilletCLI` renders errors; nothing else prints.
+**Error model.** One typed `EDDError` hierarchy; every case carries `exitCode`, a human message, and a `remedy` line. The `skillet` executable renders errors; nothing else prints.
 
 **Concurrency & cancellation.** `async/await` with a `TaskGroup` per run; Ctrl-C cancels cleanly — in-flight workspaces and worktrees are destroyed, partial run records are marked `aborted`, never half-written.
 
-**Testing strategy.** `EDDCore`/`TraceKit`: pure unit tests incl. property tests on the gates engine. Boundary codecs: golden files (§7.2). Pipelines end-to-end: `HarnessReplay` fixtures recorded from real harnesses. One opt-in, env-gated live smoke job per adapter in CI; everything else runs free.
+**Testing strategy.** `EDDCore`/`TraceKit`: pure unit tests incl. property tests on the gates engine. Boundary codecs: golden files (§7.2). Pipelines end-to-end: `HarnessReplay` fixtures recorded from real harnesses. One opt-in, env-gated live smoke job per adapter in CI; everything else runs free. Each kit is its own target with its own unit-test target, so every kit is provably importable and testable in isolation. Because *all* argument-parser logic lives in the `skillet` executable (not a library), the command surface is exercised by a separate `IntegrationTests` target that drives the **built binary** through `swift-subprocess` — with test-bundle-relative binary discovery (plus a `SKILLET_TEST_BINARY` override), per-test temp-dir isolation for parallel safety, and Swift Testing tags separating the free suite from env-gated live runs. Test files carry a **300-line soft cap**, honored by splitting suites and extracting harness/fixture helpers (e.g. a `TestHarness` + a project fixture).
 
 **Dependency policy.** `swift-argument-parser`, `swift-yaml` (the 21-DOT-DEV YAML 1.2 parser/emitter for config and evidence frontmatter — it **replaces Yams**, and because config is now YAML there is **no TOML dependency**), `swift-subprocess` (the swiftlang async/await process API; see below), and the standard library; JSON, SARIF, and the frozen boundary formats use Foundation `Codable`, adding no dependency. `swift-yaml` vendors `yaml-cpp` and builds it natively via SwiftPM (no system dependencies, no unsafe flags). All shelling-out is confined to the effectful layers — `EDDCore` spawns nothing — and goes through **`swift-subprocess`**, the *single* sanctioned way to launch a process (no `Foundation.Process`, no raw `posix_spawn`): harness CLIs, the judge, `git` (worktree/status; no libgit2 binding), and the vendored secret scanner (`betterleaks`, §6.1) all run through it, each adapter's environment contract (§10) supplied as the subprocess's explicit environment and the per-trial watchdog (SIGTERM → grace → SIGKILL, §10) mapped onto its graceful→forceful teardown. SQLite via the system library for the cache only.
+
+Two implementation notes refine this policy. (1) `swift-yaml` currently has **no tagged release**, and its `YAML` product **requires C++ interop** in the consuming target; to keep `EDDCore` and the rest of the pure core free of C++-interop mode (and its strict-concurrency friction), `swift-yaml` is pinned by revision and confined to an **isolated YAML-codec seam**, wired in only when that codec body lands rather than up front. (2) `swift-system` (`FilePath`) rides in transitively via `swift-subprocess` and is surfaced **test-only** to the `IntegrationTests` harness, so it adds no shipped runtime dependency and needs no amendment. Known-good pins at time of writing: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system` 1.5.0.
 
 ---
 

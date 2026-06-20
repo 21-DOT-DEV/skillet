@@ -41,14 +41,14 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 
 | Horizon | Phase | Name / Goal | Status | Detail |
 |---|---|---|---|---|
-| Now | 1 | Walking Skeleton — prove the loop end-to-end | PLANNED | [phase-1](docs/roadmap/phase-1-walking-skeleton.md) |
-| Next | 2 | Trustworthy Measurement & Static Gates | PLANNED | [phase-2](docs/roadmap/phase-2-measurement-static-gates.md) |
-| Next | 3 | Discovery & Evidence Capture | PLANNED | [phase-3](docs/roadmap/phase-3-discovery-evidence.md) |
-| Next | 4 | Error Analysis — *Northstar gap #1* | PLANNED | [phase-4](docs/roadmap/phase-4-error-analysis.md) |
-| Next | 5 | The Computable Runbook — *differentiator #1* | PLANNED | [phase-5](docs/roadmap/phase-5-computable-runbook.md) |
-| Next | 6 | Fix Suggestion & Safe Iteration — *Northstar gap #2* | PLANNED | [phase-6](docs/roadmap/phase-6-fix-suggestion-iteration.md) |
-| Next | 7 | Multi-Harness Portability — *differentiator #2* | PLANNED | [phase-7](docs/roadmap/phase-7-multi-harness.md) |
-| Later | 8 | Beyond v1 — deeper analysis, broader reach | FUTURE | [phase-8](docs/roadmap/phase-8-beyond-v1.md) |
+| Now | 1 | Walking Skeleton — prove the loop end-to-end | PLANNED | [phase-1](roadmap/phase-1-walking-skeleton.md) |
+| Next | 2 | Trustworthy Measurement & Static Gates | PLANNED | [phase-2](roadmap/phase-2-measurement-static-gates.md) |
+| Next | 3 | Discovery & Evidence Capture | PLANNED | [phase-3](roadmap/phase-3-discovery-evidence.md) |
+| Next | 4 | Error Analysis — *Northstar gap #1* | PLANNED | [phase-4](roadmap/phase-4-error-analysis.md) |
+| Next | 5 | The Computable Runbook — *differentiator #1* | PLANNED | [phase-5](roadmap/phase-5-computable-runbook.md) |
+| Next | 6 | Fix Suggestion & Safe Iteration — *Northstar gap #2* | PLANNED | [phase-6](roadmap/phase-6-fix-suggestion-iteration.md) |
+| Next | 7 | Multi-Harness Portability — *differentiator #2* | PLANNED | [phase-7](roadmap/phase-7-multi-harness.md) |
+| Later | 8 | Beyond v1 — deeper analysis, broader reach | FUTURE | [phase-8](roadmap/phase-8-beyond-v1.md) |
 
 - **Phase 1 (Now):** The thinnest end-to-end thread — `skillet run` one eval
   through `claude-code`, judged, with a `pass^k` result — plus just-enough

@@ -1,0 +1,75 @@
+import Foundation
+import EDDCore
+
+/// Whether to render for humans (TTY tables/prose) or machines (`--json`).
+public enum OutputMode: Sendable {
+    case human
+    case json
+}
+
+/// Turns domain payloads into a ``Rendering`` (stdout/stderr split), honoring the output mode and
+/// color policy. Pure: it returns strings rather than writing, so every branch is unit-testable.
+public struct Renderer: Sendable {
+    public let mode: OutputMode
+    public let color: ColorPolicy
+
+    public init(mode: OutputMode, color: ColorPolicy) {
+        self.mode = mode
+        self.color = color
+    }
+
+    /// The root command's output: the loop overview (human) or the `skillet.root/1` payload (json).
+    public func renderRoot(_ info: RootInfo) throws -> Rendering {
+        switch mode {
+        case .json:
+            return Rendering(stdout: try SkilletJSON.encode(info) + "\n")
+        case .human:
+            return Rendering(stdout: humanRoot(info))
+        }
+    }
+
+    /// An error: human "what/why/fix" (human) or the `skillet.error/1` payload (json) — both to
+    /// stderr, since an error is never the command's primary data.
+    public func renderError(_ error: EDDError) -> Rendering {
+        switch mode {
+        case .json:
+            let json = (try? SkilletJSON.encode(ErrorPayload(error))) ?? #"{"schema":"skillet.error/1"}"#
+            return Rendering(stderr: json + "\n")
+        case .human:
+            return Rendering(stderr: humanError(error))
+        }
+    }
+
+    // MARK: - Human rendering
+
+    private func bold(_ text: String) -> String {
+        color.enabled ? "\u{1B}[1m\(text)\u{1B}[0m" : text
+    }
+
+    private func red(_ text: String) -> String {
+        color.enabled ? "\u{1B}[31m\(text)\u{1B}[0m" : text
+    }
+
+    private func humanRoot(_ info: RootInfo) -> String {
+        var out = bold("🍳 skillet — the SKILL.md Evaluation Toolkit") + "\n\n"
+        out += "The eval-driven development loop:\n"
+        for verb in info.loop {
+            let name = verb.name.padding(toLength: 10, withPad: " ", startingAt: 0)
+            out += "  \(name)\(verb.summary)\n"
+        }
+        out += "\n"
+        if let root = info.project.root {
+            out += "Project: \(root) (via \(info.project.discoveredVia.rawValue))\n"
+        } else {
+            out += "Project: none found — run from a skills repo, or initialize with `skillet init`\n"
+        }
+        out += bold("→ next: skillet --help") + "\n"
+        return out
+    }
+
+    private func humanError(_ error: EDDError) -> String {
+        var out = "\(red("error:")) \(error.message)\n"
+        out += "  fix: \(error.remedy)\n"
+        return out
+    }
+}

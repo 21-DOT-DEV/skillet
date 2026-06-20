@@ -4,15 +4,15 @@
 CLI for eval-driven development (EDD) of agent skills: capture real runs, turn hand-fixes into
 structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
 
-> **Status: greenfield.** As of this writing the repository contains design and planning artifacts
-> only — there is **no Swift code, no `Package.swift`, no tests, and no CI yet**. Everything under
-> "Planned" below is agreed *intent*, not shipped fact. Do not run build/test commands or assume
-> modules/commands exist until the corresponding roadmap phase lands. Update this file as each
-> phase is completed.
->
-> **Architecture finalized, not built:** design §11 was refined — the `skillet` executable owns the
-> full ArgumentParser command tree (there is **no `skilletCLI` library target**) and **`ProjectKit`**
-> is added — but **no Swift code, `Package.swift`, or tests exist yet**; these remain target-state specs.
+> **Status: Phase 1 in progress — F1 landed.** The walking skeleton has begun. `Package.swift` plus
+> `EDDCore`, `ProjectKit`, `RenderKit`, and the `skillet` executable exist, with unit + integration
+> tests green (`swift build && swift test`). **F1 (project discovery & output contract) is
+> implemented**: `skillet` explains the loop, `-C <dir>`, `--json` (schema-tagged), `--color`/`NO_COLOR`,
+> and the typed §5.4 exit codes (0 ok · 2 usage · 3 environment reachable today). The `skillet`
+> executable owns the full ArgumentParser command tree (no `skilletCLI` library); `ProjectKit` is the
+> discovery/config-IO home. The rest of the command surface under "Planned" is still agreed *intent*,
+> not shipped fact — don't assume a command/module exists until its feature lands. Update this file as
+> each feature/phase completes.
 
 ## Source-of-truth documents (read these first)
 
@@ -31,7 +31,18 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 [`21-DOT-DEV/.github`](https://github.com/21-DOT-DEV/.github) (`CONTRIBUTING.md`, `SECURITY.md`,
 `CODE_OF_CONDUCT.md`). There are intentionally no repo-local copies.
 
-## Binding conventions (true now, even before code exists)
+## Commands (true now — Phase 1 / F1)
+
+- `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`).
+- `swift test` — run the unit + integration suites (32 tests, all green). The integration suite drives
+  the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
+- `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet --help`,
+  `skillet --version`.
+- `SKILLET_TEST_BINARY=<path> swift test` — point the integration harness at a specific binary.
+
+Subcommands (`init`/`doctor`/`lint`/`run`/…) are not built yet — see Planned.
+
+## Binding conventions
 
 These are real rules from the constitution + design decisions. Follow them in any code you write,
 from the first commit.
@@ -87,7 +98,9 @@ from the first commit.
 
 ## Planned (per `ROADMAP.md` — agreed intent, NOT yet built)
 
-Treat everything in this section as a target to build toward, not as existing functionality.
+Treat everything in this section as a target to build toward, not as existing functionality —
+**except** the F1 substrate already shipped (`EDDCore`, `ProjectKit`, `RenderKit`, the `skillet`
+executable; see Commands above).
 
 ### Package architecture (design §11)
 

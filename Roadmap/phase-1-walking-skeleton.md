@@ -1,8 +1,8 @@
 # Phase 1 — Walking Skeleton: Prove the Loop End-to-End
 
-**Status:** PLANNED
+**Status:** IN PROGRESS — F1 complete
 **Horizon:** Now
-**Last Updated:** 2026-06-18
+**Last Updated:** 2026-06-20
 
 ## Goal
 
@@ -15,7 +15,7 @@ tool its first user.
 
 ## Key Features
 
-1. Project discovery & output contract (CLI: `skillet`, `-C <dir>`, `--json`, exit codes) — PLANNED · Net-new
+1. Project discovery & output contract (CLI: `skillet`, `-C <dir>`, `--json`, exit codes) — DONE · Net-new
    - Purpose & user value: Run from anywhere — skillet finds its project by
      walking up to `skillet.yaml`/`.git`, like git — and every command speaks to
      both humans (TTY) and scripts (`--json` + stable exit codes).
@@ -26,6 +26,7 @@ tool its first user.
      - Every `--json` payload validates against its declared `schema` field.
    - Dependencies: none.
    - Confidence: Medium — design §5 (invocation model, exit codes, output contract).
+   - Plan: [Specs/001-project-discovery-output-contract/plan.md](../Specs/001-project-discovery-output-contract/plan.md)
 
 2. Adopt skillet in a repo (CLI: `skillet init`) — PLANNED · Net-new
    - Purpose & user value: One idempotent command turns a skills repo into a
@@ -165,3 +166,6 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
 - 2026-06-18: PATCH — config referenced as `skillet.yaml` (was `skillet.toml`);
   reflects the YAML-via-`swift-yaml` decision (TOML dependency dropped). No
   feature or priority change.
+- 2026-06-20: F1 (project discovery & output contract) implemented — `Package.swift`
+  + `EDDCore`/`ProjectKit`/`RenderKit` + the `skillet` executable; 32 unit + integration
+  tests green. Plan: [Specs/001-…/plan.md](../Specs/001-project-discovery-output-contract/plan.md).

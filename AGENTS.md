@@ -4,13 +4,15 @@
 CLI for eval-driven development (EDD) of agent skills: capture real runs, turn hand-fixes into
 structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
 
-> **Status: Phase 1 in progress — F1 landed.** The walking skeleton has begun. `Package.swift` plus
+> **Status: Phase 1 in progress — F1 + F2 landed.** The walking skeleton has begun. `Package.swift` plus
 > `EDDCore`, `ProjectKit`, `RenderKit`, and the `skillet` executable exist, with unit + integration
 > tests green (`swift build && swift test`). **F1 (project discovery & output contract) is
 > implemented**: `skillet` explains the loop, `-C <dir>`, `--json` (schema-tagged), `--color`/`NO_COLOR`,
-> and the typed §5.4 exit codes (0 ok · 2 usage · 3 environment reachable today). The `skillet`
-> executable owns the full ArgumentParser command tree (no `skilletCLI` library); `ProjectKit` is the
-> discovery/config-IO home. The rest of the command surface under "Planned" is still agreed *intent*,
+> and the typed §5.4 exit codes (0 ok · 2 usage · 3 environment reachable today). **F2 (`skillet init`)
+> is implemented**: idempotent project scaffolding (`skillet.yaml`, per-skill `evaluations/`, a
+> self-owned `.skillet/.gitignore`), plus the verified-docs harness (dump-help surface + behavioral +
+> link checks). The `skillet` executable owns the full ArgumentParser command tree (no `skilletCLI`
+> library); `ProjectKit` is the discovery/config-IO home. The rest of the command surface under "Planned" is still agreed *intent*,
 > not shipped fact — don't assume a command/module exists until its feature lands. Update this file as
 > each feature/phase completes.
 
@@ -31,16 +33,17 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 [`21-DOT-DEV/.github`](https://github.com/21-DOT-DEV/.github) (`CONTRIBUTING.md`, `SECURITY.md`,
 `CODE_OF_CONDUCT.md`). There are intentionally no repo-local copies.
 
-## Commands (true now — Phase 1 / F1)
+## Commands (true now — Phase 1 / F1–F2)
 
 - `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`).
-- `swift test` — run the unit + integration suites (32 tests, all green). The integration suite drives
+- `swift test` — run the unit + integration suites (45 tests, all green). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
-- `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet --help`,
-  `skillet --version`.
+- `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
+  `skillet init --json`, `skillet --help`, `skillet --version`.
+- `swift package generate-manual` / `generate-docc-reference` — regenerate the command reference from the parser.
 - `SKILLET_TEST_BINARY=<path> swift test` — point the integration harness at a specific binary.
 
-Subcommands (`init`/`doctor`/`lint`/`run`/…) are not built yet — see Planned.
+`init` is built; `doctor`/`lint`/`run`/… are not yet — see Planned.
 
 ## Binding conventions
 
@@ -76,7 +79,12 @@ from the first commit.
   decoded fields in goldens and round-trip unknown keys. `--json` payloads carry a `schema` field
   and are additive within a major. Exit codes are a stable API. Human TTY output is *not* an API.
 - **Every command** offers `--json`, supports `-h`/`--help`, ends by suggesting the next sensible
-  command, and fails with a message stating what/why/the fixing command.
+  command (only ones that actually exist), and fails with a message stating what/why/the fixing command.
+- **CLI help lives in ArgumentParser metadata, not `///`.** User-facing help is the `abstract`/
+  `discussion` + per-flag `help:` — the single source of truth that `--help`, `--experimental-dump-help`,
+  and the `generate-manual`/`generate-docc-reference` plugins all read. `///` doc comments are
+  contributor/implementation notes and **MUST NOT** duplicate the help (only the ArgumentParser copy is
+  verified). DocC symbol docs (`///`) apply to *public library* symbols; the executable has none.
 - **License**: repo ships **MIT** (`LICENSE`); design §14 recommends Apache-2.0 — unresolved, see
   constitution › Deferred Decisions.
 
@@ -161,3 +169,9 @@ matrix) → 8 (beyond v1). See `ROADMAP.md` and `docs/roadmap/`.
   constitution remains authoritative for development principles, this file for operational
   onboarding.
 - Add real `Commands` (e.g. `swift build`, `swift test`) only once they actually work.
+- **Documentation is verified, not just written** (Principle VII). Each new/changed command updates
+  `README.md` usage + the *Commands* list, and the free test suite checks three layers: (1) the
+  documented command/flag surface against `skillet --experimental-dump-help` (`ArgumentParserToolInfo`);
+  (2) behavioral claims (exit codes, `--json` `schema`) by running the binary; (3) internal doc links
+  resolve. The command *reference* can be regenerated from the parser via `swift package generate-manual`
+  / `generate-docc-reference`. Checks assert **facts only — never the human/TTY prose** a command prints (P7).

@@ -20,8 +20,13 @@ struct SilentExit: Error {
 struct SkilletMain {
     static func main() async {
         do {
-            let command = try SkilletCommand.parse()
-            try await command.run()
+            // parseAsRoot dispatches to the right command (root or a subcommand like `init`).
+            var command = try SkilletCommand.parseAsRoot()
+            if var asyncCommand = command as? AsyncParsableCommand {
+                try await asyncCommand.run()
+            } else {
+                try command.run()
+            }
         } catch let silent as SilentExit {
             exit(silent.code)
         } catch let error as EDDError {

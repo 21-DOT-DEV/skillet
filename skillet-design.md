@@ -3,12 +3,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.4 — for review |
+| **Status** | Draft v0.5 — for review |
 | **Name** | `skillet` (settled — SKILL · E · T, the *SKILL.md Evaluation Toolkit*); EDD remains the methodology's name |
 | **Deliverable** | Public, open-source, multi-harness Swift CLI |
 | **Supersedes** | The repo-private `swift-skill-eval` tool + the Python trigger harness |
 | **Decision provenance** | §2 — every load-bearing choice here was settled in the design Q&A |
-| **Revision log** | v0.4 (2026-06-18): added `capture` secret-sanitization — redact-in-place before write, bundled `betterleaks` (MIT) run offline via `swift-subprocess`, fail-closed when unavailable; extended §12 privacy to secrets-in-evidence (touches §6.1, §7.2, §11, §12). v0.3 (2026-06-18): config format moved TOML→YAML (adopt `swift-yaml`, drop the TOML dependency); standardized all process execution on `swift-subprocess`; added §7.5 artifact & file-format reference and the §7.6 YAML usage policy. v0.2: renamed to `skillet`; applied the cross-implementation review (findings 1.1–4.7 + appendices); P5 amended; proposal format changed to content-anchored edits. v0.1: initial design |
+| **Revision log** | v0.5 (2026-06-20): clig.dev conformance reconciliation — re-verified against the live guidelines and closed gaps: §5.2 environment-variable conventions; §5.3 `--version`, `--no-input`, `-n`, and color completeness (`TERM=dumb`, `--no-color`); §5.5 responsiveness/progress and pager; §6.3 + §11 support/bug-report path and bounded Ctrl-C cleanup; §12 uninstall. Appendix B rebuilt from prose into a complete, sectioned checklist; Appendix D citation broadened. Two reconciliations that touch settled choices were decided in review: `--plain` (P7) **deferred** (Open Question 6); the user-level XDG **preferences** tier **adopted** — a user-config tier added to §5.2 precedence (§7.1, §7.5), with D3 scoped to workflow state and the gitignored cache kept repo-local. v0.4 (2026-06-18): added `capture` secret-sanitization — redact-in-place before write, bundled `betterleaks` (MIT) run offline via `swift-subprocess`, fail-closed when unavailable; extended §12 privacy to secrets-in-evidence (touches §6.1, §7.2, §11, §12). v0.3 (2026-06-18): config format moved TOML→YAML (adopt `swift-yaml`, drop the TOML dependency); standardized all process execution on `swift-subprocess`; added §7.5 artifact & file-format reference and the §7.6 YAML usage policy. v0.2: renamed to `skillet`; applied the cross-implementation review (findings 1.1–4.7 + appendices); P5 amended; proposal format changed to content-anchored edits. v0.1: initial design |
 
 ---
 
@@ -47,7 +47,7 @@ These were settled explicitly during design elicitation and are **not** open for
 |---|---|---|
 | D1 | **Public open-source tool** | `init` scaffolding, config story, schemas assume nothing about any one repo, single-binary distribution, stability promises |
 | D2 | **Layered: opinionated workflow is the identity, neutral runner is the entry point** | Porcelain/plumbing split; `run` works statelessly in any skills repo; workflow commands light up as artifacts accumulate |
-| D3 | **Repo files are the only state** | No database, no daemon; all workflow state derived from committed artifacts; a gitignored cache may accelerate, never originate |
+| D3 | **Repo files are the only state** | No database, no daemon; all workflow state derived from committed artifacts; a gitignored cache may accelerate, never originate. User-level *preferences* (XDG config, §5.2) are configuration inputs — like flags and env — not state: they tune defaults and never originate evidence, gate, or run state |
 | D4 | **Multi-harness from day one** | `HarnessAdapter` protocol with capability flags; normalized trace schema designed now; judge decoupled from task harness |
 | D5 | **Wire-compatible at the boundaries, greenfield at the core** | `evals.json`, `trigger-eval.json`, `benchmark.json`, SARIF 2.1.0, session bundles: frozen contracts with golden-file tests. Friction/gate state: new structured format. `migrate` exists for the friction log only |
 | D6 | **Gates advise, never silently enforce** | Human-only judgment and git commits; `--strict` exists for CI opt-in |
@@ -119,7 +119,7 @@ Precise names are half the "intuitive" battle. These terms are used consistently
 
 ### 5.2 Configuration precedence
 
-`flags > environment > per-skill overlay > repo skillet.yaml > built-in defaults` — strictly, with `skillet config list --origins` showing where every effective value came from. The per-skill overlay (`evaluations/skillet.yaml`, optional, knobs only) exists because the highest-frequency configuration — scorer exemptions, vocab allowlists, lint disables — is skill-local. It is the landing spot for the `config` lever, and the operational reason most evidence never needs to become prose.
+`flags > environment > per-skill overlay > repo skillet.yaml > user config (XDG) > built-in defaults` — strictly, with `skillet config list --origins` showing where every effective value came from. The per-skill overlay (`evaluations/skillet.yaml`, optional, knobs only) exists because the highest-frequency configuration — scorer exemptions, vocab allowlists, lint disables — is skill-local. It is the landing spot for the `config` lever, and the operational reason most evidence never needs to become prose. The **user config** (`$XDG_CONFIG_HOME/skillet/config.yaml`, else `~/.config/skillet/config.yaml`) holds cross-repo personal *preferences* — a default harness, color, judge model, editor — and sits just above built-in defaults so any repo, overlay, env, or flag value wins over it; it may set defaults but **never** originates evidence, gate, or run state (D3). The gitignored cache stays repo-local (`.skillet/`).
 
 ```yaml
 # skillet.yaml — created by `skillet init`, committed to the repo
@@ -176,19 +176,29 @@ lint:
 > in place rather than parse→mutate→serialize — the documented defaults above
 > survive a programmatic change.
 
+**Environment variables.** skillet's own variables are uppercase, underscore-delimited, and
+`SKILLET_`-prefixed (`SKILLET_<ID>_BIN`, `SKILLET_ALLOW_BANNED_<ID>`), single-line, and none ever
+carries a secret — provider credentials stay in the provider SDK's own variables and are never read
+from a skillet flag (clig.dev: secrets belong in neither flags nor env). skillet also honors the
+standard environment: `NO_COLOR`/`TERM` (color), `EDITOR` (`friction add`), `PAGER` (paged output),
+`TMPDIR` (workspace/worktree scratch), and `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` for provider calls.
+`skillet config list --origins` reveals any value an environment variable supplied.
+
 ### 5.3 Global flags
 
 | Flag | Meaning |
 |---|---|
 | `--json` | Machine output on stdout; human chatter to stderr |
 | `-q` / `-v` | Quieter / more verbose human output |
-| `--color auto\|always\|never` | Also honors `NO_COLOR` |
+| `--color auto\|always\|never` | Also honors `NO_COLOR`, `TERM=dumb`, and `--no-color` (≡ `--color never`); auto-off when stdout is not a TTY |
 | `-C <dir>` | Operate as if started in `<dir>` |
 | `--config <path>` | Explicit config file |
 | `--harness <id,...>` | Harness selection (where execution happens) |
 | `--runs <k>` | Override trials per eval |
 | `--yes` | Assume consent for confirmations (scripts/CI) |
-| `--dry-run` | Print the plan (trials, spend estimate, writes) and stop |
+| `-n` / `--dry-run` | Print the plan (trials, spend estimate, writes) and stop |
+| `--no-input` | Never prompt; if input is required, fail with the flag that supplies it (≠ `--yes`, which *answers* prompts) |
+| `--version` | Print version and exit |
 
 ### 5.4 Exit codes (stable API)
 
@@ -204,6 +214,13 @@ lint:
 ### 5.5 Output contract
 
 Human output is conversational, table-oriented, and ends with a suggested next command. It is **not** an API. `--json` payloads each carry `"schema": "skillet.<thing>/1"` and are versioned independently of the binary. Timestamps in artifacts are ISO-8601 UTC. Prompts appear only on a TTY and every prompt has a flag equivalent.
+
+**Responsive over fast.** Long operations (`run`, `capture`, `iterate`) print something before any
+paid or network call and show live progress on a TTY — a trial counter with an animated component,
+plus an ETA where one is derivable — so a multi-minute run never looks hung; animation and color
+stay suppressed when stdout is not a TTY or `--json` is set (the "no spinners when piped" rule,
+stated positively). Large human output (`report`, `friction list`, `bundle list|stats`) pages
+through `$PAGER` (default `less -FIRX`) only on a TTY.
 
 ---
 
@@ -497,7 +514,7 @@ Everything porcelain does decomposes into these; all support `--json`; their con
 
 ### 6.3 Help & discoverability conventions
 
-`skillet` with no arguments prints the loop, not a flag dump. Every `--help` leads with two real examples before flags. Unknown commands get "did you mean." Every command's human output ends with a suggested next step (P3). First paid action in a fresh repo triggers a one-time pointer to `skillet doctor`.
+`skillet` with no arguments prints the loop, not a flag dump. Every `--help` leads with two real examples before flags. Unknown commands get "did you mean." Every command's human output ends with a suggested next step (P3). First paid action in a fresh repo triggers a one-time pointer to `skillet doctor`. Top-level `--help` and `--version` carry a support line (the issues URL), so the path to report a problem is always one screen away.
 
 ---
 
@@ -534,7 +551,7 @@ repo/
         └── friction-log.md           # generated view (skillet friction render)
 ```
 
-The committed `evaluations/` tree is the database (P2). `.skillet/` is an accelerator and scratch space; `skillet` rebuilds it on demand and never treats it as truth.
+The committed `evaluations/` tree is the database (P2). `.skillet/` is an accelerator and scratch space; `skillet` rebuilds it on demand and never treats it as truth. The one configuration that lives *outside* the repo is the user-preferences file at `$XDG_CONFIG_HOME/skillet/config.yaml` (§5.2): cross-repo defaults only, never workflow state.
 
 ### 7.2 Frozen boundary formats (D5)
 
@@ -594,6 +611,7 @@ validated on read).
 | Role | File(s) | Format | Lifecycle |
 |---|---|---|---|
 | Config | `skillet.yaml`, `evaluations/skillet.yaml` (overlay) | YAML — `swift-yaml` | committed |
+| User preferences | `$XDG_CONFIG_HOME/skillet/config.yaml` | YAML — `swift-yaml` | user-global (not committed) |
 | Skill source | `SKILL.md`, `references/`, `scripts/` | Markdown + YAML frontmatter | external |
 | Eval & benchmark contracts | `evals.json`, `trigger-eval.json`, `benchmark.json` | JSON — Foundation `Codable` · **frozen** | committed |
 | Fixtures | `fixtures/<name>/…` + `fixture.json` | source packages + JSON | committed (commit-guarded) |
@@ -876,9 +894,9 @@ skillet (executable) → { IterateKit, AnalysisKit, RunKit, RenderKit }
 
 **Two lifecycles, two types, on purpose.** `Workspace` (HarnessKit) is the per-trial fixture sandbox — created and destroyed around one harness process. `Worktree` (IterateKit) is the per-proposal copy of the *skill repo* — created around one A/B experiment. They are distinct types with distinct owners precisely so neither can be misused for the other.
 
-**Error model.** One typed `EDDError` hierarchy; every case carries `exitCode`, a human message, and a `remedy` line. The `skillet` executable renders errors; nothing else prints.
+**Error model.** One typed `EDDError` hierarchy; every case carries `exitCode`, a human message, and a `remedy` line. The `skillet` executable renders errors; nothing else prints. An unexpected (non-`EDDError`) failure additionally prints a one-line, pre-populated bug-report pointer and stays terse unless `-v` adds the trace.
 
-**Concurrency & cancellation.** `async/await` with a `TaskGroup` per run; Ctrl-C cancels cleanly — in-flight workspaces and worktrees are destroyed, partial run records are marked `aborted`, never half-written.
+**Concurrency & cancellation.** `async/await` with a `TaskGroup` per run; Ctrl-C cancels cleanly — in-flight workspaces and worktrees are destroyed, partial run records are marked `aborted`, never half-written. Teardown is itself bounded so it cannot hang; a second Ctrl-C during cleanup is reported and skips the rest, leaning on the crash-only invariant (D3) that the next run always starts from committed files.
 
 **Testing strategy.** `EDDCore`/`TraceKit`: pure unit tests incl. property tests on the gates engine. Boundary codecs: golden files (§7.2). Pipelines end-to-end: `HarnessReplay` fixtures recorded from real harnesses. One opt-in, env-gated live smoke job per adapter in CI; everything else runs free. Each kit is its own target with its own unit-test target, so every kit is provably importable and testable in isolation. Because *all* argument-parser logic lives in the `skillet` executable (not a library), the command surface is exercised by a separate `IntegrationTests` target that drives the **built binary** through `swift-subprocess` — with test-bundle-relative binary discovery (plus a `SKILLET_TEST_BINARY` override), per-test temp-dir isolation for parallel safety, and Swift Testing tags separating the free suite from env-gated live runs. Test files carry a **300-line soft cap**, honored by splitting suites and extracting harness/fixture helpers (e.g. a `TestHarness` + a project fixture).
 
@@ -892,7 +910,7 @@ Two implementation notes refine this policy. (1) `swift-yaml` currently has **no
 
 **Platforms.** macOS 14+ and Linux (current Ubuntu LTS) from day one — CI in this repo *is* the Linux user.
 
-**Channels.** GitHub Releases (prebuilt binaries per platform/arch), Homebrew tap, Mint, and `swift build` from source. The skillet binary carries no library runtime dependencies; it bundles one vendored companion — `betterleaks` (MIT), per platform/arch, for `capture` secret-sanitization (§6.1) — and requires `git` for `iterate`.
+**Channels.** GitHub Releases (prebuilt binaries per platform/arch), Homebrew tap, Mint, and `swift build` from source. The skillet binary carries no library runtime dependencies; it bundles one vendored companion — `betterleaks` (MIT), per platform/arch, for `capture` secret-sanitization (§6.1) — and requires `git` for `iterate`. Uninstallation is a documented one-liner — remove the binary and the tap/formula; the per-repo `.skillet/` cache is disposable — shown at the foot of the install docs.
 
 **Stability tiers** (documented in the README, enforced by tests):
 
@@ -928,6 +946,10 @@ Two implementation notes refine this policy. (1) `swift-yaml` currently has **no
 3. **HTML viewer.** v1 renders from frozen `benchmark.json` (Python viewer keeps working regardless); full port-and-retire decision deferred to v1.1.
 4. **Judge model pinning.** Should `skillet.yaml` *require* an explicit judge model (reproducibility) or float to a provider default (freshness)? Doc assumes required-explicit, set by `init`.
 5. **Memory-aware scheduling.** v1 ships the static `concurrency` knob with the OOM rationale documented (§10); whether to add per-process RSS budgeting (auto-derived concurrency) is open — it's the principled fix but adds platform-specific machinery.
+
+6. **A stable `--plain` output mode (clig.dev Output; touches P7).** clig.dev recommends a `--plain`, one-record-per-line columnar surface for `grep`/`awk`, and its Future-proofing section explicitly blesses skillet's stance — *changing human-readable output is fine, point scripters at `--plain`/`--json`*. The tension is contract count: skillet today keeps exactly one machine surface (`--json` + `schema`), and P7 declares TTY output a non-API precisely so it can evolve freely; `--plain` adds a *second* surface to freeze, version, and golden-test (a new row in the §12 / constitution stability tiers), for users who would rather pipe to `awk` than `jq`. Affected if adopted: P7, §5.5, §12 + constitution stability tiers, Appendix B. *Recommendation:* defer — `--json` already serves machine consumers; revisit if real usage shows scripters parsing TTY output (the exact failure `--plain` exists to prevent). **Decided 2026-06-20: deferred** — `--json` remains the single machine surface.
+
+7. **User-level config tier — RESOLVED (2026-06-20): adopted as a preferences-only tier.** A cross-repo *preferences* tier (`$XDG_CONFIG_HOME/skillet/config.yaml`) was added to the §5.2 precedence chain (`… > repo skillet.yaml > user config (XDG) > built-in defaults`), with **D3 scoped to workflow state** so the tier carries defaults only and never originates evidence, gate, or run state (§7.1, §7.5; constitution Repository State Discipline clarified). The gitignored cache stays repo-local (`.skillet/`). clig.dev's category-2 user preferences were the real gap; its category-3 project config skillet already satisfied.
 
 ---
 
@@ -986,7 +1008,41 @@ Eight commands, each one suggested by the last. The machine drafted, measured, p
 
 ## Appendix B — clig.dev conformance checklist
 
-Help: examples-first `--help`, command-less invocation explains the loop, "did you mean", man pages generated from ArgumentParser. Output: human-readable default, `--json` everywhere, stderr for chatter, suggested-next-step lines, `NO_COLOR`/`--color`, no spinners when piped. Errors: what/why/fix, typed exit codes, no stack traces without `-v`. Interactivity: prompts only on TTY, every prompt has a flag, `--yes` for scripts, confirmation before large spend. Robustness: idempotent `init`, clean Ctrl-C with workspace/worktree cleanup, ISO-8601 UTC timestamps, no hidden global state, config precedence printed via `--origins`. Distribution: single binary, shell completions, semver with CHANGELOG.
+Re-verified against the live guidelines (v0.5). `✓` = conformant; `→` = deliberate divergence
+(rationale at the foot, decision staged in §14).
+
+- **The basics** — ArgumentParser; zero/non-zero exit (§5.4); stdout for data, stderr for chatter (P7).
+- **Help** — examples-first `--help`; bare invocation explains the loop; `-h`/`--help`/`help`;
+  "did you mean"; support/issues line on top-level `--help` and `--version`; man pages from ArgumentParser.
+- **Output** — human-readable default; `--json` everywhere with `schema`; `-q`/`-v`; suggested-next-step
+  lines; symbols used sparingly; pager (`$PAGER`) for large output; no animation when piped.
+  → no `--plain` (Open Q6 — `--json` is the single machine surface, P7).
+- **Color** — `--color auto|always|never` (≡ `--no-color`); honors `NO_COLOR` and `TERM=dumb`; off when not a TTY.
+- **Errors** — what/why/fix via a `remedy` line; typed exit codes (§5.4); no trace without `-v`;
+  pre-populated bug-report pointer on unexpected failures.
+- **Arguments & flags** — flags over args; long form for every flag, short only for common ones; standard
+  names (`--json`, `-n`/`--dry-run`, `-q`, `--version`, `-h`/`--help`); `--no-input`; `-` for stdin/stdout;
+  safe defaults; never reads a secret from a flag.
+- **Interactivity** — prompts only on a TTY; every prompt has a flag; `--no-input` and `--yes`;
+  confirmation before large spend (P9).
+- **Subcommands** — consistent flags/output; `noun verb` plumbing (`harness list`, `bundle verify`).
+  → git-style top-level porcelain verbs (`run`, `triage`) over strict `noun verb` — the git precedent (P1).
+- **Robustness** — input validated on read; responsive (<100 ms / print before paid calls); progress on
+  long ops; per-trial timeouts (§10); crash-only, recomputable state (D3); aborted runs never half-written.
+- **Future-proofing** — additive boundary formats (§7.2); stable exit codes; no catch-all; no arbitrary
+  abbreviations; TTY output free to change, scripters pointed at `--json`.
+- **Signals** — immediate Ctrl-C; bounded cleanup; second Ctrl-C reported.
+- **Configuration** — precedence printed via `--origins` (§5.2); project config version-controlled;
+  env-var conventions (uppercase, `SKILLET_`-prefixed); no secrets in env; user-level preferences in `$XDG_CONFIG_HOME/skillet/` (§5.2).
+- **Naming** — short, lowercase, memorable (trademark check pending, D7).
+- **Distribution** — single binary; native installers; shell completions; semver + CHANGELOG; documented uninstall.
+- **Analytics** — none: no telemetry, no phone-home (§12, Principle VI) — exceeding the opt-in bar.
+
+**Deliberate divergences** (clig.dev is guidelines, not rules). `--plain` touches a settled choice (P7)
+and is deferred (Open Question 6); the user-level XDG **preferences** tier was adopted (D3 scoped to
+workflow state, §5.2). Verb-first porcelain follows git (P1). Secrets-in-env is the one provider-dictated
+exception — LLM SDKs read their own key variables — and skillet keeps its *own* surface clean: it never
+takes a secret from a skillet flag or variable.
 
 ## Appendix C — Similar CLI tools (landscape, June 2026)
 
@@ -1038,7 +1094,7 @@ The predecessor repo grounds its choices in two tiers: roadmap/principles files 
 | LLM-as-judge baseline; judge validation & criteria drift; independent ground-truth verification | Zheng et al., *MT-Bench* (arXiv:2306.05685); Shankar et al., *Who Validates the Validators?* (UIST 2024, arXiv:2404.12272); Dhuliawala et al., *Chain-of-Verification* (arXiv:2309.11495) |
 | Self-evolving evals / drift detection (the `baseline` subsystem) | Lun Wang — *Your Evals Will Break and You Won't See It Coming* — wanglun1996.github.io/blog/your-evals-will-break.html |
 | Open → axial coding (Track B's qualitative method) | Grounded theory (Glaser & Strauss 1967; Strauss & Corbin 1990) |
-| CLI conventions: precedence, human-first output, color | clig.dev; The Twelve-Factor App §III (12factor.net/config); no-color.org |
+| CLI conventions: config precedence & XDG, human-first output, color, progress/responsiveness, standard flags (`--version`/`--no-input`/`--plain`/`--json`), env-var hygiene, no-telemetry | clig.dev; The Twelve-Factor App §III (12factor.net/config); no-color.org |
 | Skill-authoring spec the lint catalog codifies; docs craft; SARIF interchange | Anthropic — Agent Skills best practices (platform.claude.com); Diátaxis (diataxis.fr); SARIF 2.1.0 (OASIS) |
 
 **Repo-cited, not independently verified — resolve before publishing:**

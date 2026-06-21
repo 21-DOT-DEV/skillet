@@ -16,7 +16,8 @@ struct SkilletCommand: AsyncParsableCommand {
         skillet --json           machine-readable project context
         """,
         discussion: "Run from anywhere: skillet finds its project by walking up to skillet.yaml or a .git boundary.",
-        version: SkilletVersion.current
+        version: SkilletVersion.current,
+        subcommands: [InitCommand.self]
     )
 
     @OptionGroup var options: GlobalOptions

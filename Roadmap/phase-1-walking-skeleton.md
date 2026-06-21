@@ -28,7 +28,7 @@ tool its first user.
    - Confidence: Medium — design §5 (invocation model, exit codes, output contract).
    - Plan: [Specs/001-project-discovery-output-contract/plan.md](../Specs/001-project-discovery-output-contract/plan.md)
 
-2. Adopt skillet in a repo (CLI: `skillet init`) — PLANNED · Net-new
+2. Adopt skillet in a repo (CLI: `skillet init`) — DONE · Net-new
    - Purpose & user value: One idempotent command turns a skills repo into a
      skillet project — detected config, discovered skills, scaffolded
      `evaluations/` — so a newcomer is productive without hand-authoring config.
@@ -38,6 +38,7 @@ tool its first user.
      - Re-running fills gaps and overwrites nothing (idempotency test passes).
    - Dependencies: Project discovery (F1).
    - Confidence: Medium — design §6.1 `init`.
+   - Plan: [Specs/002-adopt-skillet-repo/plan.md](../Specs/002-adopt-skillet-repo/plan.md)
 
 3. $0 preflight & skill-visibility check (CLI: `skillet doctor`) — PLANNED · Net-new
    - Purpose & user value: A free, fast self-check that catches the silent
@@ -169,3 +170,7 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
 - 2026-06-20: F1 (project discovery & output contract) implemented — `Package.swift`
   + `EDDCore`/`ProjectKit`/`RenderKit` + the `skillet` executable; 32 unit + integration
   tests green. Plan: [Specs/001-…/plan.md](../Specs/001-project-discovery-output-contract/plan.md).
+- 2026-06-20: F2 (`skillet init`) implemented — templated `skillet.yaml` + per-skill `evaluations/`
+  scaffolding + self-owned `.skillet/.gitignore`; verified-docs harness (dump-help surface +
+  behavioral + link checks); `README.md` brought current. 45 tests green. Plan:
+  [Specs/002-adopt-skillet-repo/plan.md](../Specs/002-adopt-skillet-repo/plan.md).

@@ -1,10 +1,13 @@
 <!--
 Sync Impact Report:
-- Version: 1.0.0 → 1.1.0 (Verifiable documentation)
-- Change Type: MINOR — materially expanded guidance under Principle VII (Open Source
-  Excellence): documentation examples and "true now" claims become CI-verifiable, with a
-  P7-aligned guard against treating human/TTY output as a doc contract, plus a review-threshold
-  staleness practice. No principle added or removed.
+- Version: 1.1.0 → 1.2.0 (clig.dev conformance practices)
+- Change Type: MINOR — materially expanded guidance under Principle IV (Human- and Agent-First,
+  Composable CLI): support `--version` and standard flag names including `--no-input`, stay
+  responsive with progress on long operations, and page large output; plus a Repository State
+  Discipline clarification that user-level XDG preferences are config inputs, not workflow state
+  (design Q7 adopted). Keeps the development charter in sync with skillet-design.md v0.5's clig.dev
+  conformance reconciliation (Appendix B).
+  No principle added or removed.
 - Scope: skillet repository (/Users/csjones/Developer/skillet) — the SKILL.md Evaluation Toolkit, a public, open-source, multi-harness Swift CLI for eval-driven development (EDD) of agent skills
 - Orientation: This constitution governs HOW WE DEVELOP skillet (engineering process and
   non-negotiable development standards). It is orthogonal to — and deliberately distinct from —
@@ -175,6 +178,9 @@ what let both a person and a program drive a tool confidently.
   agents on every command (P7).
 - **MUST** support `-h`/`--help` on every command, lead help with examples, and surface the most
   common flags first.
+- **MUST** support `--version` and use standard flag names where a convention exists — including
+  `--no-input` (disable all prompts; fail with the flag that supplies the input) as the agent/script
+  complement to `--yes`, and `-n`/`--dry-run` for preview.
 - **MUST** end command output by suggesting the next sensible command, so the workflow is
   self-revealing (progressive disclosure).
 - **MUST** make every failure message state what went wrong, why, and the exact command that fixes
@@ -187,6 +193,9 @@ what let both a person and a program drive a tool confidently.
 - **MUST NOT** treat human TTY output as an API or require interactive prompts on a path an agent
   or script must take (`--yes` MUST exist for confirmations; `--dry-run` MUST exist to preview).
 - **SHOULD** follow established CLI conventions for naming, exit-on-error, and signal handling.
+- **SHOULD** stay responsive on long operations — print something before any paid or network call
+  and show progress on a TTY — while never animating into piped output or `--json`, and page large
+  human output through `$PAGER` only on a TTY (P7).
 - **MAY** ship shell/command completion to further lower the discovery cost.
 
 **Compliance**: Reviews verify `--json`, `-h/--help`, teaching errors, and AGENTS.md updates for
@@ -327,6 +336,9 @@ policy, dependency or launcher changes):
 
 - All workflow state **MUST** be derived from committed files under `evaluations/`; the `.skillet/`
   cache **MAY** accelerate but **MUST NOT** originate state. Deleting the cache MUST lose nothing.
+- User-level **preferences** (XDG config, design §5.2) are configuration inputs — like flags and
+  environment variables — not state; they tune defaults and **MUST NOT** originate evidence, gate, or
+  run state. The gitignored cache stays repo-local.
 
 ### swift-yaml Usage Policy (design §7.6)
 
@@ -459,11 +471,19 @@ constitution is the development-principle layer. They are kept in sync, not dupl
 
 ## Version History
 
-**Version**: 1.1.0
+**Version**: 1.2.0
 **Ratified**: 2026-06-18
-**Last Amended**: 2026-06-19
+**Last Amended**: 2026-06-20
 
 **Changelog**:
+- **1.2.0** (2026-06-20): MINOR amendment — Principle IV (Human- and Agent-First, Composable CLI)
+  gains concrete clig.dev-derived practices: support `--version` and standard flag names including
+  `--no-input` (the agent/script complement to `--yes`) and `-n`/`--dry-run`; stay responsive with
+  progress on long operations; and page large output through `$PAGER` on a TTY. Also clarifies
+  Repository State Discipline — user-level XDG preferences are config inputs, not workflow state
+  (design Q7 adopted: a preferences tier in §5.2, D3 scoped to workflow state). Syncs the development
+  charter with `skillet-design.md` v0.5's clig.dev conformance reconciliation (design Appendix B).
+  No principle added or removed.
 - **1.1.0** (2026-06-19): MINOR amendment — Principle VII (Open Source Excellence) gains
   verifiable-documentation practices: `README.md`/`AGENTS.md` examples SHOULD be CI-exercised,
   AGENTS.md "true now" command claims SHOULD be machine-checked, documentation verification MUST

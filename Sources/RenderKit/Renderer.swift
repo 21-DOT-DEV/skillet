@@ -40,6 +40,16 @@ public struct Renderer: Sendable {
         }
     }
 
+    /// `skillet init`'s output: a created/skipped summary (human) or the `skillet.init/1` payload (json).
+    public func renderInit(_ report: InitReport, nextSteps: [String]) throws -> Rendering {
+        switch mode {
+        case .json:
+            return Rendering(stdout: try SkilletJSON.encode(report) + "\n")
+        case .human:
+            return Rendering(stdout: humanInit(report, nextSteps: nextSteps))
+        }
+    }
+
     // MARK: - Human rendering
 
     private func bold(_ text: String) -> String {
@@ -70,6 +80,16 @@ public struct Renderer: Sendable {
     private func humanError(_ error: EDDError) -> String {
         var out = "\(red("error:")) \(error.message)\n"
         out += "  fix: \(error.remedy)\n"
+        return out
+    }
+
+    private func humanInit(_ report: InitReport, nextSteps: [String]) -> String {
+        var out = bold("Initialized skillet") + "\n"
+        out += "  created \(report.created.count) · skipped \(report.skipped.count) · skills \(report.skills.count)\n"
+        for path in report.created { out += "  + \(path)\n" }
+        if !nextSteps.isEmpty {
+            out += "\n\(bold("→ next:")) \(nextSteps.joined(separator: " · "))\n"
+        }
         return out
     }
 }

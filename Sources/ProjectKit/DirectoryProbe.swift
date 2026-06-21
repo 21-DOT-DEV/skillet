@@ -7,6 +7,8 @@ public protocol DirectoryProbe: Sendable {
     func exists(named name: String, in directory: URL) -> Bool
     /// Whether `url` is an existing, readable directory (used to validate `-C`).
     func isReadableDirectory(_ url: URL) -> Bool
+    /// The immediate subdirectories of `directory` (used by skill discovery). Empty if unreadable.
+    func subdirectories(of directory: URL) -> [URL]
 }
 
 /// The real, `FileManager`-backed probe.
@@ -21,5 +23,16 @@ public struct FileSystemProbe: DirectoryProbe {
         var isDirectory: ObjCBool = false
         let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
         return exists && isDirectory.boolValue && FileManager.default.isReadableFile(atPath: url.path)
+    }
+
+    public func subdirectories(of directory: URL) -> [URL] {
+        let contents = try? FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+        return (contents ?? []).filter {
+            (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+        }
     }
 }

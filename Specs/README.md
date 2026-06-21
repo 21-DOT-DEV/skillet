@@ -13,4 +13,5 @@ roadmap re-phasing.
 
 | # | Feature | Phase | Status | Plan |
 |---|---|---|---|---|
-| 001 | Project discovery & output contract | 1 · F1 | Planned | [plan.md](001-project-discovery-output-contract/plan.md) |
+| 001 | Project discovery & output contract | 1 · F1 | Implemented | [plan.md](001-project-discovery-output-contract/plan.md) |
+| 002 | Adopt skillet in a repo (`skillet init`) | 1 · F2 | Implemented | [plan.md](002-adopt-skillet-repo/plan.md) |

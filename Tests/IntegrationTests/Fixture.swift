@@ -21,6 +21,15 @@ enum Fixture {
         return root
     }
 
+    /// A temp repo containing `skills/<name>/SKILL.md` (a discoverable skill), no `skillet.yaml` yet.
+    static func makeRepoWithSkill(_ name: String = "demo") throws -> URL {
+        let root = try makeTempDirectory()
+        let skill = root.appendingPathComponent("skills/\(name)", isDirectory: true)
+        try FileManager.default.createDirectory(at: skill, withIntermediateDirectories: true)
+        try "# \(name)\n".write(to: skill.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+        return root
+    }
+
     static func remove(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
     }

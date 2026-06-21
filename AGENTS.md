@@ -4,14 +4,16 @@
 CLI for eval-driven development (EDD) of agent skills: capture real runs, turn hand-fixes into
 structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
 
-> **Status: Phase 1 in progress — F1 + F2 landed.** The walking skeleton has begun. `Package.swift` plus
+> **Status: Phase 1 in progress — F1, F2, F5 landed.** The walking skeleton has begun. `Package.swift` plus
 > `EDDCore`, `ProjectKit`, `RenderKit`, and the `skillet` executable exist, with unit + integration
 > tests green (`swift build && swift test`). **F1 (project discovery & output contract) is
 > implemented**: `skillet` explains the loop, `-C <dir>`, `--json` (schema-tagged), `--color`/`NO_COLOR`,
 > and the typed §5.4 exit codes (0 ok · 2 usage · 3 environment reachable today). **F2 (`skillet init`)
 > is implemented**: idempotent project scaffolding (`skillet.yaml`, per-skill `evaluations/`, a
 > self-owned `.skillet/.gitignore`), plus the verified-docs harness (dump-help surface + behavioral +
-> link checks). The `skillet` executable owns the full ArgumentParser command tree (no `skilletCLI`
+> link checks). **F5 (trace + harness seam) is implemented**: the `Trace` model (`skillet.trace/1`), the
+> full `HarnessAdapter` protocol with a `HarnessReplay` double + a claude-code stub, and `skillet harness
+> list`/`info`. The `skillet` executable owns the full ArgumentParser command tree (no `skilletCLI`
 > library); `ProjectKit` is the discovery/config-IO home. The rest of the command surface under "Planned" is still agreed *intent*,
 > not shipped fact — don't assume a command/module exists until its feature lands. Update this file as
 > each feature/phase completes.
@@ -33,17 +35,17 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 [`21-DOT-DEV/.github`](https://github.com/21-DOT-DEV/.github) (`CONTRIBUTING.md`, `SECURITY.md`,
 `CODE_OF_CONDUCT.md`). There are intentionally no repo-local copies.
 
-## Commands (true now — Phase 1 / F1–F2)
+## Commands (true now — Phase 1 / F1–F2, F5)
 
 - `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`).
-- `swift test` — run the unit + integration suites (45 tests, all green). The integration suite drives
+- `swift test` — run the unit + integration suites (58 tests, all green). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
-  `skillet init --json`, `skillet --help`, `skillet --version`.
+  `skillet init --json`, `skillet harness list`, `skillet harness info [--json]`, `skillet --help`, `skillet --version`.
 - `swift package generate-manual` / `generate-docc-reference` — regenerate the command reference from the parser.
 - `SKILLET_TEST_BINARY=<path> swift test` — point the integration harness at a specific binary.
 
-`init` is built; `doctor`/`lint`/`run`/… are not yet — see Planned.
+`init` and `harness list`/`info` are built; the claude-code adapter (F6) and `doctor`/`lint`/`run`/… are not yet — see Planned.
 
 ## Binding conventions
 

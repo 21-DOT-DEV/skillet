@@ -14,7 +14,9 @@ struct DocsTests {
         .init(args: ["--help"], exit: 0),
         .init(args: ["--version"], exit: 0),
         .init(args: ["--json"], exit: 0, schema: "skillet.root/1"),
-        .init(args: ["-C", "/no/such/x", "--json"], exit: 3, schema: "skillet.error/1")
+        .init(args: ["-C", "/no/such/x", "--json"], exit: 3, schema: "skillet.error/1"),
+        .init(args: ["harness", "list"], exit: 0),
+        .init(args: ["harness", "info", "--json"], exit: 0, schema: "skillet.harness-info/1")
     ]
 
     @Test("Documented commands hold their exit/JSON contract", arguments: claims)

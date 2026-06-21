@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.2.0
-**Last Updated:** 2026-06-18
+**Version:** v1.3.0
+**Last Updated:** 2026-06-21
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is
@@ -41,7 +41,7 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 
 | Horizon | Phase | Name / Goal | Status | Detail |
 |---|---|---|---|---|
-| Now | 1 | Walking Skeleton — prove the loop end-to-end | PLANNED | [phase-1](Roadmap/phase-1-walking-skeleton.md) |
+| Now | 1 | Walking Skeleton — prove the loop end-to-end | IN PROGRESS | [phase-1](Roadmap/phase-1-walking-skeleton.md) |
 | Next | 2 | Trustworthy Measurement & Static Gates | PLANNED | [phase-2](Roadmap/phase-2-measurement-static-gates.md) |
 | Next | 3 | Discovery & Evidence Capture | PLANNED | [phase-3](Roadmap/phase-3-discovery-evidence.md) |
 | Next | 4 | Error Analysis — *Northstar gap #1* | PLANNED | [phase-4](Roadmap/phase-4-error-analysis.md) |
@@ -107,10 +107,10 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 
 ## Global Risks & Assumptions
 
-- **Greenfield repo.** Only `skillet-design.md` and stub `README`/`LICENSE` exist
-  today; no implementation. All phases are therefore PLANNED/FUTURE — there is no
-  COMPLETE Foundation phase. Statuses reflect design intent verified against the
-  design doc (Medium confidence), not running code.
+- **Phase 1 underway; later phases greenfield.** Phase 1 features F1 (project discovery &
+  output contract) and F2 (`skillet init`) are implemented (`Specs/001`, `Specs/002`; 45 tests
+  green); the remainder of Phase 1 and Phases 2–8 are PLANNED/FUTURE. Those statuses reflect
+  design intent verified against the design doc (Medium confidence), not running code.
 - **"Ported" assumption.** The design doc says much of v1 is faithfully
   translated from a predecessor (`swift-skill-eval` + a Python trigger harness).
   That predecessor is not in this repo, so `Ported` tags are a scheduling hint,
@@ -136,6 +136,13 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 
 ## Change Log
 
+- v1.3.0 (2026-06-21): MINOR — Phase 1 re-sequenced to a dependency-honest build order:
+  `skillet doctor` (F3) moved after the HarnessAdapter seam (F5) + claude-code adapter (F6),
+  because `doctor`'s `probe()`/`verifySkillVisibility` are adapter methods (design §9.1) and it
+  also needs `swift-yaml` + error-tier lint (F4). New build order: F1, F2, F5, F6, F4, F3, F8, F7
+  (feature **Fn** ids unchanged — stable across specs and Package targets). Also marked Phase 1
+  IN PROGRESS and corrected the now-stale "no implementation" assumption (F1/F2 shipped:
+  `Specs/001`, `Specs/002`). No scope change.
 - v1.2.0 (2026-06-18): MINOR — added **capture secret-sanitization** to Phase 3 (F7):
   redact-in-place before write, bundled `betterleaks` (MIT) run offline, fail-closed
   when unavailable. Closes the commit-secrets footgun; extends design §12 privacy

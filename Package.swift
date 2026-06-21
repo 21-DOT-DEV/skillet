@@ -38,9 +38,13 @@ let package = Package(
         // MARK: Layer 0 — pure core (no I/O, no processes, no network)
         .target(name: "EDDCore"),
 
+        // MARK: Layer 1 — normalized trace model
+        .target(name: "TraceKit", dependencies: ["EDDCore"]),
+
         // MARK: Layer 2 — mechanism (effectful kits over the pure core)
         .target(name: "ProjectKit", dependencies: ["EDDCore"]),
         .target(name: "RenderKit", dependencies: ["EDDCore"]),
+        .target(name: "HarnessKit", dependencies: ["TraceKit", "EDDCore"]),
 
         // MARK: Layer 4 — the executable: ALL ArgumentParser commands + wiring
         .executableTarget(
@@ -49,14 +53,18 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 "EDDCore",
                 "ProjectKit",
-                "RenderKit"
+                "RenderKit",
+                "TraceKit",
+                "HarnessKit"
             ]
         ),
 
         // MARK: Unit tests — one target per kit (each proven importable in isolation)
         .testTarget(name: "EDDCoreTests", dependencies: ["EDDCore"]),
+        .testTarget(name: "TraceKitTests", dependencies: ["TraceKit"]),
         .testTarget(name: "ProjectKitTests", dependencies: ["ProjectKit"]),
         .testTarget(name: "RenderKitTests", dependencies: ["RenderKit"]),
+        .testTarget(name: "HarnessKitTests", dependencies: ["HarnessKit"]),
 
         // MARK: Integration tests — drive the built BINARY (commands live in the executable, so
         // the binary harness is the only way to exercise the command tree). Does NOT import the kits.

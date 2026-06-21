@@ -1,8 +1,8 @@
 # Phase 1 — Walking Skeleton: Prove the Loop End-to-End
 
-**Status:** IN PROGRESS — F1 complete
+**Status:** IN PROGRESS — F1, F2, F5 complete
 **Horizon:** Now
-**Last Updated:** 2026-06-20
+**Last Updated:** 2026-06-21
 
 ## Goal
 
@@ -15,7 +15,11 @@ tool its first user.
 
 ## Key Features
 
-1. Project discovery & output contract (CLI: `skillet`, `-C <dir>`, `--json`, exit codes) — DONE · Net-new
+Listed in **build order**; the bracketed **[Fn]** is the feature's *stable identifier* (referenced in
+Dependencies, Package targets, the specs, and the change log) and does **not** change when the build
+sequence is re-ordered.
+
+1. **[F1]** Project discovery & output contract (CLI: `skillet`, `-C <dir>`, `--json`, exit codes) — DONE · Net-new
    - Purpose & user value: Run from anywhere — skillet finds its project by
      walking up to `skillet.yaml`/`.git`, like git — and every command speaks to
      both humans (TTY) and scripts (`--json` + stable exit codes).
@@ -28,7 +32,7 @@ tool its first user.
    - Confidence: Medium — design §5 (invocation model, exit codes, output contract).
    - Plan: [Specs/001-project-discovery-output-contract/plan.md](../Specs/001-project-discovery-output-contract/plan.md)
 
-2. Adopt skillet in a repo (CLI: `skillet init`) — DONE · Net-new
+2. **[F2]** Adopt skillet in a repo (CLI: `skillet init`) — DONE · Net-new
    - Purpose & user value: One idempotent command turns a skills repo into a
      skillet project — detected config, discovered skills, scaffolded
      `evaluations/` — so a newcomer is productive without hand-authoring config.
@@ -40,19 +44,32 @@ tool its first user.
    - Confidence: Medium — design §6.1 `init`.
    - Plan: [Specs/002-adopt-skillet-repo/plan.md](../Specs/002-adopt-skillet-repo/plan.md)
 
-3. $0 preflight & skill-visibility check (CLI: `skillet doctor`) — PLANNED · Net-new
-   - Purpose & user value: A free, fast self-check that catches the silent
-     killers before any paid run — config parses, the harness is found and
-     authed, and the skill is actually *visible* to the harness. Kills the
-     `--skill-path` false-negative class by construction (design P6).
-   - Northstar: loop integrity (errors teach; never pay to discover a misconfig).
+3. **[F5]** Normalized trace & harness-adapter seam (surfaces via `skillet harness info`) — DONE · Net-new
+   - Purpose & user value: The one harness-independent record (`skillet.trace/1`)
+     and the `HarnessAdapter` protocol that every later capability — capture,
+     triage, judging, the matrix — consumes. Designing it now (D4) is what lets
+     the tool be multi-harness later without a retrofit.
+   - Northstar: differentiator #2 foundation + loop integrity.
    - Success metrics:
-     - `doctor` reports config origin, harness version, and auth, exiting `3` with a remedy line on any failure.
-     - Verifies both the positive-load condition (target `SKILL.md` + `references/`) and the discovery-only condition (siblings listable, not injected).
-   - Dependencies: HarnessAdapter seam (F5), claude-code adapter (F6).
-   - Confidence: Medium — design §6.1 `doctor`, §9.2.
+     - The `Trace` model round-trips through `--json` with its `schema` field intact (golden test).
+     - `skillet harness info` lists registered adapters and their capability matrix; `--json` carries its `schema`.
+     - `HarnessReplay` produces a canned `Trace` through the protocol — the seam is implementable end-to-end with no live harness.
+   - Dependencies: none (pure model + protocol). Per §9.3, per-harness parsers live beside their adapters, so claude-code trace parsing is F6.
+   - Confidence: Medium — design §9.1, §9.3, §11.
+   - Plan: [Specs/003-normalized-trace-harness-seam/plan.md](../Specs/003-normalized-trace-harness-seam/plan.md)
 
-4. Free static lint — error-tier core (CLI: `skillet lint`) — PLANNED · Ported
+4. **[F6]** claude-code adapter — run & trace parse (CLI: `--harness claude-code`) — PLANNED · Ported
+   - Purpose & user value: The first real harness — execute a task and parse its
+     native session — so the runner has something to run against on day one.
+   - Northstar: loop integrity.
+   - Success metrics:
+     - Probes (version + auth) and executes a trivial task end-to-end, returning a parseable `RawTrace`.
+     - A recorded Claude Code session (native JSONL) parses into a `Trace` — turns, tool calls, file changes, skill invocations — golden-tested vs the native log (moved here from F5; per §9.3 the parser lives beside the adapter).
+     - A seed-denylist version is refused when pinned, or warned + fallen-back-from when auto-discovered.
+   - Dependencies: Trace & adapter seam (F5).
+   - Confidence: Medium — design §9, §13 (ported from the Claude-only predecessor).
+
+5. **[F4]** Free static lint — error-tier core (CLI: `skillet lint`) — PLANNED · Ported
    - Purpose & user value: Instant, model-free analysis of the `SKILL.md` source
      so the cheapest lever runs first and gates the expensive ones; error-tier
      findings surface in `doctor` too.
@@ -65,29 +82,31 @@ tool its first user.
    - Notes: Phase 1 ships the error-tier subset `doctor` depends on; the full
      5-rule catalog + SARIF lands in Phase 2.
 
-5. Normalized trace & harness-adapter seam (surfaces via `skillet harness info`) — PLANNED · Net-new
-   - Purpose & user value: The one harness-independent record (`skillet.trace/1`)
-     and the `HarnessAdapter` protocol that every later capability — capture,
-     triage, judging, the matrix — consumes. Designing it now (D4) is what lets
-     the tool be multi-harness later without a retrofit.
-   - Northstar: differentiator #2 foundation + loop integrity.
+6. **[F3]** $0 preflight & skill-visibility check (CLI: `skillet doctor`) — PLANNED · Net-new
+   - Purpose & user value: A free, fast self-check that catches the silent
+     killers before any paid run — config parses, the harness is found and
+     authed, and the skill is actually *visible* to the harness. Kills the
+     `--skill-path` false-negative class by construction (design P6).
+   - Northstar: loop integrity (errors teach; never pay to discover a misconfig).
    - Success metrics:
-     - A Claude Code session parses into a `Trace` with turns, tool calls, file changes, and skill invocations (golden-file test vs a recorded native log).
-     - The `Trace` round-trips through `--json` with its `schema` field intact.
-   - Dependencies: none (pure model + protocol).
-   - Confidence: Medium — design §9.1, §9.3, §11.
+     - `doctor` reports config origin, harness version, and auth, exiting `3` with a remedy line on any failure.
+     - Verifies both the positive-load condition (target `SKILL.md` + `references/`) and the discovery-only condition (siblings listable, not injected).
+   - Dependencies: HarnessAdapter seam (F5), claude-code adapter (F6); also `swift-yaml` (config parsing) and error-tier `lint` (F4, surfaced in `doctor`).
+   - Confidence: Medium — design §6.1 `doctor`, §9.2.
 
-6. claude-code adapter — run & trace parse (CLI: `--harness claude-code`) — PLANNED · Ported
-   - Purpose & user value: The first real harness — execute a task and parse its
-     native session — so the runner has something to run against on day one.
-   - Northstar: loop integrity.
+7. **[F8]** Frozen boundary codecs + golden tests (`evals.json`, `benchmark.json`) — PLANNED · Ported
+   - Purpose & user value: Read/write the de-facto-standard eval and benchmark
+     formats byte-compatibly so existing skill-creator tooling and the eval-viewer
+     keep working unchanged — the promise that adopting skillet costs nothing
+     downstream (D5).
+   - Northstar: loop integrity (ecosystem compatibility).
    - Success metrics:
-     - Probes (version + auth) and executes a trivial task end-to-end, returning a parseable `RawTrace`.
-     - A seed-denylist version is refused when pinned, or warned + fallen-back-from when auto-discovered.
-   - Dependencies: Trace & adapter seam (F5).
-   - Confidence: Medium — design §9, §13 (ported from the Claude-only predecessor).
+     - `evals.json` and `benchmark.json` round-trip with unknown keys preserved (`Tests/Golden/boundary/` passes).
+     - A `run` updates `benchmark.json` in a form the legacy Python viewer renders unmodified.
+   - Dependencies: none (EDDCore codecs).
+   - Confidence: Medium — design §7.2, §13.
 
-7. The neutral runner — behavioral axis + pass^k (CLI: `skillet run`) — PLANNED · Ported
+8. **[F7]** The neutral runner — behavioral axis + pass^k (CLI: `skillet run`) — PLANNED · Ported
    - Purpose & user value: The entry point (D2) — execute a skill's behavioral
      evals in an isolated sandbox, grade each `expected_behavior` line with the
      (text) judge, and report `pass^k` reliability. Answers "does this skill
@@ -104,24 +123,15 @@ tool its first user.
      text judge. Trigger axis, A/B arm, grounded judge, and matrix arrive in
      Phases 2 and 7.
 
-8. Frozen boundary codecs + golden tests (`evals.json`, `benchmark.json`) — PLANNED · Ported
-   - Purpose & user value: Read/write the de-facto-standard eval and benchmark
-     formats byte-compatibly so existing skill-creator tooling and the eval-viewer
-     keep working unchanged — the promise that adopting skillet costs nothing
-     downstream (D5).
-   - Northstar: loop integrity (ecosystem compatibility).
-   - Success metrics:
-     - `evals.json` and `benchmark.json` round-trip with unknown keys preserved (`Tests/Golden/boundary/` passes).
-     - A `run` updates `benchmark.json` in a form the legacy Python viewer renders unmodified.
-   - Dependencies: none (EDDCore codecs).
-   - Confidence: Medium — design §7.2, §13.
-
 ## Dependencies & Sequencing
 
-- Local ordering: Trace & adapter seam (F5) → claude-code adapter (F6) → runner
-  (F7). Boundary codecs (F8) and the output contract (F1) are prerequisites of
-  the runner. `doctor` (F3) depends on the adapter; `lint` (F4) and `init` (F2)
-  need only discovery.
+- **Build order (dependency-honest):** F1 → F2 *(done)* → F5 (adapter seam) → F6 (claude-code
+  adapter) → F4 (lint) → F3 (`doctor`) → F8 (boundary codecs) → F7 (`run`). The Key Features list is
+  in this order; **Fn** ids are stable and independent of position.
+- Local dependencies: `doctor` (F3) needs the adapter seam (F5) + claude-code adapter (F6) +
+  `swift-yaml` (config parsing) + error-tier `lint` (F4, which it surfaces); the runner (F7) needs the
+  claude-code adapter (F6) + boundary codecs (F8) + the text judge; `lint` (F4) and `init` (F2) need
+  only discovery (F1).
 - Cross-phase: F5/F6 are reused by Phases 3, 4, 6, 7; F8 by Phase 2's reporting.
 
 ## Package targets (Phase 1)
@@ -174,3 +184,19 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
   scaffolding + self-owned `.skillet/.gitignore`; verified-docs harness (dump-help surface +
   behavioral + link checks); `README.md` brought current. 45 tests green. Plan:
   [Specs/002-adopt-skillet-repo/plan.md](../Specs/002-adopt-skillet-repo/plan.md).
+- 2026-06-21: MINOR re-sequence — Phase-1 build order made dependency-honest: `skillet doctor` (F3)
+  moved to after the HarnessAdapter seam (F5) and claude-code adapter (F6), since `doctor`'s
+  `probe()`/`verifySkillVisibility` are adapter methods (design §9.1) and it also needs `swift-yaml`
+  (config parsing) + error-tier `lint` (F4). New build order: F1, F2, F5, F6, F4, F3, F8, F7. Feature
+  identifiers (**Fn**) are unchanged — stable across the specs, Package targets, and prior log entries;
+  only the build sequence changed. No scope or feature-content change.
+- 2026-06-21: PATCH — F5 scoped as the harness-*agnostic* seam (Trace model + HarnessAdapter protocol
+  + HarnessReplay + `harness info`); claude-code trace parsing confirmed F6 (per §9.3, per-harness
+  parsers live beside their adapters). F5's "parse a Claude Code log" success-metric moved to F6;
+  added F5 plan link ([Specs/003](../Specs/003-normalized-trace-harness-seam/plan.md)). Metric
+  attribution only — no scope change.
+- 2026-06-21: F5 (normalized trace & harness-adapter seam) implemented — `TraceKit` (`Trace` =
+  `skillet.trace/1`) + `HarnessKit` (full `HarnessAdapter` protocol + `HarnessReplay` + claude-code
+  stub + registry + `harness-info` report) + `skillet harness list`/`info`; harness-agnostic, no new
+  package deps; 58 unit + integration tests green. Plan:
+  [Specs/003](../Specs/003-normalized-trace-harness-seam/plan.md).

@@ -50,6 +50,27 @@ public struct Renderer: Sendable {
         }
     }
 
+    /// A generic aligned table for plumbing/listing output (e.g. `harness info`). Column widths come
+    /// from the widest cell; the last column is left unpadded to avoid trailing whitespace.
+    public func renderTable(_ headers: [String], _ rows: [[String]]) -> Rendering {
+        let columns = headers.count
+        var widths = headers.map(\.count)
+        for row in rows {
+            for index in 0..<min(columns, row.count) {
+                widths[index] = max(widths[index], row[index].count)
+            }
+        }
+        func line(_ cells: [String]) -> String {
+            (0..<columns).map { index -> String in
+                let cell = index < cells.count ? cells[index] : ""
+                return index == columns - 1 ? cell : cell.padding(toLength: widths[index], withPad: " ", startingAt: 0)
+            }.joined(separator: "  ")
+        }
+        var out = bold(line(headers)) + "\n"
+        for row in rows { out += line(row) + "\n" }
+        return Rendering(stdout: out)
+    }
+
     // MARK: - Human rendering
 
     private func bold(_ text: String) -> String {

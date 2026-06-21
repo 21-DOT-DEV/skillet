@@ -47,4 +47,19 @@ public enum SkilletJSON {
         let data = try encoder().encode(Envelope(payload))
         return String(decoding: data, as: UTF8.self)
     }
+
+    /// The shared decoder, mirroring ``encoder()`` (snake_case keys, ISO-8601 UTC dates). The
+    /// envelope's injected `schema` key is simply ignored on read; *schema-validating* decode (for
+    /// the frozen boundary formats) lands with F8.
+    public static func decoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
+    /// Decode a value from a JSON string using the shared decoder.
+    public static func decode<T: Decodable>(_ type: T.Type, from json: String) throws -> T {
+        try decoder().decode(type, from: Data(json.utf8))
+    }
 }

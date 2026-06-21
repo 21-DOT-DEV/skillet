@@ -27,6 +27,8 @@ skillet --json              # machine-readable project context (schema: skillet.
 skillet -C path/to/repo     # operate as if started in another directory
 skillet init                # adopt skillet in the current repo (idempotent)
 skillet init --json         # report created/skipped paths (schema: skillet.init/1)
+skillet harness info        # harness adapters, capabilities, probe status
+skillet harness info --json # machine-readable (schema: skillet.harness-info/1)
 ```
 
 Every command speaks to **humans** (TTY) and **scripts** (`--json`, each payload carrying a `schema`

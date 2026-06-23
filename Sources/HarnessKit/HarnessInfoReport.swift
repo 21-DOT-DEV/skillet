@@ -40,6 +40,9 @@ public struct HarnessInfoReport: SchemaIdentified, Sendable, Equatable {
                 ))
             } catch HarnessError.notImplemented(let message) {
                 infos.append(AdapterInfo(id: adapter.id.rawValue, capabilities: capabilities, available: false, version: nil, detail: message))
+            } catch let error as EDDError {
+                // Surface the human "what + why", not the raw enum case.
+                infos.append(AdapterInfo(id: adapter.id.rawValue, capabilities: capabilities, available: false, version: nil, detail: error.message))
             } catch {
                 infos.append(AdapterInfo(id: adapter.id.rawValue, capabilities: capabilities, available: false, version: nil, detail: "\(error)"))
             }

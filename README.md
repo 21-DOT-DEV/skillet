@@ -4,9 +4,36 @@
 agent skills: capture real runs, turn hand-fixes into structured evidence, and ship a `SKILL.md`
 edit only after a previously-failing eval proves it.
 
-> **Status — Phase 1 (walking skeleton), in progress.** F1 (project discovery & output contract)
-> and F2 (`skillet init`) have landed; the rest of the loop lights up across later phases. See
-> [ROADMAP.md](ROADMAP.md).
+> **Status — Phase 1 (walking skeleton), in progress.** F1 (project discovery & output contract),
+> F2 (`skillet init`), F5 (trace & harness seam), and F6 (claude-code adapter) have landed; the rest
+> of the loop lights up across later phases. See [ROADMAP.md](ROADMAP.md).
+
+## How it works
+
+skillet runs a tight **eval-driven loop** — measure your skill, find where it fails, fix it, and
+re-measure — and a `SKILL.md` edit ships only after its previously-failing eval passes. **Solid =
+available today, dashed = planned** (see [ROADMAP.md](ROADMAP.md)):
+
+```mermaid
+flowchart LR
+    I["skillet init<br/>adopt"]
+    R["skillet run<br/>measure · pass^k"]
+    D["skillet capture · friction<br/>discover failures"]
+    N["skillet triage · next<br/>interpret · what to fix"]
+    F["skillet suggest · iterate<br/>fix & prove in a worktree"]
+
+    I --> R --> D --> N --> F --> R
+
+    classDef planned stroke-dasharray:5 5
+    class R,D,N,F planned
+```
+
+You **adopt** skillet once (`init`), then loop: **measure** with `run` (each eval repeated *k* times
+for a `pass^k` consistency score), **discover** real failures via `capture`/`friction`, **interpret**
+them with `triage` — `next` names the single highest-value action — then **fix and prove** the change
+with `suggest`/`iterate` in a throwaway worktree, and re-run. Free `lint` checks gate every paid
+`run`. Today `skillet init` ships (plus `skillet harness info` for setup); the rest lands across the
+roadmap phases.
 
 ## Install
 

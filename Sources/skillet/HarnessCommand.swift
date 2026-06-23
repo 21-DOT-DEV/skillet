@@ -6,7 +6,7 @@ import HarnessKit
 import RenderKit
 
 /// `skillet harness` — inspect the harness adapters behind the seam (F5). `info`/`list` are
-/// informational ($0); the live probe/run for claude-code lands in F6.
+/// informational ($0); claude-code's live `run` lands in F7. `info` probes the real adapter (F6).
 struct HarnessCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "harness",
@@ -25,7 +25,7 @@ struct HarnessListCommand: AsyncParsableCommand {
     @OptionGroup var options: GlobalOptions
 
     func run() async throws {
-        let report = await HarnessInfoReport.build(from: .default)
+        let report = await HarnessInfoReport.build(from: configuredRegistry(options: options))
         if options.json {
             Console.emit(Rendering(stdout: try SkilletJSON.encode(report) + "\n"))
         } else {
@@ -48,7 +48,7 @@ struct HarnessInfoCommand: AsyncParsableCommand {
 
     func run() async throws {
         let renderer = options.makeRenderer()
-        let registry = HarnessRegistry.default
+        let registry = configuredRegistry(options: options)
 
         if let id, registry.adapter(id: HarnessID(id)) == nil {
             let error = EDDError.usage(

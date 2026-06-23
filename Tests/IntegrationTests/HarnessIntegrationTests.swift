@@ -22,9 +22,12 @@ struct HarnessIntegrationTests {
         let object = try JSONSerialization.jsonObject(with: Data(output.stdout.utf8)) as? [String: Any]
         let adapters = object?["adapters"] as? [[String: Any]]
         #expect(adapters?.contains { ($0["id"] as? String) == "replay" } == true)
-        // the claude-code stub is listed but not available (its probe isn't implemented until F6)
+        // F6: claude-code ships a real adapter. Its binary isn't installed here, so the real probe
+        // reports unavailable with a human "what + why" detail (not a raw enum, not a stub message).
         let claudeCode = adapters?.first { ($0["id"] as? String) == "claude-code" }
         #expect(claudeCode?["available"] as? Bool == false)
+        #expect((claudeCode?["detail"] as? String)?.contains("could not find the claude-code binary") == true)
+        #expect((claudeCode?["capabilities"] as? [String])?.contains("session_capture") == true)
     }
 
     @Test("harness info <id> filters to one adapter")

@@ -4,17 +4,17 @@
 CLI for eval-driven development (EDD) of agent skills: capture real runs, turn hand-fixes into
 structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
 
-> **Status: Phase 1 in progress — F1, F2, F5 landed.** The walking skeleton has begun. `Package.swift` plus
-> `EDDCore`, `ProjectKit`, `RenderKit`, and the `skillet` executable exist, with unit + integration
+> **Status: Phase 1 in progress — F1, F2, F5, F6 landed.** The walking skeleton has begun. `Package.swift` plus
+> `EDDCore`, `TraceKit`, `ProjectKit`, `RenderKit`, `HarnessKit`, `ConfigYAML`, and the `skillet` executable exist, with unit + integration
 > tests green (`swift build && swift test`). **F1 (project discovery & output contract) is
 > implemented**: `skillet` explains the loop, `-C <dir>`, `--json` (schema-tagged), `--color`/`NO_COLOR`,
 > and the typed §5.4 exit codes (0 ok · 2 usage · 3 environment reachable today). **F2 (`skillet init`)
 > is implemented**: idempotent project scaffolding (`skillet.yaml`, per-skill `evaluations/`, a
 > self-owned `.skillet/.gitignore`), plus the verified-docs harness (dump-help surface + behavioral +
 > link checks). **F5 (trace + harness seam) is implemented**: the `Trace` model (`skillet.trace/1`), the
-> full `HarnessAdapter` protocol with a `HarnessReplay` double + a claude-code stub, and `skillet harness
+> full `HarnessAdapter` protocol with a `ReplayAdapter` double + a claude-code stub, and `skillet harness
 > list`/`info`. The `skillet` executable owns the full ArgumentParser command tree (no `skilletCLI`
-> library); `ProjectKit` is the discovery/config-IO home. The rest of the command surface under "Planned" is still agreed *intent*,
+> library); `ProjectKit` is the discovery/config-IO home. **F6 (claude-code adapter) is implemented** (validatable core): the native-session-JSONL → `Trace` parser (golden-tested vs a synthetic fixture), the binary resolution chain (flag > env > config > PATH), the version denylist/ban policy, and `probe()`/`verifySkillVisibility` behind a fakeable launcher — `harness info` now probes the real adapter. `swift-yaml` is wired, isolated in a `.Cxx` `ConfigYAML` target (the kits + pure core stay interop-free; the executable is a `.Cxx` leaf). Live `run` lands in F7. The rest of the command surface under "Planned" is still agreed *intent*,
 > not shipped fact — don't assume a command/module exists until its feature lands. Update this file as
 > each feature/phase completes.
 
@@ -35,17 +35,17 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 [`21-DOT-DEV/.github`](https://github.com/21-DOT-DEV/.github) (`CONTRIBUTING.md`, `SECURITY.md`,
 `CODE_OF_CONDUCT.md`). There are intentionally no repo-local copies.
 
-## Commands (true now — Phase 1 / F1–F2, F5)
+## Commands (true now — Phase 1 / F1–F2, F5, F6)
 
-- `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`).
-- `swift test` — run the unit + integration suites (58 tests, all green). The integration suite drives
+- `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`).
+- `swift test` — run the unit + integration suites (76 tests, all green). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
   `skillet init --json`, `skillet harness list`, `skillet harness info [--json]`, `skillet --help`, `skillet --version`.
 - `swift package generate-manual` / `generate-docc-reference` — regenerate the command reference from the parser.
 - `SKILLET_TEST_BINARY=<path> swift test` — point the integration harness at a specific binary.
 
-`init` and `harness list`/`info` are built; the claude-code adapter (F6) and `doctor`/`lint`/`run`/… are not yet — see Planned.
+`init`, `harness list`/`info`, and the claude-code adapter (F6 — parse + resolution + probe; live `run` is F7) are built; `doctor`/`lint`/`run`/… are not yet — see Planned.
 
 ## Binding conventions
 
@@ -59,12 +59,16 @@ from the first commit.
   there is **no TOML dependency**), `swift-subprocess`, plus the standard library. JSON/SARIF/frozen
   formats use Foundation `Codable` (no added dependency). Secret scanning uses a vendored
   `betterleaks` (MIT) companion. The cache MAY use system SQLite.
-- **Dependency notes (implementation reality):** `swift-yaml` has **no tagged release** and its
-  `YAML` product needs **C++ interop** in the consumer, so it is pinned by revision and isolated to a
-  YAML-codec seam (the pure core stays interop-free), wired in only when that codec lands — not up
-  front. `swift-system` (`FilePath`) is a **test-only** transitive dep of `swift-subprocess` (the
-  integration-test binary harness), adding no shipped runtime dep and needing no amendment. Known-good
-  pins: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system` 1.5.0.
+- **Dependency notes (implementation reality):** `swift-yaml` has **no tagged release**, so it is
+  **pinned by revision** (`e8d1769…`). Its `YAML` product needs **C++ interop**, which is **viral to
+  direct importers** — so it is confined to the isolated **`ConfigYAML`** target
+  (`.interoperabilityMode(.Cxx)`), which exposes a pure-Swift API (decoding into `EDDCore.SkilletConfig`).
+  Consequence (validated by the F6 spike): the `skillet` executable, as a direct importer, is a **`.Cxx`
+  leaf** too — but every kit and the pure core stay interop-free (they take a decoded `SkilletConfig` as
+  input and never import `ConfigYAML`). `swift-subprocess` is now used by **`HarnessKit`** (the
+  `ProcessLauncher` seam) as well as the integration-test harness; `swift-system` (`FilePath`) rides in
+  with it. Known-good pins: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system`
+  1.5.0, `swift-yaml` rev `e8d1769…`.
 - **`swift-subprocess` is the only sanctioned way to launch a process** — no `Foundation.Process`,
   no raw `posix_spawn`. All process execution lives in the effectful layers.
 - **`EDDCore` is pure and synchronous** — it spawns nothing and performs no I/O beyond its inputs.
@@ -145,7 +149,7 @@ tested via an `IntegrationTests` target that runs the built binary. CorpusKit is
 ### Platforms & testing (design §11–§12)
 
 macOS 14+ and current Ubuntu LTS. Testing strategy: pure unit + property tests for
-`EDDCore`/`TraceKit`; golden files for boundary codecs; `HarnessReplay` fixtures for pipelines; one
+`EDDCore`/`TraceKit`; golden files for boundary codecs; `ReplayAdapter` fixtures for pipelines; one
 opt-in, env-gated live smoke job per adapter in CI — everything else runs free, and free
 deterministic gates run before any paid one. **One unit-test target per kit** (each kit provably
 importable/testable in isolation). Because all ArgumentParser logic lives in the `skillet`

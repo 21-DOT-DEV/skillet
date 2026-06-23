@@ -3,7 +3,7 @@ import TraceKit
 
 /// An in-memory `HarnessAdapter` for tests — and the proof that the seam is implementable
 /// end-to-end with no live harness. Serves a deterministic synthetic `Trace`.
-public struct HarnessReplay: HarnessAdapter {
+public struct ReplayAdapter: HarnessAdapter {
     public let id: HarnessID = "replay"
     public let capabilities: HarnessCapabilities = [.runTask, .skillInjection, .traceParsing]
     public init() {}

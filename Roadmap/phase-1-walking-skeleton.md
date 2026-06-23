@@ -1,6 +1,6 @@
 # Phase 1 — Walking Skeleton: Prove the Loop End-to-End
 
-**Status:** IN PROGRESS — F1, F2, F5 complete
+**Status:** IN PROGRESS — F1, F2, F5, F6 complete
 **Horizon:** Now
 **Last Updated:** 2026-06-21
 
@@ -53,21 +53,25 @@ sequence is re-ordered.
    - Success metrics:
      - The `Trace` model round-trips through `--json` with its `schema` field intact (golden test).
      - `skillet harness info` lists registered adapters and their capability matrix; `--json` carries its `schema`.
-     - `HarnessReplay` produces a canned `Trace` through the protocol — the seam is implementable end-to-end with no live harness.
+     - `ReplayAdapter` produces a canned `Trace` through the protocol — the seam is implementable end-to-end with no live harness.
    - Dependencies: none (pure model + protocol). Per §9.3, per-harness parsers live beside their adapters, so claude-code trace parsing is F6.
    - Confidence: Medium — design §9.1, §9.3, §11.
    - Plan: [Specs/003-normalized-trace-harness-seam/plan.md](../Specs/003-normalized-trace-harness-seam/plan.md)
 
-4. **[F6]** claude-code adapter — run & trace parse (CLI: `--harness claude-code`) — PLANNED · Ported
-   - Purpose & user value: The first real harness — execute a task and parse its
-     native session — so the runner has something to run against on day one.
+4. **[F6]** claude-code adapter — trace parser, resolution & probe (live `run` in F7) — DONE · Ported
+   - Purpose & user value: The first real harness adapter: parse claude-code's native session into a
+     `Trace`, resolve and vet its binary (denylist), and provide the `probe` + static skill-visibility
+     check that `doctor` needs. The live task execution (`run` + §9.2 skill-injection) lands in F7, where
+     a real claude-code validates it.
    - Northstar: loop integrity.
    - Success metrics:
-     - Probes (version + auth) and executes a trivial task end-to-end, returning a parseable `RawTrace`.
-     - A recorded Claude Code session (native JSONL) parses into a `Trace` — turns, tool calls, file changes, skill invocations — golden-tested vs the native log (moved here from F5; per §9.3 the parser lives beside the adapter).
-     - A seed-denylist version is refused when pinned, or warned + fallen-back-from when auto-discovered.
-   - Dependencies: Trace & adapter seam (F5).
-   - Confidence: Medium — design §9, §13 (ported from the Claude-only predecessor).
+     - A recorded Claude Code session (native JSONL) parses into a `Trace` — turns, tool calls, file changes, skill invocations — golden-tested vs a **synthetic** fixture mirroring the native format (real logs are not committed — constitution VI; the parser is re-derived from the live format, the predecessor port being absent).
+     - The binary resolution chain (flag > env > config > PATH; vendored deferred) selects the right link and records which one won (the source is captured + printable; `harness which` surfaces it later).
+     - A seed-denylist version is refused when pinned (exit `3`), or warned + fallen-back-from when auto-discovered.
+     - `probe()` and `verifySkillVisibility` are implemented behind a fakeable process-launcher seam (logic unit-tested); `probe`'s live version/auth call is validated only by F7's opt-in env-gated smoke (claude-code isn't runnable in CI).
+   - Dependencies: Trace & adapter seam (F5). Needs a synthetic claude-code-format fixture; live paths are env-gated (claude-code unavailable in CI).
+   - Confidence: Medium — design §9, §13.
+   - Plan: [Specs/004-claude-code-adapter/plan.md](../Specs/004-claude-code-adapter/plan.md)
 
 5. **[F4]** Free static lint — error-tier core (CLI: `skillet lint`) — PLANNED · Ported
    - Purpose & user value: Instant, model-free analysis of the `SKILL.md` source
@@ -117,11 +121,14 @@ sequence is re-ordered.
      - `run <skill>` runs every eval k times in a fresh `Workspace`, prints a per-eval PASS/FAIL/FLAKY table + aggregate `pass^k`, and exits `1` on any failure.
      - An eval passes a trial only if *all* criteria pass; a planted "surface compliance without substance" case FAILs.
      - `pass^k` is computed at observed k and recomputes identically offline from the on-disk run record.
+     - Executes a trivial task end-to-end through the **live** claude-code adapter (`probe` version+auth, `run` + §9.2 skill-injection), returning a parseable `RawTrace` — covered by one **opt-in, env-gated live smoke** (the only paid test; free CI skips it). *(The live half of F6, validated here against a real claude-code.)*
    - Dependencies: claude-code adapter (F6), boundary codecs (F8), text judge (in this feature).
    - Confidence: Medium — design §6.1 `run`, §10.
    - Notes: Phase 1 ships the with-skill behavioral arm via `claude-code` with the
      text judge. Trigger axis, A/B arm, grounded judge, and matrix arrive in
-     Phases 2 and 7.
+     Phases 2 and 7. F7 also implements claude-code's live `run` execution + §9.2
+     skill-injection (the body F6 leaves as a seam) and owns the env-gated live smoke
+     that validates the real adapter path (probe/run/injection).
 
 ## Dependencies & Sequencing
 
@@ -133,6 +140,10 @@ sequence is re-ordered.
   claude-code adapter (F6) + boundary codecs (F8) + the text judge; `lint` (F4) and `init` (F2) need
   only discovery (F1).
 - Cross-phase: F5/F6 are reused by Phases 3, 4, 6, 7; F8 by Phase 2's reporting.
+- F6 ships the validatable core (parser, resolution, denylist, `probe`/`verifySkillVisibility` behind a
+  fakeable launcher); F7 implements the **live** claude-code `run` execution + §9.2 skill-injection.
+  Because claude-code isn't runnable in CI, every live adapter path is validated by **one opt-in,
+  env-gated smoke (in F7)** — never by free CI.
 
 ## Package targets (Phase 1)
 
@@ -142,8 +153,10 @@ strict downward DAG enforced from the first commit (later phases add kits, not r
 - **`EDDCore`** (pure) — exit codes, `--json` schema envelope, `EDDError`, pass^k aggregation,
   `evals.json`/`benchmark.json` boundary codecs (F1, F4, F7, F8).
 - **`TraceKit`** — normalized `Trace`/`Turn` model behind the `HarnessAdapter` seam (F5).
-- **`HarnessKit`** — `HarnessAdapter`, `Workspace`, `HarnessClaudeCode`, `HarnessReplay` (F5, F6);
+- **`HarnessKit`** — `HarnessAdapter`, `Workspace`, `ClaudeCodeAdapter` (parser + resolution + probe),
+  `BinaryResolver`, `Denylist`, `ProcessLauncher`, `ReplayAdapter` (F5, F6);
   **`JudgeKit`** — `Judge`, text judge, `ReplayJudge` (F7).
+- **`ConfigYAML`** — the isolated `.Cxx` YAML-codec seam (swift-yaml → `EDDCore.SkilletConfig`); F6.
 - **`RunKit`** — trial planner, run records, pass^k (F7).
 - **`LintKit`** — error-tier `SKILL-Lxxx` subset (F4); **`RenderKit`** — TTY tables + versioned JSON
   encoders (F1); **`ProjectKit`** — project discovery, config I/O, `init` scaffolding (F1–F3).
@@ -166,7 +179,11 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
 
 ## Risks & Assumptions
 
-- Assumes the predecessor runner/codecs port faithfully behind the new seams.
+- **The predecessor (`swift-skill-eval`) is not in this repo**, so "Ported" tags are scheduling hints,
+  not a copy path: the claude-code parser/runner are re-derived from the live native-session format +
+  design §9, validated against real `~/.claude` logs (read, never committed — constitution VI).
+- **claude-code is not available in the dev/CI environment**, so every live adapter path (F6 `probe`'s
+  call, F7 `run`) is validated only by an opt-in env-gated smoke (F7), not by free CI.
 - Token/cost fields may be structurally zero until usage parsing lands (Phase 8);
   spend falls back to trial-count estimates.
 
@@ -200,3 +217,20 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
   stub + registry + `harness-info` report) + `skillet harness list`/`info`; harness-agnostic, no new
   package deps; 58 unit + integration tests green. Plan:
   [Specs/003](../Specs/003-normalized-trace-harness-seam/plan.md).
+- 2026-06-21: MINOR — F6/F7 scope re-attributed (Option B). claude-code isn't runnable in this dev/CI
+  environment and the predecessor port is absent, so F6 now ships only the validatable core — the
+  native-JSONL→`Trace` parser (golden vs a synthetic fixture; real logs not committed, constitution VI),
+  the binary resolution chain, the denylist/ban policy, and `probe`/`verifySkillVisibility` behind a
+  fakeable launcher seam — while the **live `run` execution + §9.2 skill-injection** (and the live
+  validation of `probe`/`run`) move to **F7**, which owns the one opt-in env-gated smoke where a real
+  claude-code validates the path. `probe`/`verifySkillVisibility` stay in F6 because `doctor` (F3,
+  earlier in the build order) needs them. Fn ids stable; build order unchanged.
+- 2026-06-21: F6 (claude-code adapter) implemented — `HarnessKit` gains `ClaudeCodeAdapter`
+  (native-JSONL → `Trace` parser, golden vs a synthetic fixture covering turns / tool calls / skill
+  invocations / workspace diff), `BinaryResolver` (flag > env > config > PATH), `Denylist` (seed
+  `2.1.143`; pinned-banned exit 3, auto-discovered warn+fallback), and `probe` / `verifySkillVisibility`
+  behind a fakeable `ProcessLauncher`; live `run` stays an F7 seam. `swift-yaml` wired isolated in the
+  new `.Cxx` `ConfigYAML` target (decodes `skillet.yaml` → `EDDCore.SkilletConfig`); the interop spike
+  confirmed C++ interop is **viral to direct importers**, so the executable is a `.Cxx` leaf while every
+  kit + the pure core stay interop-free. 76 unit + integration tests green. Plan:
+  [Specs/004](../Specs/004-claude-code-adapter/plan.md).

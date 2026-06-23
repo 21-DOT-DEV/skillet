@@ -8,7 +8,7 @@
 | **Deliverable** | Public, open-source, multi-harness Swift CLI |
 | **Supersedes** | The repo-private `swift-skill-eval` tool + the Python trigger harness |
 | **Decision provenance** | §2 — every load-bearing choice here was settled in the design Q&A |
-| **Revision log** | v0.5 (2026-06-20): clig.dev conformance reconciliation — re-verified against the live guidelines and closed gaps: §5.2 environment-variable conventions; §5.3 `--version`, `--no-input`, `-n`, and color completeness (`TERM=dumb`, `--no-color`); §5.5 responsiveness/progress and pager; §6.3 + §11 support/bug-report path and bounded Ctrl-C cleanup; §12 uninstall. Appendix B rebuilt from prose into a complete, sectioned checklist; Appendix D citation broadened. Two reconciliations that touch settled choices were decided in review: `--plain` (P7) **deferred** (Open Question 6); the user-level XDG **preferences** tier **adopted** — a user-config tier added to §5.2 precedence (§7.1, §7.5), with D3 scoped to workflow state and the gitignored cache kept repo-local. v0.4 (2026-06-18): added `capture` secret-sanitization — redact-in-place before write, bundled `betterleaks` (MIT) run offline via `swift-subprocess`, fail-closed when unavailable; extended §12 privacy to secrets-in-evidence (touches §6.1, §7.2, §11, §12). v0.3 (2026-06-18): config format moved TOML→YAML (adopt `swift-yaml`, drop the TOML dependency); standardized all process execution on `swift-subprocess`; added §7.5 artifact & file-format reference and the §7.6 YAML usage policy. v0.2: renamed to `skillet`; applied the cross-implementation review (findings 1.1–4.7 + appendices); P5 amended; proposal format changed to content-anchored edits. v0.1: initial design |
+| **Revision log** | v0.6 (2026-06-21): swift-yaml interop-containment validated during F6 implementation — wired isolated in the new `.Cxx` `ConfigYAML` target (decodes config → `EDDCore.SkilletConfig`); C++ interop proved **viral to direct importers**, so the `skillet` executable is a `.Cxx` leaf while `EDDCore` + all kits stay interop-free (§11 implementation notes 1–2 updated). v0.5 (2026-06-20): clig.dev conformance reconciliation — re-verified against the live guidelines and closed gaps: §5.2 environment-variable conventions; §5.3 `--version`, `--no-input`, `-n`, and color completeness (`TERM=dumb`, `--no-color`); §5.5 responsiveness/progress and pager; §6.3 + §11 support/bug-report path and bounded Ctrl-C cleanup; §12 uninstall. Appendix B rebuilt from prose into a complete, sectioned checklist; Appendix D citation broadened. Two reconciliations that touch settled choices were decided in review: `--plain` (P7) **deferred** (Open Question 6); the user-level XDG **preferences** tier **adopted** — a user-config tier added to §5.2 precedence (§7.1, §7.5), with D3 scoped to workflow state and the gitignored cache kept repo-local. v0.4 (2026-06-18): added `capture` secret-sanitization — redact-in-place before write, bundled `betterleaks` (MIT) run offline via `swift-subprocess`, fail-closed when unavailable; extended §12 privacy to secrets-in-evidence (touches §6.1, §7.2, §11, §12). v0.3 (2026-06-18): config format moved TOML→YAML (adopt `swift-yaml`, drop the TOML dependency); standardized all process execution on `swift-subprocess`; added §7.5 artifact & file-format reference and the §7.6 YAML usage policy. v0.2: renamed to `skillet`; applied the cross-implementation review (findings 1.1–4.7 + appendices); P5 amended; proposal format changed to content-anchored edits. v0.1: initial design |
 
 ---
 
@@ -343,6 +343,23 @@ skillet capture --skill <skill> --slug <slug>
 
 The Discover step's recorder. The adapter (capability: `sessionCapture`) locates the native session — `--last` means "the one I just finished" — exports it, normalizes it to a Trace, and writes a session bundle to `evaluations/<skill>/sessions/<date>-<slug>.*` in the frozen bundle layout, **plus** an additive `*.trace.json` (the normalized form; additive files are permitted by the bundle's append-only policy, §7.2). Runs the deterministic scorers to produce the bundle's SARIF — renamed by role at capture time: producer skills' emitted findings become `*.audit-baseline.sarif`, consumer-side scans become `*.audit-input.sarif` (§7.2), with directionality enforced by `bundle verify`.
 
+The pipeline normalizes the native session and **sanitizes before writing**, failing closed if the scanner cannot run:
+
+```mermaid
+flowchart LR
+    L["locate native session<br/>adapter sessionCapture (--last)"]
+    E["export → normalize to Trace"]
+    SCAN{"secret scan<br/>betterleaks, offline"}
+    RED["redact in place<br/>+ redaction report"]
+    FC["fail closed<br/>no bundle written"]
+    W["write session bundle<br/>frozen layout + trace.json + SARIF"]
+    D["corrective-turn detect<br/>→ suggest: skillet friction add"]
+
+    L --> E --> SCAN
+    SCAN -- scanner ran --> RED --> W --> D
+    SCAN -- scanner unavailable --> FC
+```
+
 **Secret sanitization (before write).** Production sessions leak credentials — `.env` contents, tokens, auth headers, keys echoed in command output — and capture commits the bundle, so the pipeline scans the transcript, diff, and bodies *before writing* and **redacts in place** with typed markers (`[REDACTED:aws-key]`). The raw secret never enters the repo; it remains only in the harness's native session store, which capture reads but does not commit. The default scanner is **bundled `betterleaks`** (MIT — vendored per platform/arch and run via `swift-subprocess`, §11; version-pinned, behind a swappable seam), run **detection-only and fully offline** (local BPE tokenization); `betterleaks`'s optional validation — its only network step — is off by default, irrelevant to redaction, and never enabled by skillet (§12, P8). Capture stays non-blocking (P4) — it redacts and prints a **redaction report** for the human to review before committing (P5); `--fail-on-secret` makes it fail-closed for CI (exit `1`). False positives are silenced via `betterleaks`'s own allowlist plus a skillet path exemption (`sanitize.exempt_paths`), and every redaction appears in the report, so an exemption is a one-line fix. If the scanner cannot run, capture **fails closed** with a remedy rather than writing an unsanitized bundle. Redaction provenance (scanner, version, count) is recorded in the bundle's `session-meta.json` (§7.2).
 
 Two capture modes matter for the loop. `--from-checkpoint [last|<match>]` slices the transcript at a saved checkpoint *before* the session finishes — the real corpus carries two-stage lineages (an in-progress capture plus a `-completed` sibling of the same work). `--preserve-feedback` keeps every corrective turn from the first checkpoint to EOF instead of trimming to the final state — this is the open-coding signal `triage --code-feedback` (§9.3) depends on; without it Track B starves.
@@ -393,6 +410,22 @@ The Interpret step: error analysis across the whole session corpus, not a pass-r
 Scorer↔judge **contradictions print first**, above the taxonomy — "⚠ contradictions (N): triage before trusting the verdict" — because a disagreement between a deterministic scorer and the judge on the same expectation is the calibration alarm that silently inflates or deflates every pass rate (§8).
 
 Output is a failure taxonomy; each cluster becomes a **finding** file (§7.3) routed to its cheapest lever, auto-linked to friction events that share sessions. Routing prints with its standing caveat — *a hypothesis, not a verdict* — and the table ends with `skillet next`, where findings and friction jointly feed the gates.
+
+The two tracks run over the corpus and merge into routed findings — contradictions surfaced first:
+
+```mermaid
+flowchart LR
+    C["session corpus<br/>normalized traces + bundles"]
+    A["Track A — free<br/>deterministic scorers, clustered"]
+    B["Track B — paid (--code-feedback)<br/>judge axial-codes corrective turns"]
+    M["failure taxonomy<br/>contradictions first"]
+    F["finding files<br/>routed to cheapest lever"]
+    N["→ skillet next"]
+
+    C --> A --> M
+    C --> B --> M
+    M --> F --> N
+```
 
 ---
 
@@ -467,6 +500,21 @@ no regressions · proposal set proven
 ```
 
 Any regression ⇒ worktree discarded, exit `1`, nothing emitted unless `--keep-worktree` for forensics. `skillet` never applies to the live tree from `iterate` and never commits (P5). On success it can, with `--mark`, advance the linked friction event to `proven` — an explicit, auditable state write whose verdict is **provisional until judge calibration clears** (no unresolved scorer↔judge contradiction on the affected evals, §8).
+
+The fix-and-prove loop ties `suggest` and `iterate` together — the machine drafts and proves, you review and commit; a regression sends you back to redraft, never to the live tree:
+
+```mermaid
+flowchart LR
+    S["skillet suggest<br/>draft EditProposals from evidence"]
+    R["you review the proposals"]
+    I["skillet iterate --apply<br/>A/B in a throwaway worktree, at k"]
+    Q{"pass^k delta:<br/>no regression?"}
+    L["skillet suggest --apply<br/>writes working tree — you commit"]
+
+    S --> R --> I --> Q
+    Q -- proven --> L
+    Q -- regression --> S
+```
 
 ---
 
@@ -677,6 +725,18 @@ A pure function:
 
 Deterministic, instant, no model calls, exhaustively unit-tested — because users must be able to *trust the worklist* the way they trust `git status`.
 
+The engine sits in a loop — evidence in, a ranked worklist out, and your action changes the evidence:
+
+```mermaid
+flowchart LR
+    EV["evidence<br/>friction + findings + eval results"]
+    GE["gates engine<br/>pure derivation, no model"]
+    NX["skillet next<br/>ranked worklist: ACT NOW · corroborate · HELD · WATCH<br/>each with a reason + exact command"]
+    DO["you run the suggested command<br/>→ evidence changes"]
+
+    EV --> GE --> NX --> DO --> EV
+```
+
 **Rules are data.** The shipped defaults are the methodology's published numbers; the `gates.*` keys in `skillet.yaml` tune them per repo (P10):
 
 | Gate | Default rule |
@@ -812,6 +872,38 @@ Two real agents plus `direct-api` ship in v1 because the matrix is a launch feat
 
 ## 10. Execution & scoring semantics
 
+One trial of `skillet run` flows through the harness seam (§9.1) as shown below; the paragraphs that follow detail each stage. Free deterministic gates (`doctor`/`lint`) run *before* any paid trial, and both the judge and the scorers feed `EDDCore`'s aggregation (§8).
+
+```mermaid
+sequenceDiagram
+    actor U as You or CI
+    participant S as skillet (RunKit)
+    participant A as HarnessAdapter
+    participant H as Harness CLI (subprocess)
+    participant J as Judge
+    participant C as Score + EDDCore
+
+    U->>S: skillet run SKILL --eval E --runs k
+    S->>S: load config, discover skill, plan trials
+    Note over S: free pre-gates first (doctor / lint)
+    loop each trial (to observed k)
+        S->>A: probe() — resolve binary, denylist, version
+        S->>A: stage skill in a fresh Workspace (§9.2)
+        S->>A: run(task, workspace, skills)
+        A->>H: launch via swift-subprocess (env contract, §10)
+        H-->>A: native session (JSONL)
+        A-->>S: RawTrace
+        S->>A: parseTrace(raw)
+        A-->>S: normalized Trace (§9.3)
+        S->>J: grade Trace against the rubric
+        J-->>S: per-criterion verdict
+        S->>C: deterministic scorers, SARIF
+    end
+    S->>C: aggregate pass^k, gates, scorer/judge contradiction (§8)
+    C-->>S: result
+    S-->>U: TTY + --json (schema-tagged), stable exit code
+```
+
 **Trial isolation.** Every trial gets a fresh `Workspace`: fixtures and `files[]` staged in, harness runs, diff captured, sandbox destroyed. No trial sees another's residue; `--keep-worktree`/`--keep-workspace` exist for forensics.
 
 **pass^k, precisely.** Per eval per harness: pass ⇔ all recorded trials pass every criterion, computed at **observed k** — `min(runs)` actually recorded — which diverges from requested k (`--runs`) whenever trials are lost, aborted, or infra-retried (the common case). Consistency is only *meaningful* at observed k ≥ 2; below that, the aggregator reports "variance unmeasurable" rather than a number, and it always re-derives from the on-disk run records (so the pass^k baseline survives process restarts and is recomputable offline). Anything with 0 < passes < observed k is *flaky* and is reported as a hygiene item before any delta is trusted (§8); pass-rate trust is additionally conditioned on zero unresolved scorer↔judge contradictions. `report` shows variance across historical runs so "did it really improve" has an answer beyond one number.
@@ -844,10 +936,10 @@ skillet (Package.swift, Swift 6, strict concurrency)
 ├── ScoreKit       deterministic output scorers · SARIF emit
 ├── HarnessKit     HarnessAdapter · resolution chain + ban policy · env-hygiene
 │                  contracts · per-trial Workspace sandbox
-│   ├── HarnessClaudeCode   (+ its trace parser)
-│   ├── HarnessOpenCode     (+ its trace parser)
-│   ├── HarnessDirectAPI
-│   └── HarnessReplay       (test/replay double)
+│   ├── ClaudeCodeAdapter   (trace parser + resolution + probe; F6)
+│   ├── OpenCodeAdapter     (+ its trace parser)
+│   ├── DirectAPIAdapter
+│   └── ReplayAdapter       (test/replay double)
 ├── JudgeKit       Judge protocol · text judge (AnthropicAPIJudge) · grounded
 │                  judge (sandbox-reading adapters) · ReplayJudge
 ├── RunKit         trial planner/scheduler · memory-aware concurrency · watchdog +
@@ -898,11 +990,11 @@ skillet (executable) → { IterateKit, AnalysisKit, RunKit, RenderKit }
 
 **Concurrency & cancellation.** `async/await` with a `TaskGroup` per run; Ctrl-C cancels cleanly — in-flight workspaces and worktrees are destroyed, partial run records are marked `aborted`, never half-written. Teardown is itself bounded so it cannot hang; a second Ctrl-C during cleanup is reported and skips the rest, leaning on the crash-only invariant (D3) that the next run always starts from committed files.
 
-**Testing strategy.** `EDDCore`/`TraceKit`: pure unit tests incl. property tests on the gates engine. Boundary codecs: golden files (§7.2). Pipelines end-to-end: `HarnessReplay` fixtures recorded from real harnesses. One opt-in, env-gated live smoke job per adapter in CI; everything else runs free. Each kit is its own target with its own unit-test target, so every kit is provably importable and testable in isolation. Because *all* argument-parser logic lives in the `skillet` executable (not a library), the command surface is exercised by a separate `IntegrationTests` target that drives the **built binary** through `swift-subprocess` — with test-bundle-relative binary discovery (plus a `SKILLET_TEST_BINARY` override), per-test temp-dir isolation for parallel safety, and Swift Testing tags separating the free suite from env-gated live runs. Test files carry a **300-line soft cap**, honored by splitting suites and extracting harness/fixture helpers (e.g. a `TestHarness` + a project fixture).
+**Testing strategy.** `EDDCore`/`TraceKit`: pure unit tests incl. property tests on the gates engine. Boundary codecs: golden files (§7.2). Pipelines end-to-end: `ReplayAdapter` fixtures recorded from real harnesses. One opt-in, env-gated live smoke job per adapter in CI; everything else runs free. Each kit is its own target with its own unit-test target, so every kit is provably importable and testable in isolation. Because *all* argument-parser logic lives in the `skillet` executable (not a library), the command surface is exercised by a separate `IntegrationTests` target that drives the **built binary** through `swift-subprocess` — with test-bundle-relative binary discovery (plus a `SKILLET_TEST_BINARY` override), per-test temp-dir isolation for parallel safety, and Swift Testing tags separating the free suite from env-gated live runs. Test files carry a **300-line soft cap**, honored by splitting suites and extracting harness/fixture helpers (e.g. a `TestHarness` + a project fixture).
 
 **Dependency policy.** `swift-argument-parser`, `swift-yaml` (the 21-DOT-DEV YAML 1.2 parser/emitter for config and evidence frontmatter — it **replaces Yams**, and because config is now YAML there is **no TOML dependency**), `swift-subprocess` (the swiftlang async/await process API; see below), and the standard library; JSON, SARIF, and the frozen boundary formats use Foundation `Codable`, adding no dependency. `swift-yaml` vendors `yaml-cpp` and builds it natively via SwiftPM (no system dependencies, no unsafe flags). All shelling-out is confined to the effectful layers — `EDDCore` spawns nothing — and goes through **`swift-subprocess`**, the *single* sanctioned way to launch a process (no `Foundation.Process`, no raw `posix_spawn`): harness CLIs, the judge, `git` (worktree/status; no libgit2 binding), and the vendored secret scanner (`betterleaks`, §6.1) all run through it, each adapter's environment contract (§10) supplied as the subprocess's explicit environment and the per-trial watchdog (SIGTERM → grace → SIGKILL, §10) mapped onto its graceful→forceful teardown. SQLite via the system library for the cache only.
 
-Two implementation notes refine this policy. (1) `swift-yaml` currently has **no tagged release**, and its `YAML` product **requires C++ interop** in the consuming target; to keep `EDDCore` and the rest of the pure core free of C++-interop mode (and its strict-concurrency friction), `swift-yaml` is pinned by revision and confined to an **isolated YAML-codec seam**, wired in only when that codec body lands rather than up front. (2) `swift-system` (`FilePath`) rides in transitively via `swift-subprocess` and is surfaced **test-only** to the `IntegrationTests` harness, so it adds no shipped runtime dependency and needs no amendment. Known-good pins at time of writing: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system` 1.5.0.
+Two implementation notes refine this policy. (1) `swift-yaml` has **no tagged release** (pinned by revision), and its `YAML` product **requires C++ interop**, which is **viral to direct importers**; it is confined to the isolated **`ConfigYAML`** target (`.interoperabilityMode(.Cxx)`), which exposes a pure-Swift API decoding into `EDDCore.SkilletConfig` — landed in F6. The pure core (`EDDCore`) and every kit stay free of C++-interop mode by consuming a decoded `SkilletConfig` rather than importing `ConfigYAML`; the F6 interop spike confirmed the one unavoidable consequence — the `skillet` executable, a direct importer, is a `.Cxx` leaf (the kits/core are unaffected). (2) `swift-system` (`FilePath`) rides in transitively via `swift-subprocess`, which is now a shipped dependency used by **`HarnessKit`** (the `ProcessLauncher` seam) as well as the `IntegrationTests` harness; both were already sanctioned, so no amendment is needed. Known-good pins at time of writing: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system` 1.5.0, `swift-yaml` rev `e8d1769…`.
 
 ---
 

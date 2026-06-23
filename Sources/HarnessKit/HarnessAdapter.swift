@@ -87,7 +87,7 @@ public enum HarnessError: Error, Sendable, Equatable {
 
 /// The one protocol every harness implements; the seam every later capability (capture, triage,
 /// judging, `run`, the matrix) consumes. Defined in full now (D4) so later features build against a
-/// stable contract; F5 ships only the `HarnessReplay` double + a claude-code stub.
+/// stable contract; F5 ships only the `ReplayAdapter` double + a claude-code stub.
 public protocol HarnessAdapter: Sendable {
     var id: HarnessID { get }
     var capabilities: HarnessCapabilities { get }

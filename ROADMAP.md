@@ -1,6 +1,6 @@
 # Product Roadmap — skillet
 
-**Version:** v1.3.0
+**Version:** v1.4.1
 **Last Updated:** 2026-06-21
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
@@ -108,9 +108,10 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 ## Global Risks & Assumptions
 
 - **Phase 1 underway; later phases greenfield.** Phase 1 features F1 (project discovery &
-  output contract) and F2 (`skillet init`) are implemented (`Specs/001`, `Specs/002`; 45 tests
-  green); the remainder of Phase 1 and Phases 2–8 are PLANNED/FUTURE. Those statuses reflect
-  design intent verified against the design doc (Medium confidence), not running code.
+  output contract), F2 (`skillet init`), F5 (trace & harness seam), and F6 (claude-code adapter)
+  are implemented (`Specs/001`–`004`; 76 tests green); the remainder of Phase 1 (F4, F3, F8, F7)
+  and Phases 2–8 are PLANNED/FUTURE. Those statuses reflect design intent verified against the
+  design doc (Medium confidence), not running code.
 - **"Ported" assumption.** The design doc says much of v1 is faithfully
   translated from a predecessor (`swift-skill-eval` + a Python trigger harness).
   That predecessor is not in this repo, so `Ported` tags are a scheduling hint,
@@ -136,6 +137,17 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 
 ## Change Log
 
+- v1.4.1 (2026-06-21): PATCH — Phase 1 **F6 (claude-code adapter) implemented** (validatable core):
+  `ClaudeCodeAdapter` (native-JSONL→`Trace` parser, golden vs a synthetic fixture), `BinaryResolver`,
+  `Denylist`, and `probe`/`verifySkillVisibility` behind a fakeable launcher; live `run` stays F7.
+  `swift-yaml` wired isolated in a new `.Cxx` `ConfigYAML` target (kits + pure core stay interop-free;
+  the executable is a `.Cxx` leaf, per the interop spike). Phase 1 stays IN PROGRESS (F4/F3/F8/F7 open).
+- v1.4.0 (2026-06-21): MINOR — Phase 1 F6/F7 scope re-attributed: claude-code's **live `run`
+  execution + skill-injection** moved from F6 to F7 (where the opt-in env-gated smoke and a real
+  claude-code can validate it), because claude-code isn't runnable in this dev/CI environment and the
+  predecessor port is absent. F6 keeps the validatable core (native-JSONL→`Trace` parser, binary
+  resolution, denylist, and the `probe`/`verifySkillVisibility` seam). Build order and **Fn** ids
+  unchanged. Detail in `Roadmap/phase-1-walking-skeleton.md`.
 - v1.3.0 (2026-06-21): MINOR — Phase 1 re-sequenced to a dependency-honest build order:
   `skillet doctor` (F3) moved after the HarnessAdapter seam (F5) + claude-code adapter (F6),
   because `doctor`'s `probe()`/`verifySkillVisibility` are adapter methods (design §9.1) and it

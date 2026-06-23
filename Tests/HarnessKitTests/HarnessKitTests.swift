@@ -14,7 +14,7 @@ struct HarnessKitTests {
 
     @Test("Replay double probes and parses a canned Trace through the protocol")
     func replayProvesTheSeam() async throws {
-        let replay = HarnessReplay()
+        let replay = ReplayAdapter()
         let info = try await replay.probe()
         #expect(info.available)
         #expect(info.id == "replay")
@@ -27,22 +27,30 @@ struct HarnessKitTests {
 
     @Test("Unsupported capabilities degrade loudly")
     func unsupportedThrows() async {
-        let replay = HarnessReplay() // declares no sessionCapture
+        let replay = ReplayAdapter() // declares no sessionCapture
         await #expect(throws: HarnessError.self) {
             _ = try await replay.locateSessions(SessionQuery())
         }
     }
 
-    @Test("claude-code stub declares capabilities but is not implemented")
-    func claudeCodeStub() async {
+    @Test("claude-code ships a real adapter; run() remains the F7 seam")
+    func claudeCodeRunSeam() async {
         let adapter = ClaudeCodeAdapter()
         #expect(adapter.capabilities.contains(.runTask))
-        await #expect(throws: HarnessError.self) { _ = try await adapter.probe() }
+        await #expect(throws: HarnessError.self) {
+            _ = try await adapter.run(TaskSpec(query: "hi"), in: Workspace(root: URL(fileURLWithPath: "/tmp")), skills: .none)
+        }
     }
 
-    @Test("harness-info report probes the registry and carries the schema")
+    @Test("harness-info report probes adapters and carries the schema")
     func harnessInfoReport() async throws {
-        let report = await HarnessInfoReport.build(from: .default)
+        // Inject a claude-code that resolves nothing → deterministically unavailable (no real binary here).
+        let claude = ClaudeCodeAdapter(
+            launcher: FakeLauncher(output: ProcessOutput(stdout: "", stderr: "", exitCode: 1)),
+            resolver: BinaryResolver(probe: FakeExecutableProbe(), environment: [:]),
+            environment: [:]
+        )
+        let report = await HarnessInfoReport.build(from: HarnessRegistry(adapters: [ReplayAdapter(), claude]))
         let ids = report.adapters.map(\.id)
         #expect(ids.contains("replay"))
         #expect(ids.contains("claude-code"))
@@ -55,5 +63,12 @@ struct HarnessKitTests {
 
         let json = try SkilletJSON.encode(report)
         #expect(json.contains(#""schema":"skillet.harness-info/1""#))
+    }
+
+    @Test("the default registry includes replay and claude-code")
+    func defaultRegistry() {
+        let ids = HarnessRegistry.default.adapters.map(\.id)
+        #expect(ids.contains("replay"))
+        #expect(ids.contains("claude-code"))
     }
 }

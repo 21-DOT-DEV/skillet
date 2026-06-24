@@ -2,7 +2,7 @@
 
 **Status:** FUTURE
 **Horizon:** Later
-**Last Updated:** 2026-06-18
+**Last Updated:** 2026-06-24
 
 ## Goal
 
@@ -75,6 +75,24 @@ the explicit non-goals so scope stays honest.
     - Confidence: Medium — precedent (Vale, Semgrep) + the design's §7.6 YAML usage policy; bounded by its litmus test and tripwire.
     - Notes: Governed by design §7.6; repo-local rule IDs use a reserved range (e.g. `L2xx`). Subsumes the data-expressible subset of F6.
 
+12. Skill-security lint rules (security tier in the `SKILL-Lxxx` catalog) — FUTURE · Net-new
+    - Purpose & user value: Static, deterministic-first security checks over the SKILL.md file —
+      prompt-injection phrasing, evaluator/judge manipulation, unicode obfuscation, YAML
+      front-matter anomalies, and suspicious size — so a skill is screened for adversarial content
+      before it is trusted or shipped. Runs free, before any paid judge.
+    - Confidence: Medium — competitive cross-reference (Skill-Lab's 5 security checks; AWS
+      `skill-eval` static security scan; SkillTester's security benchmark); design §6.1 `lint`, §13.
+
+13. Skill-bundle integrity lint group — FUTURE · Net-new
+    - Purpose & user value: Static checks over a skill's *bundle*, beyond its `SKILL.md` prose —
+      that bundled `scripts/` are self-contained, non-interactive, and `--help`-capable; that
+      referenced script/asset paths resolve; and that no files are orphaned or outside the spec
+      dirs — so a skill ships as a coherent, runnable package, not just well-written prose. Free,
+      deterministic, before any paid judge.
+    - Confidence: Medium — competitive cross-reference (Skill-Lab's Structure/Content bundle checks;
+      AWS `skill-eval`'s skill-standard-directory scan); the agentskills.io `scripts/`/`references/`
+      structure; design §6.1 `lint`, §7.1, §13.
+
 ## Non-Goals (explicitly out of scope)
 
 - **Description-optimizer loop** — owned by skill-creator; revisit only if that changes.
@@ -101,3 +119,8 @@ the explicit non-goals so scope stays honest.
   the best-practice cross-reference as a `needs-research` item.
 - 2026-06-18: Added F11 (user-authored declarative YAML lint rules), governed by
   the new design §7.6 YAML usage policy; noted the F6 overlap. Roadmap MINOR → v1.1.0.
+- 2026-06-24: Added F12 (skill-security lint rules) from the v0.8 competitive cross-reference
+  (Skill-Lab / AWS `skill-eval` / SkillTester); no settled-decision touch. Roadmap MINOR → v1.5.0.
+- 2026-06-24: Added F13 (skill-bundle integrity lint group — `scripts/`/asset/reference checks)
+  from the Skill-Lab cross-reference (its Structure/Content bundle checks; AWS `skill-eval`); no
+  settled-decision touch. Roadmap MINOR → v1.7.0.

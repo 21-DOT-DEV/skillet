@@ -86,7 +86,8 @@ sequence is re-ordered.
    - Dependencies: Project discovery (F1).
    - Confidence: Medium — design §6.1 `lint`.
    - Notes: Phase 1 ships the error-tier subset `doctor` depends on; the full
-     5-rule catalog + SARIF lands in Phase 2.
+     5-rule catalog + SARIF lands in Phase 2. Error-tier core = `L001` + `L003` + `L009` (full tiers).
+   - Plan: [Specs/005-free-static-lint/plan.md](../Specs/005-free-static-lint/plan.md)
 
 6. **[F3]** $0 preflight & skill-visibility check (CLI: `skillet doctor`) — PLANNED · Net-new
    - Purpose & user value: A free, fast self-check that catches the silent

@@ -2,7 +2,7 @@
 
 **Status:** PLANNED
 **Horizon:** Next
-**Last Updated:** 2026-06-17
+**Last Updated:** 2026-06-24
 
 ## Goal
 
@@ -61,6 +61,19 @@ failures, never imagined ones.
    - Dependencies: iterate (F3), evidence lifecycle (Phase 3), contradiction join (Phase 4).
    - Confidence: Medium — design §6.1 `iterate`, §8.
 
+5. Held-out proof discipline (gate: `gates.proof.require_holdout`) — PLANNED · Net-new
+   - Purpose & user value: Close the *circular-proof* gap — a `skill_md` edit is `proven`
+     only when a **held-out sibling eval** (same failure class, *not* the one the edit was
+     drafted from) also passes, so a proof reflects a fix that generalizes rather than an
+     overfit to its own eval. When the failure class has no sibling, `next` advises authoring
+     one; the proof is recorded `single-eval` until then.
+   - Northstar: loop integrity; hardens the *corroboration integrity* outcome.
+   - Success metrics:
+     - `iterate --mark proven` on a `skill_md` lever requires a held-out sibling eval to pass; with none, it records `single-eval, un-corroborated` and `next` surfaces the gap.
+     - Under `--strict`, a missing held-out blocks promotion (exit `5`); advisory otherwise (D6).
+   - Dependencies: iterate (F3), the Proof gate + evidence `root_cause`/`cluster` keys (design §8, §7.3).
+   - Confidence: Medium — design §8 (Held-out proof), §5.2 `gates.proof`, §6.1 `iterate`; adopted from §14-8.
+
 ## Dependencies & Sequencing
 
 - Local ordering: `suggest` (F1) → `iterate` proves (F3) → `--mark` (F4); safe
@@ -86,3 +99,5 @@ failures, never imagined ones.
 
 - 2026-06-17: Phase created and spotlighted as its own phase (Northstar gap #2),
   sequenced ahead of the harness matrix within Next.
+- 2026-06-24: Added F5 (held-out proof discipline), adopting design §14-8 (R2) from the v0.8
+  competitive cross-reference; graduated from ROADMAP *Candidate Enhancements*. Roadmap MINOR → v1.6.0.

@@ -17,3 +17,4 @@ roadmap re-phasing.
 | 002 | Adopt skillet in a repo (`skillet init`) | 1 · F2 | Implemented | [plan.md](002-adopt-skillet-repo/plan.md) |
 | 003 | Normalized trace & harness-adapter seam | 1 · F5 | Implemented | [plan.md](003-normalized-trace-harness-seam/plan.md) |
 | 004 | claude-code adapter (trace parser, resolution & probe) | 1 · F6 | Implemented | [plan.md](004-claude-code-adapter/plan.md) |
+| 005 | Free static lint — error-tier core (`skillet lint`) | 1 · F4 | Planned | [plan.md](005-free-static-lint/plan.md) |

@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.4.1
-**Last Updated:** 2026-06-21
+**Version:** v1.7.0
+**Last Updated:** 2026-06-24
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is
@@ -68,8 +68,9 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 - **Phase 7 (Next):** Run the same suite across multiple agents and print a
   per-harness `pass^k` portability table.
 - **Phase 8 (Later):** Track B axial coding, more adapters, the remaining lint
-  rules, **user-authored (YAML) lint rules**, real spend numbers, a judge↔human-label
-  calibration harness — plus the explicit non-goals.
+  rules — incl. the **skill-security** (F12) and **skill-bundle-integrity** (F13) groups from the
+  competitive cross-reference — **user-authored (YAML) lint rules**, real spend numbers, a
+  judge↔human-label calibration harness — plus the explicit non-goals.
 
 ## Product-Level Metrics & Success Criteria
 
@@ -78,7 +79,9 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 - **Loop cycle time** — median elapsed time from a captured friction event to a
   proven, ready-to-land proposal.
 - **Corroboration integrity** — 100% of `SKILL.md` edits shipped via skillet are
-  backed by a previously-failing eval that now passes.
+  backed by a previously-failing eval that now passes, **corroborated by a held-out sibling
+  eval** (same failure class, distinct from the drafting eval) so the proof reflects a
+  generalizing fix, not an overfit.
 - **Evidence-to-edit ratio** — share of evidence correctly routed to a cheaper
   lever (config/lint/reference) instead of a prose edit; the tool should resist
   over-editing the skill.
@@ -122,7 +125,10 @@ derived from `skillet-design.md` and an external best-practice cross-reference
   required-explicit judge model; static `concurrency` knob). Items resting on
   these carry `needs-research`.
 - **Trademark risk.** Palo Alto Networks ships a "Skillet" product family (design
-  Appendix C / Open Q1); a public launch needs a trademark sanity check first.
+  Appendix C / Open Q1); a public launch needs a trademark sanity check first. A
+  June-2026 GitHub sweep found **no collision *inside the eval space*** — the PAN
+  family is the only conflict, so the risk is narrowed, not removed (the check still
+  precedes any public launch).
 - **Judge-reliability risk.** External research shows LLM judges are
   systematically over-confident and that evaluation criteria drift as outputs are
   reviewed. Mitigation: the scorer↔judge contradiction gate, `judge_prompt_version`,
@@ -135,8 +141,50 @@ derived from `skillet-design.md` and an external best-practice cross-reference
   gap its own spotlighted phase, per the dependency-honest + Northstar-forward
   decisions and the walking-skeleton / error-analysis-first cross-reference.
 
+## Candidate Enhancements (pending design §14 sign-off)
+
+From the v0.8 design competitive cross-reference, **staged as design open questions and not yet in
+the phase plan**. Each graduates into a phase once its §14 question is decided; until then the
+phases and the v1 scope line are unchanged.
+
+- **Deterministic process-assertions over the Trace** → design **§14-9** (with a metrics/events
+  schema-split sub-question). Free, judge-free assertions (skill loaded? tool-calls in order? within
+  budget?) before the paid judge, extending the Phase 2 trigger axis.
+- **Ablation arms** → design **§14-10**. Partial-skill A/B (drop a section / reference / rule) to
+  isolate which part of a skill earns its tokens — feeds *evidence-to-edit ratio*. Touches the
+  Phase 6 `run --ab` / `SkillSet`.
+
 ## Change Log
 
+- v1.7.0 (2026-06-24): MINOR — added **Phase 8 F13 — skill-bundle integrity lint group** (static
+  checks that bundled `scripts/` are self-contained / non-interactive / `--help`-capable, that
+  referenced script/asset paths resolve, and that no files are orphaned or outside the spec dirs) —
+  the second cross-reference lint group beside F12, from Skill-Lab's Structure/Content bundle checks
+  + AWS `skill-eval`'s skill-standard-directory scan; no settled-decision touch. Also synced the
+  stale **Phase 8 overview bullet** to name the security + bundle-integrity groups (design→roadmap
+  drift surfaced by the F12/F13 adds). Design doc → v0.11 (§13 v1.x). No v1 scope change.
+- v1.6.0 (2026-06-24): MINOR — **adopted held-out proof (R2 / design §14-8)** and graduated it from
+  *Candidate Enhancements* into **Phase 6 (new F5)**: a `skill_md` edit is `proven` only when a
+  held-out sibling eval (same failure class, not the one it was drafted from) also passes — guarding
+  against overfit proof and hardening the *corroboration integrity* outcome. Encoded in design §8
+  (Held-out proof gate), §5.2 (`gates.proof.require_holdout`, default on; advisory per D6, enforced
+  under `--strict`), §6.1 `iterate --mark`; design doc → v0.10. §14-9/§14-10 stay parked.
+- v1.5.0 (2026-06-24): MINOR — acted on the v0.8 competitive cross-reference under a **strict
+  evidence bar**. Added **Phase 8 F12 — skill-security lint rules** (security tier in the
+  `SKILL-Lxxx` catalog: prompt-injection, evaluator-manipulation, unicode-obfuscation,
+  YAML-anomaly, suspicious-size; from Skill-Lab + AWS `skill-eval` + SkillTester) — the one finding
+  with no settled-decision touch. **Staged three more as design open questions** (not in the phase
+  plan until decided), mirrored in the new *Candidate Enhancements* section: §14-8 held-out proof
+  (R2), §14-9 process-assertions over the `Trace` (R3 + R7 sub-question), §14-10 ablation arms (R5).
+  Evaluated and **deferred** three: failure-clustering in triage (single, uncertain source —
+  revisit when Phase 4 is built), a microsoft/skills fixture corpus (a testing asset, not a
+  research-revealed gap), and reinforcing the autonomous-optimizer non-goal (already covered by the
+  v0.8 §1 / Appendix C edits). Design doc → v0.9. No v1 scope change.
+- v1.4.2 (2026-06-24): PATCH — **trademark risk narrowed** from the v0.8 design-doc
+  competitive cross-reference: a June-2026 GitHub sweep found no `skillet` name collision *inside
+  the eval space* (only PAN's non-eval product family conflicts), so the Global Risks trademark
+  bullet is updated. Risk register only — the pre-launch trademark check still stands; no phase,
+  feature, or priority change.
 - v1.4.1 (2026-06-21): PATCH — Phase 1 **F6 (claude-code adapter) implemented** (validatable core):
   `ClaudeCodeAdapter` (native-JSONL→`Trace` parser, golden vs a synthetic fixture), `BinaryResolver`,
   `Denylist`, and `probe`/`verifySkillVisibility` behind a fakeable launcher; live `run` stays F7.

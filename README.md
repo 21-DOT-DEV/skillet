@@ -4,6 +4,9 @@
 agent skills: capture real runs, turn hand-fixes into structured evidence, and ship a `SKILL.md`
 edit only after a previously-failing eval proves it.
 
+Where autonomous skill *optimizers* (SkillOpt, EvoSkill) auto-accept or auto-commit their edits,
+skillet drafts and proves — **a human lands every write**.
+
 > **Status — Phase 1 (walking skeleton), in progress.** F1 (project discovery & output contract),
 > F2 (`skillet init`), F5 (trace & harness seam), and F6 (claude-code adapter) have landed; the rest
 > of the loop lights up across later phases. See [ROADMAP.md](ROADMAP.md).

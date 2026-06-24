@@ -40,11 +40,21 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         guard output.exitCode == 0 else { throw EDDError.harnessNotFound(harness: "claude-code") }
         let version = Self.parseVersion(output.stdout)
         let bypassed = environment["SKILLET_ALLOW_BANNED_CLAUDE_CODE"] != nil
-        if case let .refused(version) = denylist.check(version: version, pinned: resolved.isPinned, bypassed: bypassed) {
+        var warnings: [String] = []
+        switch denylist.check(version: version, pinned: resolved.isPinned, bypassed: bypassed) {
+        case .allowed:
+            break
+        case let .refused(version):
+            // Explicitly pinned + banned → hard error, never a silent swap (§9.1).
             throw EDDError.harnessBanned(harness: "claude-code", version: version)
+        case let .warnedFallback(version):
+            // Auto-discovered + banned → loud notice, but not fatal. Falling back to a non-banned
+            // binary is a documented seam (the resolver returns a single candidate today); F7.
+            warnings.append("claude-code \(version) is on the known-bad denylist (§9.1); "
+                + "pin a non-banned version, or set SKILLET_ALLOW_BANNED_CLAUDE_CODE=1 to override")
         }
         // Auth: a real check is env-gated (F7). F6 reports available + assumes authenticated.
-        return HarnessInfo(id: id, version: version, authenticated: true, available: true)
+        return HarnessInfo(id: id, version: version, authenticated: true, available: true, warnings: warnings)
     }
 
     public func verifySkillVisibility(_ skill: SkillRef, strategy: InjectionStrategy) throws {
@@ -75,15 +85,20 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
     // MARK: - Parsing (native session JSONL → Trace)
 
     /// Parse claude-code's native session JSONL into the normalized `Trace`. Control lines
-    /// (`ai-title`/`last-prompt`/`queue-operation`/`attachment`) are skipped; `user`/`assistant`
-    /// lines become turns; a `tool_use` named `Skill` is a skill invocation; `Write`/`Edit` file
-    /// paths feed the workspace diff. `usage` stays `nil` (v1.x, §13). Lenient by design — a
-    /// malformed line is skipped, never fatal.
+    /// (`ai-title`/`last-prompt`/`queue-operation`/`attachment`/`system`) are skipped. Real
+    /// conversational turns are `assistant` lines and `user` lines that carry `text` — a `user` line
+    /// whose content is only `tool_result` blocks is the back-half of a tool round-trip, **not a
+    /// turn** (in real sessions these outnumber genuine user turns ~5:1), so it does not become a
+    /// `Turn`. The authoritative workspace diff comes from each result line's `toolUseResult`
+    /// (`create`→added, `update`→modified) — the request input only attributes per-turn
+    /// `filesTouched`. A `tool_use` named `Skill` is a skill invocation. `usage` stays `nil` (v1.x,
+    /// §13); deletions and failed/`is_error` tool results are not yet modeled (documented F6 gaps).
+    /// Lenient by design — a malformed line is skipped, never fatal.
     static func parse(jsonl: String) -> Trace {
         var turns: [Turn] = []
         var skillInvocations: [SkillInvocation] = []
-        var written: [String] = []
-        var edited: [String] = []
+        var created: [String] = []
+        var updated: [String] = []
         var version = "unknown"
         var startedAt: Date?
         var endedAt: Date?
@@ -98,18 +113,34 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
                 endedAt = stamp
             }
 
+            // Authoritative file changes come from the result, not the request (a requested-but-failed
+            // Write must not count). `toolUseResult` rides on the `user` tool_result line.
+            if let result = object["toolUseResult"] as? [String: Any],
+               let filePath = result["filePath"] as? String {
+                switch result["type"] as? String {
+                case "create": created.append(filePath)
+                case "update": updated.append(filePath)
+                default: break
+                }
+            }
+
             let message = object["message"] as? [String: Any]
             let role: Turn.Role = (message?["role"] as? String) == "assistant" ? .assistant : .user
             let content = message?["content"] as? [[String: Any]] ?? []
+
+            // A user line with no `text` block is a tool-result round-trip, not a turn (Gap A).
+            let hasText = content.contains { $0["type"] as? String == "text" }
+            if role == .user && !hasText { continue }
+
             let turnIndex = turns.count
-            var text = ""
+            var texts: [String] = []
             var toolCalls: [ToolCall] = []
             var filesTouched: [String] = []
 
             for block in content {
                 switch block["type"] as? String {
                 case "text":
-                    text += block["text"] as? String ?? ""
+                    if let t = block["text"] as? String { texts.append(t) }
                 case "tool_use":
                     let name = block["name"] as? String ?? ""
                     let input = block["input"] as? [String: Any]
@@ -117,19 +148,16 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
                     if name == "Skill", let skill = input?["skill"] as? String {
                         skillInvocations.append(SkillInvocation(skill: skill, turnIndex: turnIndex))
                     }
-                    if let filePath = input?["file_path"] as? String {
-                        filesTouched.append(filePath)
-                        if name == "Write" { written.append(filePath) } else if name == "Edit" { edited.append(filePath) }
-                    }
+                    if let filePath = input?["file_path"] as? String { filesTouched.append(filePath) }
                 default:
                     break
                 }
             }
-            turns.append(Turn(role: role, text: text, toolCalls: toolCalls, filesTouched: filesTouched, at: stampOrEpoch(startedAt, endedAt)))
+            turns.append(Turn(role: role, text: texts.joined(separator: "\n"), toolCalls: toolCalls, filesTouched: filesTouched, at: stampOrEpoch(startedAt, endedAt)))
         }
 
-        let added = Array(Set(written)).sorted()
-        let modified = Array(Set(edited).subtracting(added)).sorted()
+        let added = Array(Set(created)).sorted()
+        let modified = Array(Set(updated).subtracting(added)).sorted()
         let zero = Date(timeIntervalSince1970: 0)
         return Trace(
             harness: "claude-code",

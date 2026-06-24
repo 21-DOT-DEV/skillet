@@ -40,9 +40,17 @@ struct ProbeTests {
         }
     }
 
-    @Test("An auto-discovered banned version warns + falls back (probe still returns)")
+    @Test("An auto-discovered banned version surfaces a loud warning, but probe still returns")
     func bannedAuto() async throws {
         let info = try await adapter(version: "2.1.143", pathLookup: ["claude": "/usr/bin/claude"]).probe()
         #expect(info.version == "2.1.143")
+        #expect(info.available)
+        #expect(info.warnings.contains { $0.contains("2.1.143") && $0.contains("denylist") })
+    }
+
+    @Test("A clean auto-discovered version carries no warnings")
+    func cleanHasNoWarnings() async throws {
+        let info = try await adapter(version: "2.1.146", pathLookup: ["claude": "/usr/bin/claude"]).probe()
+        #expect(info.warnings.isEmpty)
     }
 }

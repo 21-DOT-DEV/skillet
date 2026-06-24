@@ -38,7 +38,7 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 ## Commands (true now — Phase 1 / F1–F2, F5, F6)
 
 - `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`).
-- `swift test` — run the unit + integration suites (76 tests, all green). The integration suite drives
+- `swift test` — run the unit + integration suites (79 tests, all green). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
   `skillet init --json`, `skillet harness list`, `skillet harness info [--json]`, `skillet --help`, `skillet --version`.

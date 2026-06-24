@@ -53,6 +53,18 @@ long-deferred **`swift-yaml`**, isolated in a `ConfigYAML` target so the pure co
 - **`Trace.usage` population** → v1.x (§13); `parseTrace` leaves it `nil`.
 - **Vendored-binary search** (the `harness which --search` recursive finder) → minimal/stub now; full later.
 
+### Known gaps (post-implementation, tracked)
+A follow-up pass corrected the parser against the **real** `~/.claude` native format (tool-result `user`
+lines are no longer counted as turns; `workspaceDiff` is derived from each result's `toolUseResult`
+rather than the request input) and made the auto-discovered-banned case surface a **loud notice** via
+`HarnessInfo.warnings`. These remain open, by design:
+- **(C) Deletions not modeled** — `Trace.workspaceDiff.deleted` is always empty (no `delete` `toolUseResult.type` observed in the sampled format). → Phase 2+.
+- **(D) Failed/`is_error` tool results not captured** — a `Skill` invocation is recorded even when its result errored, which is exactly the failure mode the `2.1.143` denylist seed exists for. → Phase 2+.
+- **(#3) Missing/unresolved binary surfaces a raw launcher error**, not a P6 what/why/fix message; the live launch path is **F7**-gated (env-gated smoke).
+- **(Automatic denylist fallback)** — notice-only today; falling back to a non-banned binary needs the resolver to enumerate candidates. → F7.
+
+*(Resolved in the same pass: F — `InitReport.created` now lists the `evaluations/` parent dir, which the planner emits as an explicit, idempotent `createDirectory` action.)*
+
 ---
 
 ## 3. Architecture (targets touched)

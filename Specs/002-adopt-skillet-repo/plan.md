@@ -34,7 +34,7 @@ docs are checked, not just written.
 - **`skillet init [--skill <path>…] [--json]`** — the executable's first subcommand (F1 root overview preserved).
 - Write repo-root **`skillet.yaml`** from the canonical commented template (design §5.2) — **text, Foundation only, no `swift-yaml`**.
 - **Discover skills** = directories containing `SKILL.md` under `skills_root` (default `skills`), or explicit `--skill` paths.
-- Per skill, scaffold **`<skill>/evaluations/{friction,findings,sessions}/`** (+ `.gitkeep`).
+- Per skill, scaffold **`<skill>/evaluations/{friction,findings,sessions}/`** (+ a directory-keeping `.gitignore` that ignores nothing — not a `.gitkeep`; see [Adam Johnson, "Don't create `.gitkeep`"](https://adamj.eu/tech/2023/09/18/git-dont-create-gitkeep/)).
 - Write **`.skillet/.gitignore`** containing `*` (self-owned cache ignore) — repo-root `.gitignore` **never** touched (clig.dev: don't edit config that isn't ours).
 - **Idempotent:** create-missing-only, never overwrite, report created vs. skipped.
 - **Empty repo** (no skills): write `skillet.yaml`, create an empty `skills/` root, guide the user to add a `SKILL.md`.
@@ -83,7 +83,7 @@ that contain a `SKILL.md` (design §4). Needs directory *listing*, so extend `Di
 - `InitPlanner` (pure; reads via `DirectoryProbe`): repo root + `skills_root` + discovered skills +
   current FS state → an `InitPlan` = ordered `[InitAction]` (`createDirectory` / `writeFile`), **only
   for missing targets** (idempotency by construction). Actions: `skillet.yaml`; `.skillet/.gitignore`
-  (`*`); per-skill `evaluations/{friction,findings,sessions}/` + `.gitkeep`; `skills/` root when none exist.
+  (`*`); per-skill `evaluations/{friction,findings,sessions}/` + a directory-keeping `.gitignore`; `skills/` root when none exist.
 - `InitExecutor` (effectful; `FileSystemWriter` seam): applies the plan → `InitReport`
   `{ created: [String], skipped: [String], skills: [String] }`.
 - `FileSystemWriter` protocol (`createDirectory`, `writeFile`) + real impl + in-memory fake (tests).

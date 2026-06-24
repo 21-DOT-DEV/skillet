@@ -68,9 +68,10 @@ struct HarnessInfoCommand: AsyncParsableCommand {
             Console.emit(Rendering(stdout: try SkilletJSON.encode(report) + "\n"))
         } else {
             let rows = report.adapters.map { adapter -> [String] in
-                let status = adapter.available
+                var status = adapter.available
                     ? "available (\(adapter.version ?? "?"))"
                     : (adapter.detail ?? "unavailable")
+                for warning in adapter.warnings { status += "  ⚠️ \(warning)" }
                 return [adapter.id, adapter.capabilities.joined(separator: ", "), status]
             }
             Console.emit(renderer.renderTable(["ADAPTER", "CAPABILITIES", "STATUS"], rows))

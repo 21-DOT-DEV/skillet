@@ -26,17 +26,20 @@ public enum InjectionStrategy: Sendable {
     case inlineContext
 }
 
-/// The result of `probe()`: presence, version, and auth.
+/// The result of `probe()`: presence, version, auth, and any non-fatal warnings (e.g. an
+/// auto-discovered binary on the denylist — surfaced loudly, but not refused; §9.1).
 public struct HarnessInfo: Sendable, Equatable {
     public var id: HarnessID
     public var version: String
     public var authenticated: Bool
     public var available: Bool
-    public init(id: HarnessID, version: String, authenticated: Bool, available: Bool) {
+    public var warnings: [String]
+    public init(id: HarnessID, version: String, authenticated: Bool, available: Bool, warnings: [String] = []) {
         self.id = id
         self.version = version
         self.authenticated = authenticated
         self.available = available
+        self.warnings = warnings
     }
 }
 

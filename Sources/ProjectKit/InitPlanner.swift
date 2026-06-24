@@ -59,10 +59,14 @@ public struct InitPlanner: Sendable {
         } else {
             for skill in skills {
                 let evaluations = skill.appendingPathComponent("evaluations")
+                directory(evaluations)
                 for sub in ["friction", "findings", "sessions"] {
                     let dir = evaluations.appendingPathComponent(sub)
                     directory(dir)
-                    file(dir.appendingPathComponent(".gitkeep"), "")
+                    // Keep each otherwise-empty evidence directory tracked with a Git-recognized
+                    // `.gitignore` (not a made-up `.gitkeep`) so it survives renames. It ignores
+                    // nothing — evidence committed here is tracked normally (D3).
+                    file(dir.appendingPathComponent(".gitignore"), "# Keep this evidence directory tracked even when empty.\n")
                 }
             }
         }

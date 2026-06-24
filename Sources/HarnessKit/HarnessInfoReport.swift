@@ -14,12 +14,14 @@ public struct HarnessInfoReport: SchemaIdentified, Sendable, Equatable {
         public let available: Bool
         public let version: String?
         public let detail: String?
-        public init(id: String, capabilities: [String], available: Bool, version: String?, detail: String?) {
+        public let warnings: [String]
+        public init(id: String, capabilities: [String], available: Bool, version: String?, detail: String?, warnings: [String] = []) {
             self.id = id
             self.capabilities = capabilities
             self.available = available
             self.version = version
             self.detail = detail
+            self.warnings = warnings
         }
     }
 
@@ -36,7 +38,8 @@ public struct HarnessInfoReport: SchemaIdentified, Sendable, Equatable {
                     capabilities: capabilities,
                     available: info.available,
                     version: info.version,
-                    detail: info.authenticated ? nil : "not authenticated"
+                    detail: info.authenticated ? nil : "not authenticated",
+                    warnings: info.warnings
                 ))
             } catch HarnessError.notImplemented(let message) {
                 infos.append(AdapterInfo(id: adapter.id.rawValue, capabilities: capabilities, available: false, version: nil, detail: message))

@@ -2,7 +2,8 @@
 
 **Status:** IN PROGRESS — F1, F2, F5, F6 complete
 **Horizon:** Now
-**Last Updated:** 2026-06-21
+**Last Updated:** 2026-06-23
+**Review:** completed-items cross-artifact audit → [phase-1-review.md](phase-1-review.md)
 
 ## Goal
 
@@ -67,8 +68,9 @@ sequence is re-ordered.
    - Success metrics:
      - A recorded Claude Code session (native JSONL) parses into a `Trace` — turns, tool calls, file changes, skill invocations — golden-tested vs a **synthetic** fixture mirroring the native format (real logs are not committed — constitution VI; the parser is re-derived from the live format, the predecessor port being absent).
      - The binary resolution chain (flag > env > config > PATH; vendored deferred) selects the right link and records which one won (the source is captured + printable; `harness which` surfaces it later).
-     - A seed-denylist version is refused when pinned (exit `3`), or warned + fallen-back-from when auto-discovered.
+     - A seed-denylist version is refused when pinned (exit `3`); when auto-discovered it surfaces a **loud notice** (carried as `HarnessInfo.warnings`, shown by `harness info` on the TTY and in `--json`) but is not fatal. *Automatic fallback to a non-banned binary is a documented seam — the resolver returns a single candidate today; F7.*
      - `probe()` and `verifySkillVisibility` are implemented behind a fakeable process-launcher seam (logic unit-tested); `probe`'s live version/auth call is validated only by F7's opt-in env-gated smoke (claude-code isn't runnable in CI).
+   - Known F6 gaps (tracked, by design): (C) `Trace.workspaceDiff.deleted` is always empty — deletions aren't modeled yet; (D) failed/`is_error` tool results are not captured, so a `Skill` invocation is recorded even when it errored; (#3) a missing/unresolved binary surfaces a raw launcher error rather than a P6 what/why/fix message — the live path is F7-gated. C/D/#3 land with their consumers (Phase 2+/F7).
    - Dependencies: Trace & adapter seam (F5). Needs a synthetic claude-code-format fixture; live paths are env-gated (claude-code unavailable in CI).
    - Confidence: Medium — design §9, §13.
    - Plan: [Specs/004-claude-code-adapter/plan.md](../Specs/004-claude-code-adapter/plan.md)
@@ -234,3 +236,14 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
   confirmed C++ interop is **viral to direct importers**, so the executable is a `.Cxx` leaf while every
   kit + the pure core stay interop-free. 76 unit + integration tests green. Plan:
   [Specs/004](../Specs/004-claude-code-adapter/plan.md).
+- 2026-06-23: PATCH — F6 correctness pass against the **real** `~/.claude` native format (read-only,
+  not committed — constitution VI). Fixed three parser defects the self-referential synthetic fixture
+  had masked: (A) tool-result `user` lines are no longer counted as conversational turns (they
+  outnumber real user turns ~5:1 in live sessions); (B) `workspaceDiff` is now derived from each
+  result's `toolUseResult` (`create`→added, `update`→modified) instead of the request input; (E)
+  multiple text blocks in a turn join with a newline. The denylist auto-discovered-banned case now
+  surfaces a **loud notice** via the new additive `HarnessInfo.warnings` (shown by `harness info` on the
+  TTY + in `--json`); automatic fallback stays an F7 seam. Synthetic fixture + tests rewritten to assert
+  the correct native-format behavior. Also fixed F2's `InitReport` (F): it now lists the auto-created
+  `evaluations/` parent dir. Deletions (C), `is_error` results (D), and the raw-error-vs-P6 message (#3)
+  are logged as tracked gaps. 79 tests green.

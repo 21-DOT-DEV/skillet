@@ -18,3 +18,4 @@ roadmap re-phasing.
 | 003 | Normalized trace & harness-adapter seam | 1 · F5 | Implemented | [plan.md](003-normalized-trace-harness-seam/plan.md) |
 | 004 | claude-code adapter (trace parser, resolution & probe) | 1 · F6 | Implemented | [plan.md](004-claude-code-adapter/plan.md) |
 | 005 | Free static lint — error-tier core (`skillet lint`) | 1 · F4 | Planned | [plan.md](005-free-static-lint/plan.md) |
+| 006 | Frozen boundary-format codecs + golden tests | 1 · F8 | Implemented | [plan.md](006-frozen-boundary-codecs/plan.md) |

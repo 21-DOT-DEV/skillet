@@ -4,7 +4,7 @@
 CLI for eval-driven development (EDD) of agent skills: capture real runs, turn hand-fixes into
 structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
 
-> **Status: Phase 1 in progress — F1, F2, F5, F6 landed.** The walking skeleton has begun. `Package.swift` plus
+> **Status: Phase 1 in progress — F1, F2, F5, F6, F8 landed.** The walking skeleton has begun. `Package.swift` plus
 > `EDDCore`, `TraceKit`, `ProjectKit`, `RenderKit`, `HarnessKit`, `ConfigYAML`, and the `skillet` executable exist, with unit + integration
 > tests green (`swift build && swift test`). **F1 (project discovery & output contract) is
 > implemented**: `skillet` explains the loop, `-C <dir>`, `--json` (schema-tagged), `--color`/`NO_COLOR`,
@@ -80,9 +80,10 @@ from the first commit.
 - **Config is YAML** (`skillet.yaml`). `config set` rewrites targeted lines in place
   (swift-yaml does not preserve comments on re-emit). YAML is for human-editable *policy*, never
   *behavior* (design §7.6).
-- **Frozen boundary formats are contracts**: `evals.json`, `trigger-eval.json`, `benchmark.json`,
-  SARIF 2.1.0, and session bundles never break — enforced by golden fixtures. Enumerate *all*
-  decoded fields in goldens and round-trip unknown keys. `--json` payloads carry a `schema` field
+- **Frozen boundary formats are contracts**: `evals.json`, `trigger-eval.json`, `benchmark.json` +
+  the run-record family (`grading.json`, `timing.json`, `metrics.json`, `eval_metadata.json`),
+  SARIF 2.1.0, and session bundles never break — enforced by golden fixtures (F8 lands the EDDCore
+  `Boundary/` codecs for these). Enumerate *all* decoded fields in goldens and round-trip unknown keys. `--json` payloads carry a `schema` field
   and are additive within a major. Exit codes are a stable API. Human TTY output is *not* an API.
 - **Every command** offers `--json`, supports `-h`/`--help`, ends by suggesting the next sensible
   command (only ones that actually exist), and fails with a message stating what/why/the fixing command.

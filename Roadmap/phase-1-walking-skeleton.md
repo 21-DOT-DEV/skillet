@@ -1,6 +1,6 @@
 # Phase 1 — Walking Skeleton: Prove the Loop End-to-End
 
-**Status:** IN PROGRESS — F1, F2, F5, F6 complete
+**Status:** IN PROGRESS — F1, F2, F5, F6, F8 complete
 **Horizon:** Now
 **Last Updated:** 2026-06-23
 **Review:** completed-items cross-artifact audit → [phase-1-review.md](phase-1-review.md)
@@ -83,7 +83,7 @@ sequence is re-ordered.
    - Success metrics:
      - Flags an over-long description (`SKILL-L001`) and a missing/short `evals.json` (`SKILL-L009`) on fixtures, exiting `1` on any error-tier finding.
      - Stable diagnostic IDs + fix-hints in TTY; exemptions read from the `[lint]` knob table, not inline pragmas.
-   - Dependencies: Project discovery (F1).
+   - Dependencies: Project discovery (F1); **F8** (the `evals.json` codec — re-sequenced ahead of F4).
    - Confidence: Medium — design §6.1 `lint`.
    - Notes: Phase 1 ships the error-tier subset `doctor` depends on; the full
      5-rule catalog + SARIF lands in Phase 2. Error-tier core = `L001` + `L003` + `L009` (full tiers).
@@ -101,17 +101,18 @@ sequence is re-ordered.
    - Dependencies: HarnessAdapter seam (F5), claude-code adapter (F6); also `swift-yaml` (config parsing) and error-tier `lint` (F4, surfaced in `doctor`).
    - Confidence: Medium — design §6.1 `doctor`, §9.2.
 
-7. **[F8]** Frozen boundary codecs + golden tests (`evals.json`, `benchmark.json`) — PLANNED · Ported
-   - Purpose & user value: Read/write the de-facto-standard eval and benchmark
-     formats byte-compatibly so existing skill-creator tooling and the eval-viewer
-     keep working unchanged — the promise that adopting skillet costs nothing
-     downstream (D5).
+7. **[F8]** Frozen boundary codecs + golden tests (skill-creator 2.0 family) — DONE · Ported
+   - Purpose & user value: Read/write the de-facto-standard eval / benchmark / run-record
+     formats byte-compatibly (unknown keys preserved) so existing skill-creator tooling and
+     the eval-viewer keep working unchanged — adopting skillet costs nothing downstream (D5).
+     Grounded against **Anthropic skill-creator 2.0** + real `~/Developer/skills` artifacts.
    - Northstar: loop integrity (ecosystem compatibility).
    - Success metrics:
-     - `evals.json` and `benchmark.json` round-trip with unknown keys preserved (`Tests/Golden/boundary/` passes).
-     - A `run` updates `benchmark.json` in a form the legacy Python viewer renders unmodified.
-   - Dependencies: none (EDDCore codecs).
-   - Confidence: Medium — design §7.2, §13.
+     - `evals.json` decodes the **2.0 object** *and* the legacy array into one model with a correct case count; the run-record family (`benchmark.json`, `grading.json`, `timing.json`, `metrics.json`), `trigger-eval.json`, and a SARIF 2.1.0 subset round-trip with unknown keys preserved (golden-tested, synthetic fixtures).
+     - §7.2 reconciled to the current Anthropic shapes; `scorecard.json` explicitly *not* adopted; full session-*bundle* assembly deferred to Phase 3.
+   - Dependencies: none (EDDCore codecs). **Re-sequenced before F4** — F4's `L009` consumes the `evals.json` codec.
+   - Confidence: Medium — design §7.2, §13; Anthropic `references/schemas.md`.
+   - Plan: [Specs/006-frozen-boundary-codecs/plan.md](../Specs/006-frozen-boundary-codecs/plan.md)
 
 8. **[F7]** The neutral runner — behavioral axis + pass^k (CLI: `skillet run`) — PLANNED · Ported
    - Purpose & user value: The entry point (D2) — execute a skill's behavioral
@@ -135,9 +136,7 @@ sequence is re-ordered.
 
 ## Dependencies & Sequencing
 
-- **Build order (dependency-honest):** F1 → F2 *(done)* → F5 (adapter seam) → F6 (claude-code
-  adapter) → F4 (lint) → F3 (`doctor`) → F8 (boundary codecs) → F7 (`run`). The Key Features list is
-  in this order; **Fn** ids are stable and independent of position.
+- **Build order (dependency-honest):** F1 → F2 *(done)* → F5 → F6 *(done)* → **F8 (boundary codecs)** → F4 (lint) → F3 (`doctor`) → F7 (`run`). F8 moved ahead of F4 — F4's `L009` consumes the `evals.json` codec. **Fn** ids are stable and independent of position; the Key Features list is grouped by id, not strictly by build order.
 - Local dependencies: `doctor` (F3) needs the adapter seam (F5) + claude-code adapter (F6) +
   `swift-yaml` (config parsing) + error-tier `lint` (F4, which it surfaces); the runner (F7) needs the
   claude-code adapter (F6) + boundary codecs (F8) + the text judge; `lint` (F4) and `init` (F2) need
@@ -248,3 +247,19 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
   the correct native-format behavior. Also fixed F2's `InitReport` (F): it now lists the auto-created
   `evaluations/` parent dir. Deletions (C), `is_error` results (D), and the raw-error-vs-P6 message (#3)
   are logged as tracked gaps. 79 tests green.
+- 2026-06-24: MINOR re-sequence + scope — **F8 (frozen boundary codecs) moved ahead of F4** (F4's `L009`
+  consumes the `evals.json` codec). F8's scope expanded + grounded against **Anthropic skill-creator 2.0**
+  (`references/schemas.md`) cross-referenced with real `~/Developer/skills` artifacts: `evals.json` decodes
+  the 2.0 object **and** the legacy array; the run-record family (`benchmark.json` / `grading.json` /
+  `timing.json` / `metrics.json`) + `trigger-eval.json` + a SARIF 2.1.0 subset get codecs+goldens;
+  `scorecard.json` is *not* adopted (local-only); full session-bundle assembly defers to Phase 3; §7.2
+  reconciliation is an F8 task. Plan: [Specs/006](../Specs/006-frozen-boundary-codecs/plan.md). New build
+  order: F1, F2, F5, F6, F8, F4, F3, F7.
+- 2026-06-24: F8 (frozen boundary codecs) implemented — `EDDCore/Boundary/`: `JSONValue` (opaque, with an
+  `extra` catch-all for unknown-key round-tripping, since synthesized `Codable` drops unknowns) +
+  `jsonSemanticEqual` (semantic golden compare, not `sortedKeys` bytes — not portable Darwin/Linux);
+  `EvalsFile` (2.0 + legacy + local aliases, faithful both-shape round-trip, `caseCount` unblocks F4); the
+  run-record family (`BenchmarkFile`/`GradingFile`/`TimingFile`/`MetricsFile`/`EvalMetadataFile` via a
+  `RawJSONObject` protocol); `TriggerEvalFile`; `SarifLog` + `SarifRole`. Grounded by the deep-research
+  pass. 95 tests green. §7.2 *prose* reconciliation still pending (code is built to the 2.0 shapes).
+  Plan: [Specs/006](../Specs/006-frozen-boundary-codecs/plan.md).

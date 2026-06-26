@@ -30,6 +30,34 @@ enum Fixture {
         return root
     }
 
+    /// A discoverable project (`skillet.yaml`) with one skill — frontmatter built from `description`,
+    /// plus `evals` eval cases (nil = no `evals.json`) — for exercising `skillet lint`.
+    static func makeLintRepo(
+        skill: String = "demo",
+        description: String,
+        body: String = "# demo\nbody\n",
+        evals: Int? = 3
+    ) throws -> URL {
+        let root = try makeTempDirectory()
+        try "project:\n  skills_root: skills\n".write(
+            to: root.appendingPathComponent("skillet.yaml"), atomically: true, encoding: .utf8
+        )
+        let dir = root.appendingPathComponent("skills/\(skill)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try "---\nname: \(skill)\ndescription: \(description)\n---\n\(body)".write(
+            to: dir.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8
+        )
+        if let evals {
+            let evalDir = dir.appendingPathComponent("evaluations", isDirectory: true)
+            try FileManager.default.createDirectory(at: evalDir, withIntermediateDirectories: true)
+            let cases = (0..<evals).map { #"{"id":\#($0),"prompt":"p\#($0)","expectations":["x"]}"# }.joined(separator: ",")
+            try #"{"skill_name":"\#(skill)","evals":[\#(cases)]}"#.write(
+                to: evalDir.appendingPathComponent("evals.json"), atomically: true, encoding: .utf8
+            )
+        }
+        return root
+    }
+
     static func remove(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
     }

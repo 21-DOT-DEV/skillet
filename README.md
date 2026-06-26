@@ -8,7 +8,8 @@ Where autonomous skill *optimizers* (SkillOpt, EvoSkill) auto-accept or auto-com
 skillet drafts and proves — **a human lands every write**.
 
 > **Status — Phase 1 (walking skeleton), in progress.** F1 (project discovery & output contract),
-> F2 (`skillet init`), F5 (trace & harness seam), and F6 (claude-code adapter) have landed; the rest
+> F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), and F6 (claude-code adapter)
+> have landed; the rest
 > of the loop lights up across later phases. See [ROADMAP.md](ROADMAP.md).
 
 ## How it works
@@ -35,7 +36,7 @@ You **adopt** skillet once (`init`), then loop: **measure** with `run` (each eva
 for a `pass^k` consistency score), **discover** real failures via `capture`/`friction`, **interpret**
 them with `triage` — `next` names the single highest-value action — then **fix and prove** the change
 with `suggest`/`iterate` in a throwaway worktree, and re-run. Free `lint` checks gate every paid
-`run`. Today `skillet init` ships (plus `skillet harness info` for setup); the rest lands across the
+`run`. Today `skillet init` and `skillet lint` ship (plus `skillet harness info` for setup); the rest lands across the
 roadmap phases.
 
 ## Install
@@ -57,6 +58,8 @@ skillet --json              # machine-readable project context (schema: skillet.
 skillet -C path/to/repo     # operate as if started in another directory
 skillet init                # adopt skillet in the current repo (idempotent)
 skillet init --json         # report created/skipped paths (schema: skillet.init/1)
+skillet lint                # free static analysis of SKILL.md (exit 1 on error-tier findings)
+skillet lint --json         # machine-readable findings (schema: skillet.lint/1)
 skillet harness info        # harness adapters, capabilities, probe status
 skillet harness info --json # machine-readable (schema: skillet.harness-info/1)
 ```

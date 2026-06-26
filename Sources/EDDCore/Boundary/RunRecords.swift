@@ -26,8 +26,8 @@ public struct GradingFile: RawJSONObject {
     public var expectations: [JSONValue] { fields["expectations"]?.arrayValue ?? [] }
     public var summary: [String: JSONValue]? { fields["summary"]?.objectValue }
     public var passRate: Double? { summary?["pass_rate"]?.numberValue }
-    public var passed: Int? { summary?["passed"]?.numberValue.map(Int.init) }
-    public var total: Int? { summary?["total"]?.numberValue.map(Int.init) }
+    public var passed: Int? { summary?["passed"]?.numberValue.flatMap { Int(exactly: $0) } }
+    public var total: Int? { summary?["total"]?.numberValue.flatMap { Int(exactly: $0) } }
 }
 
 /// `timing.json` — `{total_tokens, duration_ms, total_duration_seconds, …}`.
@@ -35,8 +35,8 @@ public struct TimingFile: RawJSONObject {
     public var fields: [String: JSONValue]
     public init(fields: [String: JSONValue]) { self.fields = fields }
 
-    public var totalTokens: Int? { fields["total_tokens"]?.numberValue.map(Int.init) }
-    public var durationMs: Int? { fields["duration_ms"]?.numberValue.map(Int.init) }
+    public var totalTokens: Int? { fields["total_tokens"]?.numberValue.flatMap { Int(exactly: $0) } }
+    public var durationMs: Int? { fields["duration_ms"]?.numberValue.flatMap { Int(exactly: $0) } }
 }
 
 /// `metrics.json` — `{tool_calls:{name:count}, total_tool_calls, total_steps, files_created, errors_encountered, …}`.
@@ -45,7 +45,7 @@ public struct MetricsFile: RawJSONObject {
     public init(fields: [String: JSONValue]) { self.fields = fields }
 
     public var toolCalls: [String: JSONValue]? { fields["tool_calls"]?.objectValue }
-    public var totalSteps: Int? { fields["total_steps"]?.numberValue.map(Int.init) }
+    public var totalSteps: Int? { fields["total_steps"]?.numberValue.flatMap { Int(exactly: $0) } }
     public var filesCreated: [String]? { fields["files_created"]?.stringArray }
 }
 

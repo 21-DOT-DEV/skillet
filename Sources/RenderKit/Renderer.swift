@@ -50,6 +50,17 @@ public struct Renderer: Sendable {
         }
     }
 
+    /// `skillet lint`'s output: the diagnostics table + fix hints + a tier summary (human), or the
+    /// `skillet.lint/1` payload (json).
+    public func renderLint(_ report: LintReport, nextSteps: [String]) throws -> Rendering {
+        switch mode {
+        case .json:
+            return Rendering(stdout: try SkilletJSON.encode(report) + "\n")
+        case .human:
+            return Rendering(stdout: humanLint(report, nextSteps: nextSteps))
+        }
+    }
+
     /// A generic aligned table for plumbing/listing output (e.g. `harness info`). Column widths come
     /// from the widest cell; the last column is left unpadded to avoid trailing whitespace.
     public func renderTable(_ headers: [String], _ rows: [[String]]) -> Rendering {
@@ -112,5 +123,30 @@ public struct Renderer: Sendable {
             out += "\n\(bold("→ next:")) \(nextSteps.joined(separator: " · "))\n"
         }
         return out
+    }
+
+    private func humanLint(_ report: LintReport, nextSteps: [String]) -> String {
+        var out = ""
+        if report.diagnostics.isEmpty {
+            out += bold("✓ lint: no findings") + "\n"
+        } else {
+            let rows = report.diagnostics.map { [$0.id, $0.tier.rawValue, $0.skill, $0.message] }
+            out += renderTable(["RULE", "TIER", "SKILL", "MESSAGE"], rows).stdout
+            out += "\n"
+            for diagnostic in report.diagnostics {
+                out += "  \(diagnostic.id) fix: \(diagnostic.fixHint)\n"
+            }
+            out += "\n" + lintSummary(report) + "\n"
+        }
+        if !nextSteps.isEmpty {
+            out += "\(bold("→ next:")) \(nextSteps.joined(separator: " · "))\n"
+        }
+        return out
+    }
+
+    private func lintSummary(_ report: LintReport) -> String {
+        let errors = "\(report.errors) error\(report.errors == 1 ? "" : "s")"
+        let warnings = "\(report.warnings) warning\(report.warnings == 1 ? "" : "s")"
+        return "\(report.errors > 0 ? red(errors) : errors) · \(warnings)"
     }
 }

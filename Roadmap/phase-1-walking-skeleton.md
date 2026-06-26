@@ -1,8 +1,8 @@
 # Phase 1 — Walking Skeleton: Prove the Loop End-to-End
 
-**Status:** IN PROGRESS — F1, F2, F5, F6, F8 complete
+**Status:** IN PROGRESS — F1, F2, F4, F5, F6, F8 complete
 **Horizon:** Now
-**Last Updated:** 2026-06-23
+**Last Updated:** 2026-06-25
 **Review:** completed-items cross-artifact audit → [phase-1-review.md](phase-1-review.md)
 
 ## Goal
@@ -75,14 +75,15 @@ sequence is re-ordered.
    - Confidence: Medium — design §9, §13.
    - Plan: [Specs/004-claude-code-adapter/plan.md](../Specs/004-claude-code-adapter/plan.md)
 
-5. **[F4]** Free static lint — error-tier core (CLI: `skillet lint`) — PLANNED · Ported
+5. **[F4]** Free static lint — error-tier core (CLI: `skillet lint`) — DONE · Ported
    - Purpose & user value: Instant, model-free analysis of the `SKILL.md` source
      so the cheapest lever runs first and gates the expensive ones; error-tier
      findings surface in `doctor` too.
    - Northstar: loop integrity + deterministic-first.
    - Success metrics:
-     - Flags an over-long description (`SKILL-L001`) and a missing/short `evals.json` (`SKILL-L009`) on fixtures, exiting `1` on any error-tier finding.
-     - Stable diagnostic IDs + fix-hints in TTY; exemptions read from the `[lint]` knob table, not inline pragmas.
+     - Flags an over-long description (`SKILL-L001`, counted as Unicode code points to match Anthropic's `quick_validate.py`) and a missing/short `evals.json` (`SKILL-L009`, ≥3) on fixtures, exiting `1` on any error-tier finding.
+     - `SKILL-L003` flags an over-long body (warn >500, error >1000 lines; frontmatter + fenced code excluded).
+     - Stable diagnostic IDs + fix-hints in TTY and `--json` (`skillet.lint/1`); exemptions read from the `[lint]` knob table, not inline pragmas; `LintKit` is pure/interop-free.
    - Dependencies: Project discovery (F1); **F8** (the `evals.json` codec — re-sequenced ahead of F4).
    - Confidence: Medium — design §6.1 `lint`.
    - Notes: Phase 1 ships the error-tier subset `doctor` depends on; the full
@@ -136,7 +137,7 @@ sequence is re-ordered.
 
 ## Dependencies & Sequencing
 
-- **Build order (dependency-honest):** F1 → F2 *(done)* → F5 → F6 *(done)* → **F8 (boundary codecs)** → F4 (lint) → F3 (`doctor`) → F7 (`run`). F8 moved ahead of F4 — F4's `L009` consumes the `evals.json` codec. **Fn** ids are stable and independent of position; the Key Features list is grouped by id, not strictly by build order.
+- **Build order (dependency-honest):** F1 → F2 *(done)* → F5 → F6 *(done)* → **F8 (boundary codecs)** *(done)* → F4 (lint) *(done)* → F3 (`doctor`) → F7 (`run`). F8 moved ahead of F4 — F4's `L009` consumes the `evals.json` codec. **Fn** ids are stable and independent of position; the Key Features list is grouped by id, not strictly by build order.
 - Local dependencies: `doctor` (F3) needs the adapter seam (F5) + claude-code adapter (F6) +
   `swift-yaml` (config parsing) + error-tier `lint` (F4, which it surfaces); the runner (F7) needs the
   claude-code adapter (F6) + boundary codecs (F8) + the text judge; `lint` (F4) and `init` (F2) need
@@ -263,3 +264,12 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
   `RawJSONObject` protocol); `TriggerEvalFile`; `SarifLog` + `SarifRole`. Grounded by the deep-research
   pass. 95 tests green. §7.2 *prose* reconciliation still pending (code is built to the 2.0 shapes).
   Plan: [Specs/006](../Specs/006-frozen-boundary-codecs/plan.md).
+- 2026-06-25: F4 (`skillet lint`) implemented — the free static gate. New pure `LintKit`
+  (`SkillSource` + `Linter`) with the three error-tier rules: `SKILL-L001` (description >1024 **Unicode
+  code points** — matching Anthropic's `quick_validate.py:82`, *not* NFC-normalized or grapheme counts,
+  decided this turn), `SKILL-L003` (body lines, frontmatter + fenced code excluded; warn >500 / error
+  >1000, tunable), `SKILL-L009` (missing evals → error, <3 → warn, consuming F8's `EvalsFile.caseCount`).
+  Plus `ConfigYAML.parseFrontmatter` (folds scalars; typed `FrontmatterError` fail-safe),
+  `ProjectKit.SkillReader`, `EDDCore` `SkillFrontmatter`/`Diagnostic`/`LintReport` (`skillet.lint/1`) +
+  `SkilletConfig.Lint`, and the `skillet lint` command (exit 1 on error-tier, 2 on unknown skill).
+  122 tests green. Plan: [Specs/005](../Specs/005-free-static-lint/plan.md).

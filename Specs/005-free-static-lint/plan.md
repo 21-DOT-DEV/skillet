@@ -4,8 +4,8 @@
 |---|---|
 | **Feature** | F4 — free static `SKILL.md` lint, error-tier core (CLI: `skillet lint`) |
 | **Phase** | 1 — Walking Skeleton ([Roadmap/phase-1-walking-skeleton.md](../../Roadmap/phase-1-walking-skeleton.md), F4) |
-| **Status** | PLANNED → ready to implement |
-| **Last updated** | 2026-06-24 |
+| **Status** | ✅ IMPLEMENTED (2026-06-25) |
+| **Last updated** | 2026-06-26 |
 | **Builds on** | F1 (project discovery, output contract, exit codes); F2 (`evaluations/` scaffolding); F6 (the `ConfigYAML`→pure-model config-link + interop-containment pattern); **F8 (the `evals.json` codec — [Specs/006](../006-frozen-boundary-codecs/plan.md), re-sequenced ahead of F4)** |
 | **Authoritative refs** | design §6.1 `lint` (catalog + tiers + `--format`), §7.1 (repo layout), §7.2 (frozen `evals.json`), §5.2 (`[lint]` knobs + per-skill overlay), §5.4 (exit codes), §11 (`LintKit`, `EDDCore` codecs); constitution I (TDD), III (deterministic core), IV (frozen formats) |
 | **Scope** | **Error-tier core**: `L001` + `L003` + `L009` (full warn+error behavior). `L010`/`L011` (warn-only) + SARIF → Phase 2. |
@@ -79,15 +79,15 @@ skillet (executable, .Cxx)   LintCommand: discover skills → assemble SkillSour
 - `parseFrontmatter(_ markdown: String) throws -> (frontmatter: SkillFrontmatter, body: String)` — split the leading `---…---` block, decode its YAML (so folded/block scalars are resolved for `L001`'s "after folding"), return the remaining body text. **Malformed input is data, not a crash:** absent frontmatter, an unterminated `---` block, or YAML that fails to decode resolves to a typed `FrontmatterError` (not an uncaught throw); `LintCommand` maps it to an **error-tier `SKILL-L001`** diagnostic ("frontmatter missing or unparseable") and skips the length check, so a hostile or garbled skill still lints to a clean exit `1`, not a stack trace. Full key-level conformance (duplicate keys, allowed-keys) stays F3. *(Skill-Lab covers this via its* Valid Frontmatter */* YAML Anomalies *checks; F4 only needs to fail safe.)*
 
 ### 4.3 LintKit (pure)
-- `SkillSource` (pure input): `name`, `frontmatter: SkillFrontmatter`, `body: String`, `evals: EvalsFile?` (nil = file absent).
+- `SkillSource` (pure input): `name`, `frontmatter: SkillFrontmatter?` (nil = missing/unparseable → L001), `body: String`, `evals: EvalsFile?` + `evalsPresent: Bool` (present-but-nil = unparseable → L009).
 - `Linter.lint(_ source: SkillSource, config: SkilletConfig.Lint) -> [Diagnostic]` — runs the three rules, skips any id in `config.disable`:
-  - **L001** description length `> 1024` → error — *length* = **Unicode scalar count, NFC-normalized**, measured on the YAML-folded value (not `String.count` grapheme clusters, which adversarial combining / zero-width padding can game; even Skill-Lab leaves bytes-vs-chars unspecified). Locked by a fixture; the unicode-*obfuscation* rule itself is F12.
+  - **L001** description length `> 1024` → error — *length* = **Unicode code-point count** (`unicodeScalars.count`) of the YAML-folded value after trimming whitespace, **matching Anthropic's canonical `len(description.strip()) > 1024`** (`skill-creator/scripts/quick_validate.py:82`). Not `String.count` (grapheme clusters), which combining / zero-width padding can slip under 1024; raw code-point counting already defeats that, and NFC would only *lower* the count and diverge from the canonical gate. Locked by a unicode fixture; the unicode-*obfuscation* rule itself is F12.
   - **L003** body lines excluding the frontmatter block and fenced ```` ``` ```` code blocks: `> bodyErrorLines` → error, else `> bodyWarnLines` → warn.
   - **L009** `evals == nil` → error; `evals.caseCount < 3` → warn.
   - Each diagnostic carries a fix-hint (e.g. L001 → "tighten the description to ≤1024 chars or extract detail to references/").
 
 ### 4.4 executable + RenderKit
-- **`LintCommand`** (`skillet lint [<skill>...]`): discover skills (ProjectKit, honoring `-C`), assemble each `SkillSource`, run `Linter`, collect a `LintReport`. Exit **`1`** if any `error` diagnostic (§5.4 measured-failure); else `0`. Unknown skill id → usage error (exit `2`).
+- **`LintCommand`** (`skillet lint [<skill>...]`): discover skills (ProjectKit, honoring `-C`), assemble each `SkillSource`, run `Linter`, collect a `LintReport`. Exit **`1`** if any `error` diagnostic (§5.4 measured-failure); else `0`. Skills are selected **by name** (unique under `skills_root`; not by path, so it's `-C`/cwd-independent and deterministic), de-duplicated + sorted; an unknown name → usage error (exit `2`) listing the available names.
 - **Output:** TTY diagnostics table via `RenderKit` (id · tier · skill · message · fix-hint); the **global `--json`** emits `LintReport` (`skillet.lint/1`). `--format` + SARIF arrive in Phase 2.
 - Ends (TTY) by suggesting the next command (`skillet run` / `skillet next` once they exist; until then a generic hint).
 
@@ -99,7 +99,7 @@ skillet (executable, .Cxx)   LintCommand: discover skills → assemble SkillSour
 ## 5. Test plan (TDD)
 - **EDDCoreTests**: `SkilletConfig.lint` decode; `LintReport` `--json` schema (`skillet.lint/1`). *(The `EvalsFile` golden + round-trip + `caseCount` are already covered by F8's tests.)*
 - **ConfigYAMLTests**: `parseFrontmatter` — folded/block-scalar description; frontmatter/body split; no-frontmatter case; **malformed / unterminated frontmatter and undecodable YAML → a typed `FrontmatterError` (no uncaught throw)**.
-- **LintKitTests** (fixtures, pure): L001 (over-long vs ok; **a Unicode boundary fixture — emoji + combining marks + zero-width chars, ≤1024 grapheme clusters but >1024 NFC scalars → must flag**; **absent/unparseable frontmatter → L001 error**), L003 (≤500 ok · >500 warn · >1000 error · code/frontmatter excluded), L009 (missing → error · <3 → warn · ≥3 → ok); `disable` exemption; custom thresholds.
+- **LintKitTests** (fixtures, pure): L001 (over-long vs ok; **a Unicode boundary fixture — combining marks, ≤1024 grapheme clusters but >1024 code points → must flag**, pinning code-point (not grapheme) counting; **absent/unparseable frontmatter → L001 error**), L003 (≤500 ok · >500 warn · >1000 error · code/frontmatter excluded), L009 (missing → error · <3 → warn · ≥3 → ok); `disable` exemption; custom thresholds.
 - **ProjectKitTests**: skill-source reader (present/absent `evals.json`).
 - **IntegrationTests**: `skillet lint` on a bad-fixture repo → exit `1` + ids present; on a clean repo → exit `0`; `--json` carries `skillet.lint/1`; unknown skill → exit `2`. **DocsTests**: add the `lint` claim.
 
@@ -118,10 +118,26 @@ skillet (executable, .Cxx)   LintCommand: discover skills → assemble SkillSour
 
 ## 7. Risks & assumptions
 - **`evals.json` shape — owned by F8 (resolved).** F8 reads the skill-creator 2.0 object (`{skill_name, evals:[…]}`) *and* the legacy bare array; **`cases` is *not* a container key** (ungrounded — not in 2.0 nor any sampled file). F4 must **not** re-introduce a `cases` reader or rebuild the codec — it only calls `EvalsFile.caseCount`.
-- **"after YAML folding" (L001)** needs a real YAML parse of the frontmatter → `ConfigYAML` (not a regex on the raw `description:` line), **and a pinned counting unit — Unicode scalars after NFC**, so combining-mark / zero-width padding can't slip under 1024 the way grapheme-cluster `String.count` allows (locked by a unicode fixture; Skill-Lab itself leaves bytes-vs-chars unspecified). The unicode-*obfuscation* security rule is F12; the *count* is frozen-ish behavior to fix now.
+- **"after YAML folding" (L001)** needs a real YAML parse of the frontmatter → `ConfigYAML` (not a regex on the raw `description:` line), **and a pinned counting unit — Unicode code points** (`unicodeScalars.count`, no normalization, after `.strip()`), **matching Anthropic's `len(description.strip())`** (`quick_validate.py:82`) so `skillet lint` faithfully predicts Anthropic's gate. Code-point counting already stops combining-mark / zero-width padding from slipping under 1024 (the gap grapheme-cluster `String.count` leaves); NFC would only lower the count and diverge. Locked by a unicode fixture. The unicode-*obfuscation* security rule is F12; the *count* is frozen-ish behavior to fix now.
 - **Malformed / adversarial frontmatter must fail safe** — absent, unterminated, or undecodable YAML frontmatter resolves to a typed error → an error-tier `SKILL-L001` diagnostic, never an uncaught throw. F4 degrades gracefully; full key-level conformance is F3.
 - **L003 body definition** — "excluding frontmatter + code": strip the `---` block and fenced code blocks, count remaining lines. Definition pinned by fixtures; refine if it proves noisy.
 - **LintKit purity** — rules take a parsed `SkillSource`; no I/O/YAML keeps it interop-free + isolated-testable (the load-bearing layering choice).
 
 ## 8. Definition of done
 `L001`/`L003`/`L009` flag fixtures with stable ids + fix-hints; `skillet lint` exits `1` on any error-tier finding (`0` clean, `2` bad usage); `--json` emits `skillet.lint/1`; `[lint].disable` + thresholds honored; `evals.json` golden green; `LintKit` pure/interop-free; `swift build` + `swift test` green; docs synced.
+
+---
+
+## 9. As-built (2026-06-25)
+
+Implemented per plan; **130 tests green** (97 → +25 feature, +8 review-hardening). Notes:
+- **L001 counts Unicode code points** (`description.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars.count > 1024`), **not** NFC-normalized scalars — decided this turn to faithfully predict Anthropic's canonical `len(description.strip()) > 1024` (`skill-creator/scripts/quick_validate.py:82`). Raw code points already defeat the combining / zero-width padding that grapheme counting allows; NFC would only *lower* the count and diverge. §4.3/§5/§7 updated to match.
+- New pure target **`LintKit`** (`SkillSource` + `Linter`), depends on `EDDCore` only — interop-free, as planned.
+- **`ConfigYAML.parseFrontmatter`** folds scalars and returns a typed `FrontmatterError` (`.missing`/`.unterminated`/`.undecodable`); the command maps any parse failure to a `nil` frontmatter → error-tier L001 (fail-safe, never an uncaught throw).
+- **`ProjectKit.SkillReader`** reads `SKILL.md` + `evaluations/evals.json` bytes; the executable assembles the `SkillSource` (parse + `EvalsFile` decode), keeping `LintKit` pure.
+- The `skillet.yaml` `[lint]` block already existed in the F2 template; F4 added only the `SkilletConfig.Lint` model (`decodeIfPresent` defaults 500/1000, snake_case keys).
+- **L003 line counting** treats a terminal newline as a terminator (so exactly N content lines counts as N, not N+1) and matches fenced blocks per CommonMark — the closer must repeat the opener's marker char at ≥ its run length with nothing trailing — so mixed `~~~`/``` markers and fence-like content lines don't mis-toggle. (Review hardening, 2026-06-25.)
+- **L009 distinguishes absent vs. unparseable** `evals.json` (both error-tier) via `SkillSource.evalsPresent`: a present-but-invalid file reports "exists but is not valid JSON", not "no evals.json found". A frontmatter parse failure feeds an **empty** body to L003 (L001 already errors), so a malformed skill doesn't double-fire. Deeper artifact validation (exit 4) is still out of F4 scope.
+- **Selection is by name, not path** (review 2026-06-26): `skillet lint <name>…` matches discovered skill-directory names (unique under `skills_root`), de-duplicated + sorted for deterministic output; an unknown name's error lists the available ones. Chosen over fixing path-vs-`-C` resolution because a skill is a named entity (cf. `cargo -p`, `kubectl`, and skillet's own `harness info <id>`), which removes the cwd/`-C` ambiguity by construction and makes `--json` order stable; path support stays addable later (additive) if an out-of-tree use case appears.
+- **Frontmatter parse-failure detail** stays a single generic L001 message in F4; the typed `FrontmatterError` (`.missing`/`.unterminated`/`.undecodable`) lives in `ConfigYAML` and can't cross into pure `LintKit` without breaking interop containment, so granular frontmatter diagnostics are F3 `doctor`'s job (which already parses frontmatter).
+- **CRLF** input is normalized in `FrontmatterParser` so scalars/body don't carry stray `\r`.

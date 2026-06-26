@@ -64,7 +64,7 @@ struct InitCommand: AsyncParsableCommand {
     /// today (never advertises an unimplemented command). Grows automatically as features register.
     static func nextSteps(skillsFound: Bool) -> [String] {
         let registered = Set(SkilletCommand.configuration.subcommands.compactMap { $0.configuration.commandName })
-        let available = ["doctor", "run", "next"].filter { registered.contains($0) }.map { "skillet \($0)" }
+        let available = ["lint", "doctor", "run", "next"].filter { registered.contains($0) }.map { "skillet \($0)" }
         if !available.isEmpty { return available }
         return skillsFound ? ["skillet --help"] : ["add a SKILL.md under skills/, then re-run skillet init"]
     }

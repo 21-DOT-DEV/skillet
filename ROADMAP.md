@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.7.0
-**Last Updated:** 2026-06-24
+**Version:** v1.7.1
+**Last Updated:** 2026-06-25
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is
@@ -111,10 +111,11 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 ## Global Risks & Assumptions
 
 - **Phase 1 underway; later phases greenfield.** Phase 1 features F1 (project discovery &
-  output contract), F2 (`skillet init`), F5 (trace & harness seam), and F6 (claude-code adapter)
-  are implemented (`Specs/001`–`004`; 76 tests green); the remainder of Phase 1 (F4, F3, F8, F7)
-  and Phases 2–8 are PLANNED/FUTURE. Those statuses reflect design intent verified against the
-  design doc (Medium confidence), not running code.
+  output contract), F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6
+  (claude-code adapter), and F8 (frozen boundary codecs) are implemented (`Specs/001`–`006`;
+  122 tests green); the remainder of Phase 1 (F3 `doctor`, F7 `run`) and Phases 2–8 are
+  PLANNED/FUTURE. Those statuses reflect design intent verified against the design doc (Medium
+  confidence), not running code.
 - **"Ported" assumption.** The design doc says much of v1 is faithfully
   translated from a predecessor (`swift-skill-eval` + a Python trigger harness).
   That predecessor is not in this repo, so `Ported` tags are a scheduling hint,
@@ -156,6 +157,13 @@ phases and the v1 scope line are unchanged.
 
 ## Change Log
 
+- v1.7.1 (2026-06-25): PATCH — Phase 1 **F4 (`skillet lint`) implemented**: the free static gate —
+  `SKILL-L001` (description >1024 Unicode code points, matching Anthropic's `quick_validate.py`),
+  `SKILL-L003` (body-line budget), `SKILL-L009` (has-evals, ≥3) — as a pure `LintKit` over a
+  `SkillSource` the executable assembles; `skillet lint` exits 1 on any error-tier finding
+  (`skillet.lint/1`). Also corrected the stale Global Risks line (F8 was already done; 122 tests;
+  `Specs/001`–`006`). Phase 1 stays IN PROGRESS (F3 `doctor`, F7 `run` open). Plan:
+  [Specs/005](Specs/005-free-static-lint/plan.md).
 - v1.7.0 (2026-06-24): MINOR — added **Phase 8 F13 — skill-bundle integrity lint group** (static
   checks that bundled `scripts/` are self-contained / non-interactive / `--help`-capable, that
   referenced script/asset paths resolve, and that no files are orphaned or outside the spec dirs) —

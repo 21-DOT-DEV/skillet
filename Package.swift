@@ -50,6 +50,8 @@ let package = Package(
         // MARK: Layer 2 — mechanism (effectful kits over the pure core)
         .target(name: "ProjectKit", dependencies: ["EDDCore"]),
         .target(name: "RenderKit", dependencies: ["EDDCore"]),
+        // Free static-lint rule engine — pure (rules run over a parsed SkillSource), no I/O, no YAML.
+        .target(name: "LintKit", dependencies: ["EDDCore"]),
         .target(
             name: "HarnessKit",
             dependencies: [
@@ -80,6 +82,7 @@ let package = Package(
                 "EDDCore",
                 "ProjectKit",
                 "RenderKit",
+                "LintKit",
                 "TraceKit",
                 "HarnessKit",
                 // Config loading. Importing ConfigYAML pulls in C++ interop (viral to direct
@@ -94,6 +97,7 @@ let package = Package(
         .testTarget(name: "TraceKitTests", dependencies: ["TraceKit"]),
         .testTarget(name: "ProjectKitTests", dependencies: ["ProjectKit"]),
         .testTarget(name: "RenderKitTests", dependencies: ["RenderKit"]),
+        .testTarget(name: "LintKitTests", dependencies: ["LintKit"]),
         .testTarget(name: "HarnessKitTests", dependencies: ["HarnessKit"]),
         // Consumer of ConfigYAML — must also enable C++ interop (it's viral to direct importers).
         .testTarget(name: "ConfigYAMLTests", dependencies: ["ConfigYAML"], swiftSettings: [.interoperabilityMode(.Cxx)]),

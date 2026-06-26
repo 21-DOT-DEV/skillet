@@ -4,7 +4,7 @@
 CLI for eval-driven development (EDD) of agent skills: capture real runs, turn hand-fixes into
 structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
 
-> **Status: Phase 1 in progress — F1, F2, F5, F6, F8 landed.** The walking skeleton has begun. `Package.swift` plus
+> **Status: Phase 1 in progress — F1, F2, F4, F5, F6, F8 landed.** The walking skeleton has begun. `Package.swift` plus
 > `EDDCore`, `TraceKit`, `ProjectKit`, `RenderKit`, `HarnessKit`, `ConfigYAML`, and the `skillet` executable exist, with unit + integration
 > tests green (`swift build && swift test`). **F1 (project discovery & output contract) is
 > implemented**: `skillet` explains the loop, `-C <dir>`, `--json` (schema-tagged), `--color`/`NO_COLOR`,
@@ -14,7 +14,7 @@ structured evidence, and ship a `SKILL.md` edit only after a previously-failing 
 > link checks). **F5 (trace + harness seam) is implemented**: the `Trace` model (`skillet.trace/1`), the
 > full `HarnessAdapter` protocol with a `ReplayAdapter` double + a claude-code stub, and `skillet harness
 > list`/`info`. The `skillet` executable owns the full ArgumentParser command tree (no `skilletCLI`
-> library); `ProjectKit` is the discovery/config-IO home. **F6 (claude-code adapter) is implemented** (validatable core): the native-session-JSONL → `Trace` parser (golden-tested vs a synthetic fixture), the binary resolution chain (flag > env > config > PATH), the version denylist/ban policy, and `probe()`/`verifySkillVisibility` behind a fakeable launcher — `harness info` now probes the real adapter. `swift-yaml` is wired, isolated in a `.Cxx` `ConfigYAML` target (the kits + pure core stay interop-free; the executable is a `.Cxx` leaf). Live `run` lands in F7. The rest of the command surface under "Planned" is still agreed *intent*,
+> library); `ProjectKit` is the discovery/config-IO home. **F6 (claude-code adapter) is implemented** (validatable core): the native-session-JSONL → `Trace` parser (golden-tested vs a synthetic fixture), the binary resolution chain (flag > env > config > PATH), the version denylist/ban policy, and `probe()`/`verifySkillVisibility` behind a fakeable launcher — `harness info` now probes the real adapter. `swift-yaml` is wired, isolated in a `.Cxx` `ConfigYAML` target (the kits + pure core stay interop-free; the executable is a `.Cxx` leaf). Live `run` lands in F7. **F4 (`skillet lint`) is implemented**: the free static gate — `SKILL-L001` (description >1024 Unicode code points, matching Anthropic's `quick_validate.py`), `SKILL-L003` (body-line budget, frontmatter+code excluded), `SKILL-L009` (has-evals, ≥3) — as a pure `LintKit` over a `SkillSource` the executable assembles (`ConfigYAML.parseFrontmatter` + the F8 `evals.json` codec); `skillet lint` exits 1 on any error-tier finding and emits `skillet.lint/1`. The rest of the command surface under "Planned" is still agreed *intent*,
 > not shipped fact — don't assume a command/module exists until its feature lands. Update this file as
 > each feature/phase completes.
 
@@ -35,17 +35,17 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 [`21-DOT-DEV/.github`](https://github.com/21-DOT-DEV/.github) (`CONTRIBUTING.md`, `SECURITY.md`,
 `CODE_OF_CONDUCT.md`). There are intentionally no repo-local copies.
 
-## Commands (true now — Phase 1 / F1–F2, F5, F6)
+## Commands (true now — Phase 1 / F1–F2, F4, F5, F6)
 
 - `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`).
-- `swift test` — run the unit + integration suites (79 tests, all green). The integration suite drives
+- `swift test` — run the unit + integration suites (130 tests, all green). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
-  `skillet init --json`, `skillet harness list`, `skillet harness info [--json]`, `skillet --help`, `skillet --version`.
+  `skillet init --json`, `skillet lint [--json]`, `skillet harness list`, `skillet harness info [--json]`, `skillet --help`, `skillet --version`.
 - `swift package generate-manual` / `generate-docc-reference` — regenerate the command reference from the parser.
 - `SKILLET_TEST_BINARY=<path> swift test` — point the integration harness at a specific binary.
 
-`init`, `harness list`/`info`, and the claude-code adapter (F6 — parse + resolution + probe; live `run` is F7) are built; `doctor`/`lint`/`run`/… are not yet — see Planned.
+`init`, `lint`, `harness list`/`info`, and the claude-code adapter (F6 — parse + resolution + probe; live `run` is F7) are built; `doctor`/`run`/… are not yet — see Planned.
 
 ## Binding conventions
 

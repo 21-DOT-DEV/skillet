@@ -19,6 +19,15 @@ struct TriggerAndSarifTests {
         #expect(try jsonSemanticEqual(Data(json.utf8), out))  // "note" preserved
     }
 
+    @Test("trigger-eval.json: a non-object array element survives the round-trip (held raw)")
+    func triggerEvalNonObjectPreserved() throws {
+        let json = #"[{"query":"a","should_trigger":true},"stray",{"query":"b","should_trigger":false}]"#
+        let f = try JSONDecoder().decode(TriggerEvalFile.self, from: Data(json.utf8))
+        #expect(f.caseCount == 2)   // only the two objects are cases…
+        let out = try JSONEncoder().encode(f)
+        #expect(try jsonSemanticEqual(Data(json.utf8), out))   // …but "stray" is preserved, not dropped
+    }
+
     @Test("SARIF 2.1.0 subset: accessors; unknown level + properties bag preserved; round-trip")
     func sarif() throws {
         let json = """

@@ -2,20 +2,33 @@
 
 **Status:** PLANNED
 **Horizon:** Next
-**Last Updated:** 2026-06-17
+**Last Updated:** 2026-06-26
 
 ## Goal
 
-Turn the thin runner into measurement you can trust *deltas* on, and complete the
-free static gate. This adds the second eval axis, the A/B baseline, a grounded
-judge for file-outcome criteria, deterministic scorers, flaky hygiene,
-record/replay, the full lint catalog, and human + HTML reporting — everything
-that makes a `pass^k` number believable before the workflow layer starts acting
-on it.
+Turn the thin runner into measurement you can trust *deltas* on, add the `doctor`
+preflight gate, and complete the free static gate. This adds the second eval axis,
+the A/B baseline, a grounded judge for file-outcome criteria, deterministic
+scorers, flaky hygiene, record/replay, the `$0` `doctor` preflight, the full lint
+catalog, and human + HTML reporting — everything that makes a `pass^k` number
+believable before the workflow layer starts acting on it.
 
 ## Key Features
 
-1. Trigger axis (CLI: `skillet run --axis trigger`) — PLANNED · Net-new
+1. **[F3]** $0 preflight & skill-visibility check (CLI: `skillet doctor`) — PLANNED · Net-new
+   - Purpose & user value: A free, fast self-check that catches the silent killers
+     before any paid run — config parses, each configured harness is found and the
+     right binary/version resolves, and the skill is actually *visible* to the
+     harness. Kills the `--skill-path` false-negative class by construction (P6).
+   - Northstar: loop integrity (errors teach; never pay to discover a misconfig).
+   - Success metrics:
+     - `doctor` reports config origin (which file loaded), harness version/resolution, and per-skill visibility, exiting `3` with a remedy line on any failure.
+     - Verifies the positive-load condition (target `SKILL.md` **+ `references/`** resolve under the injection strategy); error-tier `lint` findings surface here and also fail (exit `3`), warnings shown but non-failing.
+   - Dependencies: HarnessAdapter seam (F5), claude-code adapter (F6); also `swift-yaml` (config parsing) and error-tier `lint` (F4, surfaced here) — all Phase 1.
+   - Confidence: Medium — design §6.1 `doctor`, §9.2.
+   - Notes: Moved from Phase 1 — off the walking-skeleton critical path (`run`/F7 doesn't depend on it) and its companions live here. Live auth + the discovery-only visibility half are validated with the runner (F7); the `--paid` canary is F21; the frontmatter spec-conformance rules it surfaces come from the full lint catalog (F20).
+
+2. **[F14]** Trigger axis (CLI: `skillet run --axis trigger`) — PLANNED · Net-new
    - Purpose & user value: Test whether a skill's *description* actually fires it
      — the question behavioral evals can't answer — retiring the separate Python
      trigger harness into one binary, two axes.
@@ -26,7 +39,7 @@ on it.
    - Dependencies: Trace seam, runner (Phase 1).
    - Confidence: Medium — design §6.1 `run`, §9.3.
 
-2. A/B baseline arm (CLI: `skillet run --ab`) — PLANNED · Ported
+3. **[F15]** A/B baseline arm (CLI: `skillet run --ab`) — PLANNED · Ported
    - Purpose & user value: Run with-skill and without-skill arms and report Δ —
      "is the skill earning its tokens?" — matching `agent-skills-eval` on day one.
    - Northstar: loop integrity (value attribution).
@@ -36,7 +49,7 @@ on it.
    - Dependencies: runner (Phase 1).
    - Confidence: Medium — design §6.1 `run`, §9.2.
 
-3. Grounded judge — file-outcome grading (CLI: `--judge <grounded-id>`) — PLANNED · Net-new
+4. **[F16]** Grounded judge — file-outcome grading (CLI: `--judge <grounded-id>`) — PLANNED · Net-new
    - Purpose & user value: Most skill criteria assert *file* outcomes ("wrote
      SARIF to X", "scaffolded the catalog"); a grounded judge reads the post-run
      sandbox instead of grading from prose, killing the "surface compliance"
@@ -48,7 +61,7 @@ on it.
    - Dependencies: text judge (Phase 1), Workspace sandbox (Phase 1).
    - Confidence: Medium — design §9.4.
 
-4. Deterministic scorers → SARIF (CLI: `skillet score`) — PLANNED · Ported
+5. **[F17]** Deterministic scorers → SARIF (CLI: `skillet score`) — PLANNED · Ported
    - Purpose & user value: Free, model-free checks over outputs/bundles emitting
      standard SARIF 2.1.0 — the deterministic-first signal that feeds triage and
      editors/CI.
@@ -59,7 +72,7 @@ on it.
    - Dependencies: Trace/bundle model.
    - Confidence: Medium — design §6.2, §11 (ScoreKit).
 
-5. Flaky-eval hygiene, watchdog & infra-only retry — PLANNED · Net-new
+6. **[F18]** Flaky-eval hygiene, watchdog & infra-only retry — PLANNED · Net-new
    - Purpose & user value: Make reliability honest — flag flaky evals as hygiene
      items before any delta is trusted, retry only infrastructure failures (never
      judged FAILs), and bound every trial with a watchdog so a hung harness can't
@@ -72,48 +85,50 @@ on it.
    - Dependencies: runner (Phase 1).
    - Confidence: Medium — design §8, §10.
 
-6. Record / replay (CLI: `skillet run --record <dir>` / `--replay <dir>`) — PLANNED · Net-new
+7. **[F19]** Record / replay (CLI: `skillet run --record <dir>` / `--replay <dir>`) — PLANNED · Net-new
    - Purpose & user value: Persist every raw trace and verdict and serve them
      back — free deterministic tests, reproducible bug reports, and re-grading old
      runs without re-execution.
-   - Northstar: loop integrity (reproducibility); enables criteria-drift re-grade (F12).
+   - Northstar: loop integrity (reproducibility); enables criteria-drift re-grade (F25).
    - Success metrics:
      - A `--record`ed run replays identically through the replay adapter + replay judge with no harness or network.
    - Dependencies: runner, judge.
    - Confidence: Medium — design §10.
 
-7. Full lint catalog + SARIF (CLI: `skillet lint --format sarif`) — PLANNED · Ported
-   - Purpose & user value: Complete the shipped 5-rule `SKILL-Lxxx` catalog and
-     emit SARIF for editors/CI — the free pre-API gate in full.
+8. **[F20]** Full lint catalog + SARIF (CLI: `skillet lint --format sarif`) — PLANNED · Ported
+   - Purpose & user value: Complete the shipped 5-rule `SKILL-Lxxx` catalog, add the
+     frontmatter spec-conformance rules, and emit SARIF for editors/CI — the free
+     pre-API gate in full.
    - Northstar: deterministic-first; cheapest lever.
    - Success metrics:
      - All five shipped rules (`L001`, `L003`, `L009`, `L010`, `L011`) fire on fixtures with correct tiers.
+     - **Frontmatter spec-conformance** rules flag a non-kebab / over-long `name` (>64), disallowed top-level keys, and **duplicate keys** (raw-YAML anomaly detection) — re-homed here from `doctor` (F3), and surfacing in `doctor` because it shows error-tier lint.
      - `--format sarif` emits valid 2.1.0; `skillet lint && skillet fixtures verify` is a clean pre-commit pair.
    - Dependencies: lint core (Phase 1).
-   - Confidence: Medium — design §6.1 `lint`.
+   - Confidence: Medium — design §6.1 `lint`, `doctor`.
 
-8. Paid preflight canary (CLI: `skillet doctor --paid`) — PLANNED · Net-new
+9. **[F21]** Paid preflight canary (CLI: `skillet doctor --paid`) — PLANNED · Net-new
    - Purpose & user value: One trivial paid trial per harness that proves a known
      `references/` file is readable from inside the harness — the last $1 check
      before a real paid run.
    - Northstar: loop integrity + spend honesty.
    - Success metrics:
      - `doctor --paid` asserts reference readability per harness and reports cost.
-   - Dependencies: `doctor` (Phase 1), adapter.
+   - Dependencies: `doctor` (F3), adapter.
    - Confidence: Medium — design §6.1 `doctor`.
 
-9. Fixture-integrity guard (CLI: `skillet fixtures verify`, `skillet hooks install`) — PLANNED · Ported
-   - Purpose & user value: For SARIF-emitting skills, assert producer-output recall
-     (`expected ⊆ actual` + `allowedExtraRuleIds`) and block commits that mutate
-     fixtures — because a polluted fixture silently invalidates every later A/B.
-   - Northstar: loop integrity (A/B integrity, design §9.2).
-   - Success metrics:
-     - `fixtures verify` fails when an expected finding is missing or an un-allowed `ruleId` appears.
-     - `hooks install` refuses a commit touching `evaluations/fixtures/**` (bypass: `--no-verify`).
-   - Dependencies: scorers (F4).
-   - Confidence: Medium — design §6.2.
+10. **[F22]** Fixture-integrity guard (CLI: `skillet fixtures verify`, `skillet hooks install`) — PLANNED · Ported
+    - Purpose & user value: For SARIF-emitting skills, assert producer-output recall
+      (`expected ⊆ actual` + `allowedExtraRuleIds`) and block commits that mutate
+      fixtures — because a polluted fixture silently invalidates every later A/B.
+    - Northstar: loop integrity (A/B integrity, design §9.2).
+    - Success metrics:
+      - `fixtures verify` fails when an expected finding is missing or an un-allowed `ruleId` appears.
+      - `hooks install` refuses a commit touching `evaluations/fixtures/**` (bypass: `--no-verify`).
+    - Dependencies: scorers (F17).
+    - Confidence: Medium — design §6.2.
 
-10. Reporting — TTY & HTML (CLI: `skillet report`, `--html`) — PLANNED · Ported
+11. **[F23]** Reporting — TTY & HTML (CLI: `skillet report`, `--html`) — PLANNED · Ported
     - Purpose & user value: Render results for humans — cross-run trends, the
       flaky list, the per-harness matrix — and the interactive HTML viewer from
       the frozen `benchmark.json`, all re-aggregated offline.
@@ -124,7 +139,7 @@ on it.
     - Dependencies: boundary codecs (Phase 1), runs.
     - Confidence: Medium — design §6.1 `report`.
 
-11. Configuration & CLI ergonomics (CLI: `skillet config get|set|list --origins`, `skillet completions`) — PLANNED · Net-new
+12. **[F24]** Configuration & CLI ergonomics (CLI: `skillet config get|set|list --origins`, `skillet completions`) — PLANNED · Net-new
     - Purpose & user value: Make the precedence chain inspectable and the CLI
       pleasant — see where every effective value came from, and get shell
       completions.
@@ -135,7 +150,7 @@ on it.
     - Dependencies: config substrate (Phase 1).
     - Confidence: Medium — design §5.2, §6.2.
 
-12. Offline re-grade & judge-prompt versioning (CLI: `skillet grade --run <ts>`) — PLANNED · Net-new
+13. **[F25]** Offline re-grade & judge-prompt versioning (CLI: `skillet grade --run <ts>`) — PLANNED · Net-new
     - Purpose & user value: Manage *criteria drift* — re-grade a recorded run under
       a new judge model or prompt version without re-executing tasks, so results
       stay comparable as the rubric evolves.
@@ -143,23 +158,24 @@ on it.
     - Success metrics:
       - `grade --run <ts> --judge <id>` re-grades from recorded traces with no harness; verdicts carry the new `judge_prompt_version`.
       - Old and new verdicts are diffable for the same run.
-    - Dependencies: record/replay (F6), judge.
+    - Dependencies: record/replay (F19), judge.
     - Confidence: Medium — design §6.2, §9.4.
 
 ## Dependencies & Sequencing
 
-- Local ordering: the grounded judge (F3) and scorers (F4) precede flaky/hygiene
-  reporting (F5) and reporting (F10). Record/replay (F6) precedes offline re-grade
-  (F12).
-- Cross-phase: scorers (F4) feed Phase 4 (Error Analysis); the grounded judge (F3)
-  is reused by `iterate` in Phase 6.
+- Local ordering: `doctor` (F3) is the $0 preflight gate; the grounded judge (F16)
+  and scorers (F17) precede flaky/hygiene (F18) and reporting (F23). Record/replay
+  (F19) precedes offline re-grade (F25). The paid canary (F21) follows `doctor` (F3).
+- Cross-phase: scorers (F17) feed Phase 4 (Error Analysis); the grounded judge (F16)
+  is reused by `iterate` in Phase 6. `doctor` (F3) depends only on shipped Phase 1
+  seams (F4/F5/F6 + `swift-yaml`), so it is unblocked from the start of the phase.
 
 ## Phase Metrics & Success Criteria
 
-- This phase is successful when: a maintainer can trust a `pass^k` delta — flaky
-  evals are surfaced first, file-outcomes are graded against the real sandbox,
-  both axes and the A/B arm report cleanly, and any run can be replayed and
-  re-graded offline.
+- This phase is successful when: a maintainer can trust a `pass^k` delta — `doctor`
+  catches misconfigs for $0 first, flaky evals are surfaced, file-outcomes are
+  graded against the real sandbox, both axes and the A/B arm report cleanly, and
+  any run can be replayed and re-graded offline.
 
 ## Risks & Assumptions
 
@@ -170,3 +186,12 @@ on it.
 
 - 2026-06-17: Phase created. Holds the runner-hardening + full static-gate work
   split out of the thin "Now" walking skeleton.
+- 2026-06-26: MINOR — **`doctor` (F3) moved in from Phase 1** as the phase's first
+  feature (the $0 preflight belongs with its companions — the `--paid` canary F21,
+  the full lint catalog F20, config ergonomics F24); **frontmatter spec-conformance
+  rules re-homed into the full lint catalog (F20)** from `doctor` (they surface in
+  `doctor` once they're lint rules; duplicate-key rejection needs raw-YAML anomaly
+  detection); and the phase **adopted the global stable `Fn` ids** — the 12 native
+  features renumbered to F14–F25 (roadmap v1.8.0 scheme reconciliation; see
+  ROADMAP.md › Feature identifiers). No scope change beyond the `doctor` move and
+  the frontmatter re-home.

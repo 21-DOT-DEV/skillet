@@ -1,15 +1,15 @@
 # Phase 1 — Walking Skeleton: Prove the Loop End-to-End
 
-**Status:** IN PROGRESS — F1, F2, F4, F5, F6, F8 complete
+**Status:** IN PROGRESS — F1, F2, F4, F5, F6, F8 complete; F7 (`run`) is the only feature remaining (`doctor` F3 moved to Phase 2)
 **Horizon:** Now
-**Last Updated:** 2026-06-25
+**Last Updated:** 2026-06-26
 **Review:** completed-items cross-artifact audit → [phase-1-review.md](phase-1-review.md)
 
 ## Goal
 
 Stand up the thinnest possible end-to-end thread of the EDD loop: in any skills
 repo, run a single eval through Claude Code, have it judged, and print a `pass^k`
-result — backed by just enough `init`/`doctor`/`lint` to make that one command
+result — backed by just enough `init`/`lint` to make that one command
 trustworthy. This proves the architecture (the seams every later phase reuses)
 and delivers the "value in 30 seconds" entry point (design D2) that earns the
 tool its first user.
@@ -90,19 +90,7 @@ sequence is re-ordered.
      5-rule catalog + SARIF lands in Phase 2. Error-tier core = `L001` + `L003` + `L009` (full tiers).
    - Plan: [Specs/005-free-static-lint/plan.md](../Specs/005-free-static-lint/plan.md)
 
-6. **[F3]** $0 preflight & skill-visibility check (CLI: `skillet doctor`) — PLANNED · Net-new
-   - Purpose & user value: A free, fast self-check that catches the silent
-     killers before any paid run — config parses, the harness is found and
-     authed, and the skill is actually *visible* to the harness. Kills the
-     `--skill-path` false-negative class by construction (design P6).
-   - Northstar: loop integrity (errors teach; never pay to discover a misconfig).
-   - Success metrics:
-     - `doctor` reports config origin, harness version, and auth, exiting `3` with a remedy line on any failure.
-     - Verifies both the positive-load condition (target `SKILL.md` + `references/`) and the discovery-only condition (siblings listable, not injected).
-   - Dependencies: HarnessAdapter seam (F5), claude-code adapter (F6); also `swift-yaml` (config parsing) and error-tier `lint` (F4, surfaced in `doctor`).
-   - Confidence: Medium — design §6.1 `doctor`, §9.2.
-
-7. **[F8]** Frozen boundary codecs + golden tests (skill-creator 2.0 family) — DONE · Ported
+6. **[F8]** Frozen boundary codecs + golden tests (skill-creator 2.0 family) — DONE · Ported
    - Purpose & user value: Read/write the de-facto-standard eval / benchmark / run-record
      formats byte-compatibly (unknown keys preserved) so existing skill-creator tooling and
      the eval-viewer keep working unchanged — adopting skillet costs nothing downstream (D5).
@@ -115,7 +103,7 @@ sequence is re-ordered.
    - Confidence: Medium — design §7.2, §13; Anthropic `references/schemas.md`.
    - Plan: [Specs/006-frozen-boundary-codecs/plan.md](../Specs/006-frozen-boundary-codecs/plan.md)
 
-8. **[F7]** The neutral runner — behavioral axis + pass^k (CLI: `skillet run`) — PLANNED · Ported
+7. **[F7]** The neutral runner — behavioral axis + pass^k (CLI: `skillet run`) — PLANNED · Ported
    - Purpose & user value: The entry point (D2) — execute a skill's behavioral
      evals in an isolated sandbox, grade each `expected_behavior` line with the
      (text) judge, and report `pass^k` reliability. Answers "does this skill
@@ -137,12 +125,11 @@ sequence is re-ordered.
 
 ## Dependencies & Sequencing
 
-- **Build order (dependency-honest):** F1 → F2 *(done)* → F5 → F6 *(done)* → **F8 (boundary codecs)** *(done)* → F4 (lint) *(done)* → F3 (`doctor`) → F7 (`run`). F8 moved ahead of F4 — F4's `L009` consumes the `evals.json` codec. **Fn** ids are stable and independent of position; the Key Features list is grouped by id, not strictly by build order.
-- Local dependencies: `doctor` (F3) needs the adapter seam (F5) + claude-code adapter (F6) +
-  `swift-yaml` (config parsing) + error-tier `lint` (F4, which it surfaces); the runner (F7) needs the
-  claude-code adapter (F6) + boundary codecs (F8) + the text judge; `lint` (F4) and `init` (F2) need
-  only discovery (F1).
-- Cross-phase: F5/F6 are reused by Phases 3, 4, 6, 7; F8 by Phase 2's reporting.
+- **Build order (dependency-honest):** F1 → F2 *(done)* → F5 → F6 *(done)* → **F8 (boundary codecs)** *(done)* → F4 (lint) *(done)* → F7 (`run`). `doctor` (F3) moved to Phase 2 — off the critical path (F7 doesn't depend on it). **Fn** ids are stable, global, and position-independent (see [ROADMAP.md › Feature identifiers](../ROADMAP.md#feature-identifiers)); the Key Features list is grouped by id, not strictly by build order.
+- Local dependencies: the runner (F7) needs the claude-code adapter (F6) + boundary codecs (F8) + the
+  text judge; `lint` (F4) and `init` (F2) need only discovery (F1). (`doctor` (F3) and its deps —
+  F5/F6 + `swift-yaml` + error-tier `lint` — moved to Phase 2.)
+- Cross-phase: F5/F6 are reused by Phases 3, 4, 6, 7; F8 by Phase 2's reporting; `doctor` (F3) now lands in Phase 2 atop these Phase-1 seams.
 - F6 ships the validatable core (parser, resolution, denylist, `probe`/`verifySkillVisibility` behind a
   fakeable launcher); F7 implements the **live** claude-code `run` execution + §9.2 skill-injection.
   Because claude-code isn't runnable in CI, every live adapter path is validated by **one opt-in,
@@ -162,9 +149,9 @@ strict downward DAG enforced from the first commit (later phases add kits, not r
 - **`ConfigYAML`** — the isolated `.Cxx` YAML-codec seam (swift-yaml → `EDDCore.SkilletConfig`); F6.
 - **`RunKit`** — trial planner, run records, pass^k (F7).
 - **`LintKit`** — error-tier `SKILL-Lxxx` subset (F4); **`RenderKit`** — TTY tables + versioned JSON
-  encoders (F1); **`ProjectKit`** — project discovery, config I/O, `init` scaffolding (F1–F3).
+  encoders (F1); **`ProjectKit`** — project discovery, config I/O, `init` scaffolding (F1, F2).
 - **`skillet`** (executable) — the full ArgumentParser command tree + wiring for
-  `init`/`doctor`/`lint`/`run`. No `skilletCLI` library.
+  `init`/`lint`/`run` (the `doctor` command wires in Phase 2). No `skilletCLI` library.
 
 **Deferred:** `ScoreKit` (Phase 2), `CorpusKit`/capture (Phase 3), `AnalysisKit` (Phase 4),
 `IterateKit` (Phase 6). `swift-yaml` is wired only when `EDDCore`'s config codec body lands (no
@@ -176,9 +163,9 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
 ## Phase Metrics & Success Criteria
 
 - This phase is successful when: in a fresh checkout of a real skills repo, a new
-  user runs `skillet init && skillet doctor && skillet run <skill>` and gets a
+  user runs `skillet init && skillet run <skill>` and gets a
   trustworthy `pass^k` table in under a minute — no manual skill-path wiring, no
-  paid surprise.
+  paid surprise. (The `doctor` preflight that makes misconfigs free to catch lands in Phase 2.)
 
 ## Risks & Assumptions
 
@@ -273,3 +260,9 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
   `ProjectKit.SkillReader`, `EDDCore` `SkillFrontmatter`/`Diagnostic`/`LintReport` (`skillet.lint/1`) +
   `SkilletConfig.Lint`, and the `skillet lint` command (exit 1 on error-tier, 2 on unknown skill).
   122 tests green. Plan: [Specs/005](../Specs/005-free-static-lint/plan.md).
+- 2026-06-26: MINOR — **`doctor` (F3) moved to Phase 2** (off the walking-skeleton critical path —
+  F7 `run` doesn't depend on it; its companions — the `--paid` canary, full lint catalog, and
+  `config list --origins` — are all Phase 2), leaving **F7 (`run`) as Phase 1's only remaining
+  feature**. The frontmatter spec-conformance rules (previously deferred F4→F3) were re-homed to
+  Phase 2's full lint catalog (F20). Adopted the global stable `Fn` id convention (see ROADMAP.md ›
+  Feature identifiers; Phase 1's F1–F8 unchanged). New build order: F1, F2, F5, F6, F8, F4, F7.

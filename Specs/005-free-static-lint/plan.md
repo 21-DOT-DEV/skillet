@@ -45,8 +45,8 @@ the first **`evals.json`** reader (§11) — a frozen boundary format, golden-te
 
 ### Out of scope (deferred, with where it lands)
 - **`SKILL-L010` / `SKILL-L011`** (warn-only) + the 7 roadmap rules + **SARIF** + the `--format tty|json|sarif` option → **Phase 2**.
-- **Per-skill `evaluations/skillet.yaml` overlay precedence + `config list --origins`** → **F3** (F4 reads the repo-level `skillet.yaml [lint]` only).
-- **Full frontmatter spec-conformance** (name kebab/length, allowed-keys, duplicate-key rejection, §6.1 `doctor` line) → **F3 `doctor`** (it consumes `LintKit` + adds its own checks). F4 ships only `L001`'s description-length rule.
+- **Per-skill `evaluations/skillet.yaml` overlay precedence + `config list --origins`** → **F24** (Phase 2 config & CLI ergonomics; F4 reads the repo-level `skillet.yaml [lint]` only).
+- **Full frontmatter spec-conformance** (name kebab/length, allowed-keys, duplicate-key rejection, §6.1 `doctor` line) → **Phase 2 full lint catalog (F20)** — they land as `SKILL-Lxxx` rules and surface in `doctor` (F3, also Phase 2) automatically; duplicate-key rejection needs raw-YAML anomaly detection. F4 ships only `L001`'s description-length rule.
 - **Security-tier rules** (prompt-injection, evaluator-manipulation, unicode-obfuscation, YAML-anomaly, suspicious-size — Skill-Lab parity) → **Phase 8 F12**. Flagged here so the catalog's growth is visible: F4's `Diagnostic`/`LintReport` (`skillet.lint/1`) is **additive within the major**, so the security tier slots in with no schema change; F12 takes a reserved, greppable id block (a `SKILL-Sxxx` prefix or an `Lxxx` band, mirroring the reserved `L2xx` for user-authored rules, design F11).
 
 ---
@@ -76,7 +76,7 @@ skillet (executable, .Cxx)   LintCommand: discover skills → assemble SkillSour
 - **`SkilletConfig.lint`** — `disable: [String]`, `bodyWarnLines: Int = 500`, `bodyErrorLines: Int = 1000` (snake_case CodingKeys to match `skillet.yaml`).
 
 ### 4.2 ConfigYAML (`.Cxx`)
-- `parseFrontmatter(_ markdown: String) throws -> (frontmatter: SkillFrontmatter, body: String)` — split the leading `---…---` block, decode its YAML (so folded/block scalars are resolved for `L001`'s "after folding"), return the remaining body text. **Malformed input is data, not a crash:** absent frontmatter, an unterminated `---` block, or YAML that fails to decode resolves to a typed `FrontmatterError` (not an uncaught throw); `LintCommand` maps it to an **error-tier `SKILL-L001`** diagnostic ("frontmatter missing or unparseable") and skips the length check, so a hostile or garbled skill still lints to a clean exit `1`, not a stack trace. Full key-level conformance (duplicate keys, allowed-keys) stays F3. *(Skill-Lab covers this via its* Valid Frontmatter */* YAML Anomalies *checks; F4 only needs to fail safe.)*
+- `parseFrontmatter(_ markdown: String) throws -> (frontmatter: SkillFrontmatter, body: String)` — split the leading `---…---` block, decode its YAML (so folded/block scalars are resolved for `L001`'s "after folding"), return the remaining body text. **Malformed input is data, not a crash:** absent frontmatter, an unterminated `---` block, or YAML that fails to decode resolves to a typed `FrontmatterError` (not an uncaught throw); `LintCommand` maps it to an **error-tier `SKILL-L001`** diagnostic ("frontmatter missing or unparseable") and skips the length check, so a hostile or garbled skill still lints to a clean exit `1`, not a stack trace. Full key-level conformance (duplicate keys, allowed-keys) lands in the Phase 2 lint catalog (F20). *(Skill-Lab covers this via its* Valid Frontmatter */* YAML Anomalies *checks; F4 only needs to fail safe.)*
 
 ### 4.3 LintKit (pure)
 - `SkillSource` (pure input): `name`, `frontmatter: SkillFrontmatter?` (nil = missing/unparseable → L001), `body: String`, `evals: EvalsFile?` + `evalsPresent: Bool` (present-but-nil = unparseable → L009).
@@ -92,7 +92,7 @@ skillet (executable, .Cxx)   LintCommand: discover skills → assemble SkillSour
 - Ends (TTY) by suggesting the next command (`skillet run` / `skillet next` once they exist; until then a generic hint).
 
 ### 4.5 Config / exemptions
-`LintCommand` loads `skillet.yaml` through the existing F6 config-link (`ConfigYAML` → `SkilletConfig.lint`); `disable` suppresses rule ids and the thresholds feed `L003`. Per-skill overlay precedence → F3.
+`LintCommand` loads `skillet.yaml` through the existing F6 config-link (`ConfigYAML` → `SkilletConfig.lint`); `disable` suppresses rule ids and the thresholds feed `L003`. Per-skill overlay precedence → F24 (Phase 2 config ergonomics).
 
 ---
 
@@ -119,7 +119,7 @@ skillet (executable, .Cxx)   LintCommand: discover skills → assemble SkillSour
 ## 7. Risks & assumptions
 - **`evals.json` shape — owned by F8 (resolved).** F8 reads the skill-creator 2.0 object (`{skill_name, evals:[…]}`) *and* the legacy bare array; **`cases` is *not* a container key** (ungrounded — not in 2.0 nor any sampled file). F4 must **not** re-introduce a `cases` reader or rebuild the codec — it only calls `EvalsFile.caseCount`.
 - **"after YAML folding" (L001)** needs a real YAML parse of the frontmatter → `ConfigYAML` (not a regex on the raw `description:` line), **and a pinned counting unit — Unicode code points** (`unicodeScalars.count`, no normalization, after `.strip()`), **matching Anthropic's `len(description.strip())`** (`quick_validate.py:82`) so `skillet lint` faithfully predicts Anthropic's gate. Code-point counting already stops combining-mark / zero-width padding from slipping under 1024 (the gap grapheme-cluster `String.count` leaves); NFC would only lower the count and diverge. Locked by a unicode fixture. The unicode-*obfuscation* security rule is F12; the *count* is frozen-ish behavior to fix now.
-- **Malformed / adversarial frontmatter must fail safe** — absent, unterminated, or undecodable YAML frontmatter resolves to a typed error → an error-tier `SKILL-L001` diagnostic, never an uncaught throw. F4 degrades gracefully; full key-level conformance is F3.
+- **Malformed / adversarial frontmatter must fail safe** — absent, unterminated, or undecodable YAML frontmatter resolves to a typed error → an error-tier `SKILL-L001` diagnostic, never an uncaught throw. F4 degrades gracefully; full key-level conformance is the Phase 2 lint catalog (F20).
 - **L003 body definition** — "excluding frontmatter + code": strip the `---` block and fenced code blocks, count remaining lines. Definition pinned by fixtures; refine if it proves noisy.
 - **LintKit purity** — rules take a parsed `SkillSource`; no I/O/YAML keeps it interop-free + isolated-testable (the load-bearing layering choice).
 
@@ -139,5 +139,5 @@ Implemented per plan; **130 tests green** (97 → +25 feature, +8 review-hardeni
 - **L003 line counting** treats a terminal newline as a terminator (so exactly N content lines counts as N, not N+1) and matches fenced blocks per CommonMark — the closer must repeat the opener's marker char at ≥ its run length with nothing trailing — so mixed `~~~`/``` markers and fence-like content lines don't mis-toggle. (Review hardening, 2026-06-25.)
 - **L009 distinguishes absent vs. unparseable** `evals.json` (both error-tier) via `SkillSource.evalsPresent`: a present-but-invalid file reports "exists but is not valid JSON", not "no evals.json found". A frontmatter parse failure feeds an **empty** body to L003 (L001 already errors), so a malformed skill doesn't double-fire. Deeper artifact validation (exit 4) is still out of F4 scope.
 - **Selection is by name, not path** (review 2026-06-26): `skillet lint <name>…` matches discovered skill-directory names (unique under `skills_root`), de-duplicated + sorted for deterministic output; an unknown name's error lists the available ones. Chosen over fixing path-vs-`-C` resolution because a skill is a named entity (cf. `cargo -p`, `kubectl`, and skillet's own `harness info <id>`), which removes the cwd/`-C` ambiguity by construction and makes `--json` order stable; path support stays addable later (additive) if an out-of-tree use case appears.
-- **Frontmatter parse-failure detail** stays a single generic L001 message in F4; the typed `FrontmatterError` (`.missing`/`.unterminated`/`.undecodable`) lives in `ConfigYAML` and can't cross into pure `LintKit` without breaking interop containment, so granular frontmatter diagnostics are F3 `doctor`'s job (which already parses frontmatter).
+- **Frontmatter parse-failure detail** stays a single generic L001 message in F4; the typed `FrontmatterError` (`.missing`/`.unterminated`/`.undecodable`) lives in `ConfigYAML` and can't cross into pure `LintKit` without breaking interop containment, so granular frontmatter diagnostics land in the Phase 2 lint catalog (F20); `doctor` (F3) surfaces them as error-tier lint once F20 ships.
 - **CRLF** input is normalized in `FrontmatterParser` so scalars/body don't carry stray `\r`.

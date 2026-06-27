@@ -15,7 +15,7 @@ decide what's worth a test. This phase is sequenced ahead of the harness matrix
 
 ## Key Features
 
-1. Corpus triage — Track A (CLI: `skillet triage`) — PLANNED · Ported
+1. **[F33]** Corpus triage — Track A (CLI: `skillet triage`) — PLANNED · Ported
    - Purpose & user value: Run deterministic scorers across every bundle and
      cluster the signal into a failure taxonomy — error analysis, not a pass-rate
      — so the maintainer sees the patterns that actually recur.
@@ -27,7 +27,7 @@ decide what's worth a test. This phase is sequenced ahead of the harness matrix
    - Dependencies: scorers (Phase 2), corpus (Phase 3).
    - Confidence: Medium — design §6.1 `triage` (Track A).
 
-2. Scorer↔judge contradiction detection (surfaces in `triage`/`report`, gated in `next --strict`) — PLANNED · Net-new
+2. **[F34]** Scorer↔judge contradiction detection (surfaces in `triage`/`report`, gated in `next --strict`) — PLANNED · Net-new
    - Purpose & user value: When a deterministic scorer and the judge disagree on
      the same expectation, that calibration alarm outranks the pass rate — it
      silently inflates or deflates every number. Surfaced first, above the taxonomy.
@@ -38,7 +38,7 @@ decide what's worth a test. This phase is sequenced ahead of the harness matrix
    - Dependencies: scorers + verdicts (Phase 2).
    - Confidence: Medium — design §8, §6.1 `triage`.
 
-3. Baseline drift between captures (CLI: `skillet baseline compare`) — PLANNED · Ported
+3. **[F35]** Baseline drift between captures (CLI: `skillet baseline compare`) — PLANNED · Ported
    - Purpose & user value: For skills that *emit* findings, diff two captures —
      resolution-to-discovery ratio, severity drift, rule-ID entropy — emitted
      un-gated so the audit surfaces qualitative shifts instead of calcifying.
@@ -49,20 +49,20 @@ decide what's worth a test. This phase is sequenced ahead of the harness matrix
    - Dependencies: SARIF reader (Phase 2), corpus (Phase 3).
    - Confidence: Medium — design §6.2, §8.
 
-4. Cross-corpus drift matrix (CLI: `skillet baseline matrix`) — PLANNED · Ported
+4. **[F36]** Cross-corpus drift matrix (CLI: `skillet baseline matrix`) — PLANNED · Ported
    - Purpose & user value: Surface per-rule trajectories across packages —
      *generalizing rules* (firing in ≥3 packages) and *stuck rules* (zero variance
      across ≥3) — as producer-skill friction candidates.
    - Northstar: gap #1 (pattern discovery at corpus scale).
    - Success metrics:
      - `baseline matrix <skill>` classifies rules as generalizing/stuck with the package evidence behind each.
-   - Dependencies: baseline compare (F3).
+   - Dependencies: baseline compare (F35).
    - Confidence: Medium — design §6.2, §8.
 
 ## Dependencies & Sequencing
 
-- Local ordering: triage (F1) and contradiction detection (F2) first (consumer-skill
-  error analysis); baseline compare (F3) → matrix (F4) (producer-skill error analysis).
+- Local ordering: triage (F33) and contradiction detection (F34) first (consumer-skill
+  error analysis); baseline compare (F35) → matrix (F36) (producer-skill error analysis).
 - Cross-phase: findings here become evidence the Phase 5 gates engine consumes;
   contradictions condition the Phase 5 proof gate and Phase 6 `iterate` verdicts.
 
@@ -82,3 +82,4 @@ decide what's worth a test. This phase is sequenced ahead of the harness matrix
 
 - 2026-06-17: Phase created and spotlighted as its own phase (Northstar gap #1),
   sequenced before codification per the error-analysis-first cross-reference.
+- 2026-06-26: PATCH — adopted the global stable Fn ids (F33–F36; roadmap v1.8.0 scheme reconciliation). Mechanical renumber; no scope change.

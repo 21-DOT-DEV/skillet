@@ -15,7 +15,7 @@ still v1.
 
 ## Key Features
 
-1. opencode adapter (CLI: `--harness opencode`) — PLANNED · Net-new
+1. **[F46]** opencode adapter (CLI: `--harness opencode`) — PLANNED · Net-new
    - Purpose & user value: The second real agent — the one that makes the matrix
      meaningful and proves the adapter seam by a second implementation rather than
      assertion.
@@ -26,7 +26,7 @@ still v1.
    - Dependencies: adapter seam (Phase 1).
    - Confidence: Low — second-adapter choice is design Open Question 1 (doc assumes opencode). `needs-research`
 
-2. direct-api adapter (CLI: `--harness direct-api`) — PLANNED · Net-new
+2. **[F47]** direct-api adapter (CLI: `--harness direct-api`) — PLANNED · Net-new
    - Purpose & user value: A harness that inlines `SKILL.md` + references into the
      system context (siblings listed, bodies withheld) — and doubles as the
      cheapest CI text judge.
@@ -37,7 +37,7 @@ still v1.
    - Dependencies: adapter seam (Phase 1).
    - Confidence: Medium — design §9.5, §13.
 
-3. Replay adapter (test/replay double) — PLANNED · Ported
+3. **[F48]** Replay adapter (test/replay double) — PLANNED · Ported
    - Purpose & user value: Serve recorded traces/verdicts back so skillet's own
      suite and matrix tests run free and deterministic.
    - Northstar: loop integrity (cheap, reproducible CI).
@@ -46,17 +46,17 @@ still v1.
    - Dependencies: record/replay (Phase 2).
    - Confidence: Medium — design §9.5, §10.
 
-4. The portability table (CLI: `skillet run --matrix`) — PLANNED · Net-new
+4. **[F49]** The portability table (CLI: `skillet run --matrix`) — PLANNED · Net-new
    - Purpose & user value: Fan the suite across harnesses and add per-harness
      `pass^k` columns — the headline output no existing tool offers.
    - Northstar: differentiator #2 surface.
    - Success metrics:
      - `run --matrix` prints per-harness `pass^k` columns and flags evals that pass on one harness and fail/flake on another.
      - Spend estimate accounts for the harness multiplier before running.
-   - Dependencies: ≥2 adapters (F1/F2), runner (Phase 1).
+   - Dependencies: ≥2 adapters (F46/F47), runner (Phase 1).
    - Confidence: Medium — design §6.1 `run`, §9.5.
 
-5. Binary resolution chain & ban policy (CLI: `skillet harness list|info`, `harness which --search`) — PLANNED · Ported
+5. **[F50]** Binary resolution chain & ban policy (CLI: `skillet harness list|info`, `harness which --search`) — PLANNED · Ported
    - Purpose & user value: A fixed, printable resolution chain and a provenance-backed
      denylist so dev↔CI runs are reproducible — never a silent swap of an
      explicitly-pinned banned binary.
@@ -67,7 +67,7 @@ still v1.
    - Dependencies: adapters.
    - Confidence: Medium — design §9.1.
 
-6. Per-adapter environment-hygiene contracts — PLANNED · Net-new
+6. **[F51]** Per-adapter environment-hygiene contracts — PLANNED · Net-new
    - Purpose & user value: Each adapter declares which env vars are stripped /
      required / passed through (e.g. strip `CLAUDECODE` so a nested skillet doesn't
      confuse the child harness) — clean nesting, not ad-hoc.
@@ -79,8 +79,8 @@ still v1.
 
 ## Dependencies & Sequencing
 
-- Local ordering: adapters (F1/F2/F3) → matrix (F4); resolution/ban (F5) and env
-  hygiene (F6) underpin all adapters.
+- Local ordering: adapters (F46/F47/F48) → matrix (F49); resolution/ban (F50) and env
+  hygiene (F51) underpin all adapters.
 - Cross-phase: all build on Phase 1's `HarnessAdapter` seam; `--matrix` reuses the
   Phase 1/2 runner and judge.
 
@@ -99,3 +99,4 @@ still v1.
 
 - 2026-06-17: Phase created. Sequenced last within Next — a differentiator, not a
   Northstar value gap — per the Northstar-forward tie-break.
+- 2026-06-26: PATCH — adopted the global stable Fn ids (F46–F51; roadmap v1.8.0 scheme reconciliation). Mechanical renumber; no scope change.

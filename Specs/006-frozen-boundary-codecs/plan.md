@@ -6,7 +6,7 @@
 | **Phase** | 1 — Walking Skeleton ([Roadmap/phase-1-walking-skeleton.md](../../Roadmap/phase-1-walking-skeleton.md), F8) |
 | **Status** | ✅ IMPLEMENTED (2026-06-24) — codecs + goldens green (95 tests); §7.2 *prose* reconciliation pending |
 | **Last updated** | 2026-06-24 |
-| **Re-sequence** | **F8 moves before F4** (build order → F1, F2, F5, F6, **F8**, F4, F3, F7). F4 consumes F8's `evals.json` codec; F7 consumes the run-record family. |
+| **Re-sequence** | **F8 moves before F4** (build order → F1, F2, F5, F6, **F8**, F4, F7; doctor/F3 has since moved to Phase 2 — roadmap v1.8.0). F4 consumes F8's `evals.json` codec; F7 consumes the run-record family. |
 | **Builds on** | F1 (`SkilletJSON` envelope, golden-test harness); F6 (the `Trace`/`*.trace.json` codec already shipped; the synthetic-fixture discipline) |
 | **Authoritative refs** | **Anthropic skill-creator 2.0** [`references/schemas.md`](https://github.com/anthropics/skills/blob/main/skills/skill-creator/references/schemas.md) (Group 1); design §7.2/§7.5 (frozen formats), §9.3 (Trace), §9.4 (SARIF roles); SARIF 2.1.0 (OASIS); constitution IV (frozen formats), VI (no committed real artifacts/secrets) |
 | **Scope** | Land the EDDCore **models + decode/encode codecs + golden fixtures** for the boundary formats, grounded in reality; **reconcile §7.2** to match. Consumers (`run`/`report`/`capture`) stay in their phases. |

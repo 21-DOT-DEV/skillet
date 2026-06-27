@@ -15,7 +15,7 @@ that justify a new tool, and it encodes the expert's cost-benefit discipline:
 
 ## Key Features
 
-1. The gates engine (CLI: `skillet gate eval`) — PLANNED · Net-new
+1. **[F37]** The gates engine (CLI: `skillet gate eval`) — PLANNED · Net-new
    - Purpose & user value: A pure, instant, exhaustively-tested function over
      evidence + eval results + thresholds that decides what may be pulled and why
      — so the worklist is trustworthy the way `git status` is. It is the encoded
@@ -30,7 +30,7 @@ that justify a new tool, and it encodes the expert's cost-benefit discipline:
    - Dependencies: evidence format (Phase 3), eval results (Phase 1/2), contradiction join (Phase 4).
    - Confidence: Medium — design §8.
 
-2. The prioritized worklist (CLI: `skillet next`) — PLANNED · Net-new
+2. **[F38]** The prioritized worklist (CLI: `skillet next`) — PLANNED · Net-new
    - Purpose & user value: "git status for EDD" — the flagship. A pure derivation
      that tells you, with reasons, the single highest-value next action and the
      exact command, grouped ACT NOW / NEEDS CORROBORATION / HELD / WATCH.
@@ -38,10 +38,10 @@ that justify a new tool, and it encodes the expert's cost-benefit discipline:
    - Success metrics:
      - `next` renders the gate engine's output with a reason and a runnable command on every line.
      - Flaky evals and contradictions outrank everything; HELD items show their reason and are not nagged.
-   - Dependencies: gates engine (F1).
+   - Dependencies: gates engine (F37).
    - Confidence: Medium — design §6.1 `next`.
 
-3. CI invariant enforcement (CLI: `skillet next --strict`) — PLANNED · Net-new
+3. **[F39]** CI invariant enforcement (CLI: `skillet next --strict`) — PLANNED · Net-new
    - Purpose & user value: Let CI enforce the runbook — exit `5` on a violated
      invariant (a codified eval with no proof run, a skill_md edit landed without
      cleared gates) — without skillet ever blocking a human interactively (D6).
@@ -49,10 +49,10 @@ that justify a new tool, and it encodes the expert's cost-benefit discipline:
    - Success metrics:
      - `next --strict` exits `5` on an uncleared invariant and `0` otherwise.
      - An uncleared scorer↔judge contradiction on affected evals blocks under `--strict`.
-   - Dependencies: `next` (F2).
+   - Dependencies: `next` (F38).
    - Confidence: Medium — design §6.1 `next`, §8.
 
-4. Codify scaffolding (CLI: `skillet eval new`, `--from-friction <id>`) — PLANNED · Net-new
+4. **[F40]** Codify scaffolding (CLI: `skillet eval new`, `--from-friction <id>`) — PLANNED · Net-new
    - Purpose & user value: Turn a corroborated finding into a behavioral eval that
      cites the suspected `SKILL.md` clause and links the evidence — the *Codify*
      step, reached only after error analysis says it's worth it.
@@ -60,13 +60,13 @@ that justify a new tool, and it encodes the expert's cost-benefit discipline:
    - Success metrics:
      - `eval new <skill> --from-friction <id>` scaffolds assertions citing the clause, links the evidence, and sets state `candidate → codified` on save.
      - The new eval is confirmed to *fail today* before any fix is drafted.
-   - Dependencies: evidence (Phase 3), gates engine (F1), boundary codecs (Phase 1).
+   - Dependencies: evidence (Phase 3), gates engine (F37), boundary codecs (Phase 1).
    - Confidence: Medium — design §6.2 `eval new`, §7.3.
 
 ## Dependencies & Sequencing
 
-- Local ordering: gates engine (F1) → `next` (F2) → `--strict` (F3); `eval new`
-  (F4) is the action `next` proposes once a codify gate clears.
+- Local ordering: gates engine (F37) → `next` (F38) → `--strict` (F39); `eval new`
+  (F40) is the action `next` proposes once a codify gate clears.
 - Cross-phase: consumes Phase 3 evidence and Phase 4 findings/contradictions;
   `eval new` outputs the failing eval that Phase 6's `suggest`/`iterate` prove against.
 
@@ -85,3 +85,4 @@ that justify a new tool, and it encodes the expert's cost-benefit discipline:
 
 - 2026-06-17: Phase created. Sequenced after Error Analysis (Phase 4) so
   codification follows discovered failures, per the error-analysis-first ordering.
+- 2026-06-26: PATCH — adopted the global stable Fn ids (F37–F40; roadmap v1.8.0 scheme reconciliation). Mechanical renumber; no scope change.

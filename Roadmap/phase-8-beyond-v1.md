@@ -2,7 +2,7 @@
 
 **Status:** FUTURE
 **Horizon:** Later
-**Last Updated:** 2026-06-24
+**Last Updated:** 2026-06-26
 
 ## Goal
 
@@ -14,58 +14,58 @@ the explicit non-goals so scope stays honest.
 
 ## Key Features (name + purpose; detail backfilled on promotion)
 
-1. Track B — axial coding of corrective turns (CLI: `skillet triage --code-feedback`) — FUTURE · Net-new
+1. **[F52]** Track B — axial coding of corrective turns (CLI: `skillet triage --code-feedback`) — FUTURE · Net-new
    - Purpose & user value: Paid, judge-driven open→axial coding of the corrective
      turns captured with `--preserve-feedback` — grouping *observed* corrections by
      root cause (it never invents failures). Deepens Northstar gap #1.
    - Confidence: Medium — design §6.1 `triage`, §9.3.
 
-2. Diff-revert corrective-turn detector — FUTURE · Net-new
+2. **[F53]** Diff-revert corrective-turn detector — FUTURE · Net-new
    - Purpose & user value: The second half of corrective-turn detection — flag user
      turns whose subsequent diff reverts assistant-written hunks — beyond today's
      text-pattern heuristic. Confidence: Medium — design §9.3.
 
-3. codex adapter (CLI: `--harness codex`) — FUTURE · Net-new
+3. **[F54]** codex adapter (CLI: `--harness codex`) — FUTURE · Net-new
    - Purpose & user value: A third agent for a bigger audience and a stronger matrix.
      Confidence: Low — depends on Open Question 1. `needs-research`
 
-4. opencode session capture — FUTURE · Net-new
+4. **[F55]** opencode session capture — FUTURE · Net-new
    - Purpose & user value: Extend `capture` to a second harness's native session
      store. Confidence: Medium — design §9.5.
 
-5. Fixtures scaffolding (CLI: `skillet eval new --fixture`) — FUTURE · Net-new
+5. **[F56]** Fixtures scaffolding (CLI: `skillet eval new --fixture`) — FUTURE · Net-new
    - Purpose & user value: Generate the synthetic-package fixtures that evals run
      against. Confidence: Medium — design §13.
 
-6. The 7 roadmap lint rules — FUTURE · Net-new
+6. **[F57]** The 7 roadmap lint rules — FUTURE · Net-new
    - Purpose & user value: Extend the catalog (name↔directory match, reserved
      `anthropic-*`/`claude-*` prefixes, third-person what+when voice, ALWAYS/NEVER
      density, reference-extraction candidates, dead reference links). Several
      collapse into **data rules** once F11 lands; the semantic ones (voice,
      extraction) stay Swift. Confidence: Medium — design §6.1 `lint`.
 
-7. Variance dashboards — FUTURE · Net-new
+7. **[F58]** Variance dashboards — FUTURE · Net-new
    - Purpose & user value: Visualize `pass^k` variance across historical runs so
      "did it really improve?" has a richer answer than one number. Confidence:
      Medium — design §13.
 
-8. `lint --fix` — FUTURE · Net-new
+8. **[F59]** `lint --fix` — FUTURE · Net-new
    - Purpose & user value: Auto-apply mechanical lint fixes. Confidence: Medium —
      design §13.
 
-9. Real spend numbers — `Trace.usage` parsing in the claude-code adapter — FUTURE · Net-new
+9. **[F60]** Real spend numbers — `Trace.usage` parsing in the claude-code adapter — FUTURE · Net-new
    - Purpose & user value: Parse the stream's per-message usage / `total_cost_usd`
      (discarded today) into `Trace.usage` so estimates and the spend column show
      real numbers instead of trial-count fallbacks. Confidence: Medium — design §9.3.
 
-10. Judge↔human-label calibration harness — FUTURE · Net-new
+10. **[F10]** Judge↔human-label calibration harness — FUTURE · Net-new
     - Purpose & user value: Validate the LLM judge against a human-labeled golden
       set (agreement / sensitivity / specificity), beyond today's scorer↔judge
       contradiction alarm — addressing the documented judge-overconfidence and
       criteria-drift risks. Confidence: Low — net-new, not in the v1 design; added
       from the best-practice cross-reference. `needs-research`
 
-11. User-authored declarative lint rules (YAML) — FUTURE · Net-new
+11. **[F11]** User-authored declarative lint rules (YAML) — FUTURE · Net-new
     - Purpose & user value: Let maintainers add repo-local `SKILL-Lxxx` rules as
       data — a regex / threshold / presence matcher in YAML — without recompiling,
       so teams encode and share house style the way Vale and Semgrep do.
@@ -73,9 +73,9 @@ the explicit non-goals so scope stays honest.
       - A rule is a fixed, code-backed *kind* (`match` / `absence` / `occurrence` / `length` / `file-exists`) + pattern + scope + tier + message, riding the same SARIF emit + `lint.disable` exemption machinery as built-in rules.
       - Patterns run on a linear-time engine (or a per-match timeout) and rule files are schema-validated on read — no ReDoS, and no `script:` escape hatch (that's a Swift rule).
     - Confidence: Medium — precedent (Vale, Semgrep) + the design's §7.6 YAML usage policy; bounded by its litmus test and tripwire.
-    - Notes: Governed by design §7.6; repo-local rule IDs use a reserved range (e.g. `L2xx`). Subsumes the data-expressible subset of F6.
+    - Notes: Governed by design §7.6; repo-local rule IDs use a reserved range (e.g. `L2xx`). Subsumes the data-expressible subset of F57.
 
-12. Skill-security lint rules (security tier in the `SKILL-Lxxx` catalog) — FUTURE · Net-new
+12. **[F12]** Skill-security lint rules (security tier in the `SKILL-Lxxx` catalog) — FUTURE · Net-new
     - Purpose & user value: Static, deterministic-first security checks over the SKILL.md file —
       prompt-injection phrasing, evaluator/judge manipulation, unicode obfuscation, YAML
       front-matter anomalies, and suspicious size — so a skill is screened for adversarial content
@@ -83,7 +83,7 @@ the explicit non-goals so scope stays honest.
     - Confidence: Medium — competitive cross-reference (Skill-Lab's 5 security checks; AWS
       `skill-eval` static security scan; SkillTester's security benchmark); design §6.1 `lint`, §13.
 
-13. Skill-bundle integrity lint group — FUTURE · Net-new
+13. **[F13]** Skill-bundle integrity lint group — FUTURE · Net-new
     - Purpose & user value: Static checks over a skill's *bundle*, beyond its `SKILL.md` prose —
       that bundled `scripts/` are self-contained, non-interactive, and `--help`-capable; that
       referenced script/asset paths resolve; and that no files are orphaned or outside the spec
@@ -118,9 +118,10 @@ the explicit non-goals so scope stays honest.
   explicit non-goals; added the judge↔human-label calibration harness (F10) from
   the best-practice cross-reference as a `needs-research` item.
 - 2026-06-18: Added F11 (user-authored declarative YAML lint rules), governed by
-  the new design §7.6 YAML usage policy; noted the F6 overlap. Roadmap MINOR → v1.1.0.
+  the new design §7.6 YAML usage policy; noted the F6 [now F57] overlap. Roadmap MINOR → v1.1.0.
 - 2026-06-24: Added F12 (skill-security lint rules) from the v0.8 competitive cross-reference
   (Skill-Lab / AWS `skill-eval` / SkillTester); no settled-decision touch. Roadmap MINOR → v1.5.0.
 - 2026-06-24: Added F13 (skill-bundle integrity lint group — `scripts/`/asset/reference checks)
   from the Skill-Lab cross-reference (its Structure/Content bundle checks; AWS `skill-eval`); no
   settled-decision touch. Roadmap MINOR → v1.7.0.
+- 2026-06-26: PATCH — adopted the global stable Fn ids (items 1–9 → F52–F60; the already-global F10–F13 preserved; roadmap v1.8.0 scheme reconciliation). Mechanical renumber; no scope change.

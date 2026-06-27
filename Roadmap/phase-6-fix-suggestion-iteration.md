@@ -14,7 +14,7 @@ failures, never imagined ones.
 
 ## Key Features
 
-1. Draft edit proposals (CLI: `skillet suggest`) — PLANNED · Ported
+1. **[F41]** Draft edit proposals (CLI: `skillet suggest`) — PLANNED · Ported
    - Purpose & user value: From the failure taxonomy, the cited `SKILL.md`
      passages, and corrective-turn excerpts, the judge drafts *minimal surgical*
      content-anchored `EditProposal`s — generalize from feedback, prefer deleting
@@ -27,7 +27,7 @@ failures, never imagined ones.
    - Dependencies: findings (Phase 4), evidence (Phase 3), judge (Phase 2).
    - Confidence: Medium — design §6.1 `suggest`, §7.3.
 
-2. Safe apply to the working tree (CLI: `skillet suggest --apply[=<indices>]`) — PLANNED · Net-new
+2. **[F42]** Safe apply to the working tree (CLI: `skillet suggest --apply[=<indices>]`) — PLANNED · Net-new
    - Purpose & user value: Materialize a reviewed proposal into your working tree
      via content-anchored application (exact-once match, refuse-on-ambiguity,
      fail-loud on drift) — refusing a dirty tree and stopping short of the commit.
@@ -36,10 +36,10 @@ failures, never imagined ones.
    - Success metrics:
      - `suggest --apply=<i>` writes selected edits to the working tree, refuses a dirty tree, and never commits.
      - An anchor that matches zero or >1 times aborts loudly with a remedy.
-   - Dependencies: proposals (F1), content-anchored `EditApply` engine.
+   - Dependencies: proposals (F41), content-anchored `EditApply` engine.
    - Confidence: Medium — design §6.1 `suggest`, §7.3.
 
-3. Prove a proposal by A/B (CLI: `skillet iterate --proposals <f> --apply <indices>`) — PLANNED · Ported
+3. **[F43]** Prove a proposal by A/B (CLI: `skillet iterate --proposals <f> --apply <indices>`) — PLANNED · Ported
    - Purpose & user value: Apply a proposal subset into a *throwaway git worktree*
      (the live skill untouched), run the pinned suite at k, and print the per-eval
      `pass^k` delta against the baseline — proving the fix before any human lands
@@ -48,20 +48,20 @@ failures, never imagined ones.
    - Success metrics:
      - `iterate` reports before/after `pass^k` at observed k with no regressions to call a proposal proven.
      - Any regression discards the worktree and exits `1`, emitting nothing unless `--keep-worktree`.
-   - Dependencies: runner (Phase 1), proposals (F1), worktree lifecycle.
+   - Dependencies: runner (Phase 1), proposals (F41), worktree lifecycle.
    - Confidence: Medium — design §6.1 `iterate`, §10.
 
-4. Mark evidence proven (CLI: `skillet iterate --mark`) — PLANNED · Net-new
+4. **[F44]** Mark evidence proven (CLI: `skillet iterate --mark`) — PLANNED · Net-new
    - Purpose & user value: On a clean, regression-free A/B, advance the linked
      friction event to `proven` — an explicit, auditable state write, provisional
      until judge calibration clears.
    - Northstar: loop integrity (closes the evidence lifecycle honestly).
    - Success metrics:
      - `iterate --mark` sets `proven` only with zero pass^k regression *and* no unresolved contradiction on the affected evals.
-   - Dependencies: iterate (F3), evidence lifecycle (Phase 3), contradiction join (Phase 4).
+   - Dependencies: iterate (F43), evidence lifecycle (Phase 3), contradiction join (Phase 4).
    - Confidence: Medium — design §6.1 `iterate`, §8.
 
-5. Held-out proof discipline (gate: `gates.proof.require_holdout`) — PLANNED · Net-new
+5. **[F45]** Held-out proof discipline (gate: `gates.proof.require_holdout`) — PLANNED · Net-new
    - Purpose & user value: Close the *circular-proof* gap — a `skill_md` edit is `proven`
      only when a **held-out sibling eval** (same failure class, *not* the one the edit was
      drafted from) also passes, so a proof reflects a fix that generalizes rather than an
@@ -71,13 +71,13 @@ failures, never imagined ones.
    - Success metrics:
      - `iterate --mark proven` on a `skill_md` lever requires a held-out sibling eval to pass; with none, it records `single-eval, un-corroborated` and `next` surfaces the gap.
      - Under `--strict`, a missing held-out blocks promotion (exit `5`); advisory otherwise (D6).
-   - Dependencies: iterate (F3), the Proof gate + evidence `root_cause`/`cluster` keys (design §8, §7.3).
+   - Dependencies: iterate (F43), the Proof gate + evidence `root_cause`/`cluster` keys (design §8, §7.3).
    - Confidence: Medium — design §8 (Held-out proof), §5.2 `gates.proof`, §6.1 `iterate`; adopted from §14-8.
 
 ## Dependencies & Sequencing
 
-- Local ordering: `suggest` (F1) → `iterate` proves (F3) → `--mark` (F4); safe
-  apply (F2) is the human's landing step after a proven A/B.
+- Local ordering: `suggest` (F41) → `iterate` proves (F43) → `--mark` (F44); safe
+  apply (F42) is the human's landing step after a proven A/B.
 - Cross-phase: depends on Phase 5 (`eval new` produced the failing eval and the
   proposal's motivation), Phase 4 (the contradiction gate), and Phase 1 (the runner
   `iterate` re-measures through).
@@ -99,5 +99,6 @@ failures, never imagined ones.
 
 - 2026-06-17: Phase created and spotlighted as its own phase (Northstar gap #2),
   sequenced ahead of the harness matrix within Next.
-- 2026-06-24: Added F5 (held-out proof discipline), adopting design §14-8 (R2) from the v0.8
+- 2026-06-24: Added F5 [now F45] (held-out proof discipline), adopting design §14-8 (R2) from the v0.8
   competitive cross-reference; graduated from ROADMAP *Candidate Enhancements*. Roadmap MINOR → v1.6.0.
+- 2026-06-26: PATCH — adopted the global stable Fn ids (F41–F45; roadmap v1.8.0 scheme reconciliation). Mechanical renumber; no scope change.

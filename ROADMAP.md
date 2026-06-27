@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.7.1
-**Last Updated:** 2026-06-25
+**Version:** v1.8.0
+**Last Updated:** 2026-06-26
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is
@@ -52,10 +52,11 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 
 - **Phase 1 (Now):** The thinnest end-to-end thread — `skillet run` one eval
   through `claude-code`, judged, with a `pass^k` result — plus just-enough
-  `init`/`doctor`/`lint`. Proves the architecture and delivers 30-second value.
+  `init`/`lint`. Proves the architecture and delivers 30-second value. (`run`
+  is the only feature still open; the `doctor` preflight moved to Phase 2.)
 - **Phase 2 (Next):** Make deltas trustworthy — trigger axis, A/B baseline,
-  grounded judge, scorers, flaky hygiene, record/replay, the full free
-  static-gate catalog, and TTY/HTML reporting.
+  grounded judge, scorers, flaky hygiene, record/replay, the `doctor` preflight
+  gate, the full free static-gate catalog, and TTY/HTML reporting.
 - **Phase 3 (Next):** Record production sessions and human friction as
   structured, greppable evidence (secret-sanitized on capture) — the raw material
   for error analysis.
@@ -71,6 +72,23 @@ derived from `skillet-design.md` and an external best-practice cross-reference
   rules — incl. the **skill-security** (F12) and **skill-bundle-integrity** (F13) groups from the
   competitive cross-reference — **user-authored (YAML) lint rules**, real spend numbers, a
   judge↔human-label calibration harness — plus the explicit non-goals.
+
+## Feature identifiers
+
+Every feature carries a stable **`Fn`** id (e.g. `F6`, `F23`): a single global counter across the
+whole roadmap, **assigned once at creation and never changed, reused, or renumbered** when a feature
+moves between phases or is re-sequenced. Ids deliberately **do not encode phase or position** — a
+feature keeps its id wherever it lands — so every cross-reference (specs, design, change log) survives
+reprioritization. This is the standard stable-identifier discipline for requirements and issue
+trackers: assign-once, unique, position-independent, never-renumber
+([Sparx EA](https://sparxsystems.com/enterprise_architect_user_guide/14.0/model_domains/requirements_naming_and_numbering.html),
+[RTEMS](https://docs.rtems.org/docs/main/eng/req/req-for-req.html),
+[Jira](https://support.atlassian.com/jira/kb/how-to-get-issue-id-from-the-jira-user-interface/)).
+
+Consequences, by design: ids are **not** contiguous within a phase, and the per-phase Key-Features
+lists are ordered by build sequence/theme, **not** by id. `F9` is a retired gap (never assigned). The
+v1.8.0 reconciliation assigned global ids to the phases that had been using local per-phase numbering;
+Phase 1's `F1–F8` and Phase 8's `F10–F13` were already global and were preserved.
 
 ## Product-Level Metrics & Success Criteria
 
@@ -113,9 +131,9 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 - **Phase 1 underway; later phases greenfield.** Phase 1 features F1 (project discovery &
   output contract), F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6
   (claude-code adapter), and F8 (frozen boundary codecs) are implemented (`Specs/001`–`006`;
-  122 tests green); the remainder of Phase 1 (F3 `doctor`, F7 `run`) and Phases 2–8 are
-  PLANNED/FUTURE. Those statuses reflect design intent verified against the design doc (Medium
-  confidence), not running code.
+  130 tests green); the remainder of Phase 1 is just F7 (`run`), and Phases 2–8 — now including
+  `doctor` (F3, moved into Phase 2) — are PLANNED/FUTURE. Those statuses reflect design intent
+  verified against the design doc (Medium confidence), not running code.
 - **"Ported" assumption.** The design doc says much of v1 is faithfully
   translated from a predecessor (`swift-skill-eval` + a Python trigger harness).
   That predecessor is not in this repo, so `Ported` tags are a scheduling hint,
@@ -157,6 +175,19 @@ phases and the v1 scope line are unchanged.
 
 ## Change Log
 
+- v1.8.0 (2026-06-26): MINOR — **moved `doctor` (F3) from Phase 1 to Phase 2** and **reconciled the
+  `Fn` identifier scheme across all phases**. `doctor` is off the walking-skeleton critical path (F7
+  `run` doesn't depend on it) and its companions — the `--paid` canary, the full lint catalog, and
+  `config list --origins` — are all Phase 2; so F7 becomes Phase 1's only remaining feature. The
+  scheme reconciliation adopts one global, stable, never-reused, position-independent `Fn` counter (new
+  *Feature identifiers* section), grounded in stable-ID best practice (Sparx EA, RTEMS req-for-req, Jira
+  — assign-once / never-renumber / don't-encode-position; links in that section). Minimal-churn: Phase 1's `F1–F8` and
+  Phase 8's `F10–F13` were already global and were **preserved** (so design/AGENTS/Specs/back-changelog
+  references stay valid); the local-ordinal Phases 2–7 and Phase 8 items 1–9 received global ids
+  `F14–F60`; `doctor` keeps `F3`; `F9` is a retired gap. Also **re-deferred the three frontmatter
+  spec-conformance rules** (name kebab/length, allowed-keys, duplicate-key rejection) from `doctor` to
+  Phase 2's full lint catalog (F20) — they still surface in `doctor` once they're lint rules. No v1
+  scope change; no `plan.md` yet (authored at implementation time).
 - v1.7.1 (2026-06-25): PATCH — Phase 1 **F4 (`skillet lint`) implemented**: the free static gate —
   `SKILL-L001` (description >1024 Unicode code points, matching Anthropic's `quick_validate.py`),
   `SKILL-L003` (body-line budget), `SKILL-L009` (has-evals, ≥3) — as a pure `LintKit` over a
@@ -172,7 +203,7 @@ phases and the v1 scope line are unchanged.
   stale **Phase 8 overview bullet** to name the security + bundle-integrity groups (design→roadmap
   drift surfaced by the F12/F13 adds). Design doc → v0.11 (§13 v1.x). No v1 scope change.
 - v1.6.0 (2026-06-24): MINOR — **adopted held-out proof (R2 / design §14-8)** and graduated it from
-  *Candidate Enhancements* into **Phase 6 (new F5)**: a `skill_md` edit is `proven` only when a
+  *Candidate Enhancements* into **Phase 6 (new F5 [now F45])**: a `skill_md` edit is `proven` only when a
   held-out sibling eval (same failure class, not the one it was drafted from) also passes — guarding
   against overfit proof and hardening the *corroboration integrity* outcome. Encoded in design §8
   (Held-out proof gate), §5.2 (`gates.proof.require_holdout`, default on; advisory per D6, enforced
@@ -211,7 +242,7 @@ phases and the v1 scope line are unchanged.
   (feature **Fn** ids unchanged — stable across specs and Package targets). Also marked Phase 1
   IN PROGRESS and corrected the now-stale "no implementation" assumption (F1/F2 shipped:
   `Specs/001`, `Specs/002`). No scope change.
-- v1.2.0 (2026-06-18): MINOR — added **capture secret-sanitization** to Phase 3 (F7):
+- v1.2.0 (2026-06-18): MINOR — added **capture secret-sanitization** to Phase 3 (F7 [now F32]):
   redact-in-place before write, bundled `betterleaks` (MIT) run offline, fail-closed
   when unavailable. Closes the commit-secrets footgun; extends design §12 privacy
   (§6.1/§7.2/§11/§12 updated, doc → v0.4).

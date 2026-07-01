@@ -47,4 +47,20 @@ struct HarnessIntegrationTests {
         let output = try await harness.run(["harness", "info", "bogus-harness"])
         #expect(output.exitCode == 2)
     }
+
+    @Test("harness info shares the strict config loader: an undecodable repo skillet.yaml fails loud (exit 4)")
+    func invalidConfigRejected() async throws {
+        let root = try Fixture.makeProject(); defer { Fixture.remove(root) }
+        try "harness:\n\tclaude-code:\n\t\tpath: /x\n".write(   // tab indentation → invalid YAML
+            to: root.appendingPathComponent("skillet.yaml"), atomically: true, encoding: .utf8)
+        let output = try await SkilletHarness().run(["harness", "info", "-C", root.path])
+        #expect(output.exitCode == 4)
+    }
+
+    @Test("An invalid -C directory is an environment error, not silently ignored (exit 3)")
+    func invalidDashCRejected() async throws {
+        // Previously `harness list` swallowed a bad -C and printed adapters; it must honor the global contract.
+        let output = try await SkilletHarness().run(["-C", "/no/such/skillet-dir-xyz", "harness", "list"])
+        #expect(output.exitCode == 3)
+    }
 }

@@ -19,3 +19,4 @@ roadmap re-phasing.
 | 004 | claude-code adapter (trace parser, resolution & probe) | 1 · F6 | Implemented | [plan.md](004-claude-code-adapter/plan.md) |
 | 005 | Free static lint — error-tier core (`skillet lint`) | 1 · F4 | Implemented | [plan.md](005-free-static-lint/plan.md) |
 | 006 | Frozen boundary-format codecs + golden tests | 1 · F8 | Implemented | [plan.md](006-frozen-boundary-codecs/plan.md) |
+| 007 | The neutral runner — behavioral axis + `pass^k` (`skillet run`) | 1 · F7 | Implemented | [plan.md](007-neutral-runner/plan.md) |

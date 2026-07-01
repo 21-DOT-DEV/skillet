@@ -24,6 +24,11 @@ struct EvalsFileTests {
         try JSONDecoder().decode(EvalsFile.self, from: Data(s.utf8))
     }
 
+    @Test("Numeric eval ids are exposed as their string form, not dropped (so records keep source ids)")
+    func numericIdsCoerced() throws {
+        #expect(try decode(v2).cases.map(\.id) == ["0", "1", "2"])
+    }
+
     @Test("Decodes 2.0 object: skill_name, caseCount, normalized case access")
     func decodes2_0() throws {
         let f = try decode(v2)

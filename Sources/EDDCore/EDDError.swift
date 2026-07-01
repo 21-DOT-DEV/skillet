@@ -13,14 +13,21 @@ public enum EDDError: Error, Sendable, Equatable {
     case harnessNotFound(harness: String)
     /// An explicitly pinned harness binary is on the denylist. Exit ``ExitCode/environment``.
     case harnessBanned(harness: String, version: String)
+    /// The harness resolved + ran but is not authenticated (e.g. `claude auth status` reports logged-out).
+    /// Exit ``ExitCode/environment`` — caught at preflight, before any paid trial.
+    case harnessUnauthenticated(harness: String)
     /// A skill is not visible to the harness under its injection strategy. Exit ``ExitCode/environment``.
     case skillNotVisible(skill: String, reason: String)
+    /// A committed artifact is corrupt/invalid against its schema (e.g. unparseable `evals.json`).
+    /// Exit ``ExitCode/artifact``.
+    case invalidArtifact(path: String, reason: String)
 
     /// The stable exit code for this error.
     public var exitCode: ExitCode {
         switch self {
         case .usage: .usage
-        case .directoryNotFound, .projectNotFound, .harnessNotFound, .harnessBanned, .skillNotVisible: .environment
+        case .directoryNotFound, .projectNotFound, .harnessNotFound, .harnessBanned, .harnessUnauthenticated, .skillNotVisible: .environment
+        case .invalidArtifact: .artifact
         }
     }
 
@@ -32,7 +39,9 @@ public enum EDDError: Error, Sendable, Equatable {
         case .projectNotFound: "project_not_found"
         case .harnessNotFound: "harness_not_found"
         case .harnessBanned: "harness_banned"
+        case .harnessUnauthenticated: "harness_unauthenticated"
         case .skillNotVisible: "skill_not_visible"
+        case .invalidArtifact: "invalid_artifact"
         }
     }
 
@@ -49,8 +58,12 @@ public enum EDDError: Error, Sendable, Equatable {
             "could not find the \(harness) binary (checked the flag, env, config, and PATH)"
         case let .harnessBanned(harness, version):
             "the pinned \(harness) version \(version) is on the denylist (known-bad)"
+        case let .harnessUnauthenticated(harness):
+            "the \(harness) harness is not authenticated (no usable credential)"
         case let .skillNotVisible(skill, reason):
             "skill \(skill) is not visible to the harness: \(reason)"
+        case let .invalidArtifact(path, reason):
+            "\(path) is invalid: \(reason)"
         }
     }
 
@@ -67,8 +80,12 @@ public enum EDDError: Error, Sendable, Equatable {
             "install \(harness), or set its path via --harness-path, SKILLET_<ID>_BIN, or harness.<id>.path"
         case .harnessBanned:
             "pin a non-banned version, or set SKILLET_ALLOW_BANNED_<ID>=1 to override deliberately"
+        case let .harnessUnauthenticated(harness):
+            "authenticate \(harness) (e.g. `claude auth login`, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN), then re-run"
         case .skillNotVisible:
             "check the skill directory has a SKILL.md (and references/) resolvable under the harness"
+        case .invalidArtifact:
+            "fix or regenerate the file so it matches its schema (see skillet-design §7)"
         }
     }
 }

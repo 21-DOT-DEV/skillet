@@ -6,11 +6,15 @@ public struct SkilletConfig: Codable, Sendable, Equatable {
     public var project: Project?
     public var harness: Harness?
     public var lint: Lint?
+    public var runs: Runs?
+    public var judge: Judge?
 
-    public init(project: Project? = nil, harness: Harness? = nil, lint: Lint? = nil) {
+    public init(project: Project? = nil, harness: Harness? = nil, lint: Lint? = nil, runs: Runs? = nil, judge: Judge? = nil) {
         self.project = project
         self.harness = harness
         self.lint = lint
+        self.runs = runs
+        self.judge = judge
     }
 
     public struct Project: Codable, Sendable, Equatable {
@@ -73,6 +77,69 @@ public struct SkilletConfig: Codable, Sendable, Equatable {
             disable = try container.decodeIfPresent([String].self, forKey: .disable) ?? []
             bodyWarnLines = try container.decodeIfPresent(Int.self, forKey: .bodyWarnLines) ?? 500
             bodyErrorLines = try container.decodeIfPresent(Int.self, forKey: .bodyErrorLines) ?? 1000
+        }
+    }
+
+    /// The `runs:` knobs (design §5.2): trials per eval, the per-trial watchdog timeout, concurrency,
+    /// and the spend-confirm threshold. Absent keys fall back to the shipped defaults. (The template's
+    /// `infra_retries` is unmodeled here — ignored on decode — until F18 lands infra-retry.)
+    public struct Runs: Codable, Sendable, Equatable {
+        /// Trials per eval (overridable per invocation with `--runs`).
+        public var k: Int
+        /// Per-trial hard timeout, a duration string (e.g. `"10m"`).
+        public var timeout: String
+        /// Concurrent trials (Phase 1 ships serial: `1`).
+        public var concurrency: Int
+        /// `skillet run` confirms on the TTY when the estimated trial count exceeds this (design P9).
+        public var confirmAboveTrials: Int
+        /// Cap (bytes) on a single trial's captured stdout/stderr. Defaults to 64 MiB — big enough that a
+        /// normal large `stream-json` session isn't truncated into a false failure, bounded so a runaway
+        /// child can't exhaust memory. (Overflow beyond this stays a failed trial; true infra-class +
+        /// retry is F18.)
+        public var maxOutputBytes: Int
+
+        public init(k: Int = 3, timeout: String = "10m", concurrency: Int = 1, confirmAboveTrials: Int = 25, maxOutputBytes: Int = 64 << 20) {
+            self.k = k
+            self.timeout = timeout
+            self.concurrency = concurrency
+            self.confirmAboveTrials = confirmAboveTrials
+            self.maxOutputBytes = maxOutputBytes
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case k, timeout, concurrency
+            case confirmAboveTrials = "confirm_above_trials"
+            case maxOutputBytes = "max_output_bytes"
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            k = try container.decodeIfPresent(Int.self, forKey: .k) ?? 3
+            timeout = try container.decodeIfPresent(String.self, forKey: .timeout) ?? "10m"
+            concurrency = try container.decodeIfPresent(Int.self, forKey: .concurrency) ?? 1
+            confirmAboveTrials = try container.decodeIfPresent(Int.self, forKey: .confirmAboveTrials) ?? 25
+            maxOutputBytes = try container.decodeIfPresent(Int.self, forKey: .maxOutputBytes) ?? (64 << 20)
+        }
+    }
+
+    /// The `judge:` knobs (design §5.2): which adapter backs the judge and which model it targets.
+    /// `provider` is an adapter id with the judging capability — Phase 1 default `claude-code` (the
+    /// text judge shells the resolved `claude` CLI). Absent keys fall back to the shipped defaults.
+    public struct Judge: Codable, Sendable, Equatable {
+        public var provider: String
+        public var model: String
+
+        public init(provider: String = "claude-code", model: String = "claude-sonnet-4-6") {
+            self.provider = provider
+            self.model = model
+        }
+
+        enum CodingKeys: String, CodingKey { case provider, model }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "claude-code"
+            model = try container.decodeIfPresent(String.self, forKey: .model) ?? "claude-sonnet-4-6"
         }
     }
 }

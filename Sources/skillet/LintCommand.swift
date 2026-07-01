@@ -34,19 +34,18 @@ struct LintCommand: AsyncParsableCommand {
                 throw EDDError.projectNotFound(cwd: context.cwd)
             }
 
-            let config = loadConfig(options: options)
+            let config = try loadConfig(options: options)
             let skillsRoot = config?.project?.skillsRoot ?? "skills"
             let lintConfig = config?.lint ?? .init()
 
             let discovered = SkillScanner().scan(skillsRoot: root.appendingPathComponent(skillsRoot))
             let selected = try select(discovered, requested: skills)
 
-            let linter = Linter()
             let reader = SkillReader()
             var diagnostics: [Diagnostic] = []
             for directory in selected {
                 let raw = try reader.read(skillDirectory: directory)
-                diagnostics += linter.lint(assemble(raw), config: lintConfig)
+                diagnostics += Linter().lint(assembleSkillSource(raw), config: lintConfig)   // shared assembly (LintSupport)
             }
             let report = LintReport(diagnostics: diagnostics)
 
@@ -60,22 +59,6 @@ struct LintCommand: AsyncParsableCommand {
             Console.emit(renderer.renderError(error))
             throw SilentExit(code: error.exitCode.rawValue)
         }
-    }
-
-    /// Assemble a pure `SkillSource` from raw bytes: parse the frontmatter (`nil` when unparseable,
-    /// which L001 reports) and decode `evals.json` (`nil` when absent/corrupt, which L009 reports).
-    private func assemble(_ raw: RawSkill) -> SkillSource {
-        let parsed = try? FrontmatterParser.parse(raw.markdown)
-        let evals = raw.evalsJSON.flatMap { try? JSONDecoder().decode(EvalsFile.self, from: $0) }
-        return SkillSource(
-            name: raw.name,
-            frontmatter: parsed?.frontmatter,
-            // On a frontmatter parse failure L001 already errors; feed an empty body so L003 doesn't
-            // also fire on the (unsplit) frontmatter lines.
-            body: parsed?.body ?? "",
-            evals: evals,
-            evalsPresent: raw.evalsJSON != nil
-        )
     }
 
     /// Resolve requested skill **names** to discovered directories, de-duplicated and sorted for

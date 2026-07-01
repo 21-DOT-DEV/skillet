@@ -1,0 +1,131 @@
+import Foundation
+
+/// One judged criterion — a single `expected_behavior`/expectation line graded by a ``Judge``. Pure
+/// (EDDCore); the effectful judge lives in JudgeKit. Carries the provenance the design requires so a
+/// run is re-gradable and comparable across time (§9.4).
+public struct Verdict: Codable, Sendable, Equatable {
+    public let criterion: String
+    public let passed: Bool
+    public let rationale: String
+    public let judgeId: String
+    public let model: String
+    public let judgePromptVersion: String
+
+    public init(criterion: String, passed: Bool, rationale: String, judgeId: String, model: String, judgePromptVersion: String) {
+        self.criterion = criterion
+        self.passed = passed
+        self.rationale = rationale
+        self.judgeId = judgeId
+        self.model = model
+        self.judgePromptVersion = judgePromptVersion
+    }
+}
+
+/// How a trial ended — the run-record **exit class** (design §10), first-class so aggregation can
+/// tell measurement from noise. (F7 ships `passed`/`failed`/`timeout`; the `infra` class lands with
+/// the infra-retry classifier in F18.)
+public enum TrialExit: String, Codable, Sendable, Equatable {
+    case passed, failed, timeout
+}
+
+/// One trial of one eval: its per-criterion verdicts + exit class. A trial **passes iff** the exit
+/// class is `passed` **and** every verdict passed.
+public struct TrialResult: Codable, Sendable, Equatable {
+    public let exit: TrialExit
+    public let verdicts: [Verdict]
+
+    public init(exit: TrialExit, verdicts: [Verdict]) {
+        self.exit = exit
+        self.verdicts = verdicts
+    }
+
+    /// Passes iff it ran cleanly, produced **at least one** verdict, and every verdict passed. The
+    /// non-empty guard means a trial with no graded criteria never counts as a vacuous pass (a defense
+    /// behind the pre-spend rejection of zero-expectation evals).
+    public var passed: Bool { exit == .passed && !verdicts.isEmpty && verdicts.allSatisfy(\.passed) }
+}
+
+/// All recorded trials for one eval.
+public struct EvalResult: Codable, Sendable, Equatable {
+    public let evalId: String
+    public let trials: [TrialResult]
+
+    public init(evalId: String, trials: [TrialResult]) {
+        self.evalId = evalId
+        self.trials = trials
+    }
+
+    /// Trials actually recorded for this eval (may be < requested k if trials were lost).
+    public var recorded: Int { trials.count }
+    /// Recorded trials that fully passed.
+    public var passes: Int { trials.filter(\.passed).count }
+}
+
+/// An eval's `pass^k` verdict at its recorded trials (design §4 vocab).
+public enum EvalStatus: String, Codable, Sendable, Equatable {
+    case pass, fail, flaky
+}
+
+/// The pure `pass^k` math (constitution III): given per-eval (passes, recorded) — exactly what the
+/// committed `benchmark.json` carries — it derives each eval's status and the aggregate, so the
+/// baseline re-derives offline from committed records, not the gitignored cache (P2/D3).
+public enum PassK {
+    /// An eval **PASSes** iff every recorded trial passed (`passes == recorded`, recorded > 0);
+    /// **FAILs** iff zero passed; **FLAKY** iff `0 < passes < recorded` — on the eval's *own*
+    /// recorded count, never truncated to the run's observed k.
+    public static func status(passes: Int, recorded: Int) -> EvalStatus {
+        if recorded > 0 && passes == recorded { return .pass }
+        if passes == 0 { return .fail }
+        return .flaky
+    }
+}
+
+/// The `--json` payload for `skillet run` (`skillet.run/1`): the run-level `observed_k` + aggregate
+/// `pass^k`, with per-eval rows showing each eval's own `passes`/`recorded` and status. Built from a
+/// live run's ``EvalResult``s, or **re-derived offline** from per-eval `(passes, recorded)` counts
+/// (e.g. from the committed `benchmark.json`) — the authoritative recompute path.
+public struct RunReport: SchemaIdentified, Sendable, Equatable {
+    public static let schema = "skillet.run/1"
+
+    public let skill: String
+    /// `min` recorded-trial count across evals — the run-level basis for the aggregate.
+    public let observedK: Int
+    /// Fraction of evals that PASS. Meaningful only when `measurable` (observed k ≥ 2).
+    public let passK: Double
+    /// Whether `pass^k` is meaningful (observed k ≥ 2); below that, consistency is "unmeasurable".
+    public let measurable: Bool
+    public let evals: [Row]
+    public let passed: Int
+    public let flaky: Int
+    public let failed: Int
+
+    public struct Row: Codable, Sendable, Equatable {
+        public let id: String
+        public let status: EvalStatus
+        public let passes: Int
+        public let recorded: Int
+        public init(id: String, status: EvalStatus, passes: Int, recorded: Int) {
+            self.id = id
+            self.status = status
+            self.passes = passes
+            self.recorded = recorded
+        }
+    }
+
+    /// Build from a live run's full results.
+    public init(skill: String, results: [EvalResult]) {
+        self.init(skill: skill, counts: results.map { (id: $0.evalId, passes: $0.passes, recorded: $0.recorded) })
+    }
+
+    /// Build from per-eval `(passes, recorded)` — the offline recompute path (e.g. from `benchmark.json`).
+    public init(skill: String, counts: [(id: String, passes: Int, recorded: Int)]) {
+        self.skill = skill
+        self.evals = counts.map { Row(id: $0.id, status: PassK.status(passes: $0.passes, recorded: $0.recorded), passes: $0.passes, recorded: $0.recorded) }
+        self.observedK = counts.map(\.recorded).min() ?? 0
+        self.passed = evals.filter { $0.status == .pass }.count
+        self.flaky = evals.filter { $0.status == .flaky }.count
+        self.failed = evals.filter { $0.status == .fail }.count
+        self.passK = evals.isEmpty ? 0 : Double(passed) / Double(evals.count)
+        self.measurable = observedK >= 2
+    }
+}

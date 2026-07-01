@@ -8,7 +8,7 @@ public struct ReplayAdapter: HarnessAdapter {
     public let capabilities: HarnessCapabilities = [.runTask, .skillInjection, .traceParsing]
     public init() {}
 
-    public func probe() async throws -> HarnessInfo {
+    public func probe(strict: Bool) async throws -> HarnessInfo {
         HarnessInfo(id: id, version: "replay-1", authenticated: true, available: true)
     }
 

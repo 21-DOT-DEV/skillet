@@ -32,4 +32,11 @@ public enum Console {
     public static func isStdoutTTY() -> Bool {
         isatty(FileHandle.standardOutput.fileDescriptor) != 0
     }
+
+    /// Whether stdin is attached to a terminal — required (alongside the output stream) before an
+    /// interactive prompt, so a piped/redirected stdin fails like `--no-input` rather than blocking on
+    /// or consuming unexpected `readLine()` input.
+    public static func isStdinTTY() -> Bool {
+        isatty(FileHandle.standardInput.fileDescriptor) != 0
+    }
 }

@@ -25,12 +25,18 @@ struct HarnessListCommand: AsyncParsableCommand {
     @OptionGroup var options: GlobalOptions
 
     func run() async throws {
-        let report = await HarnessInfoReport.build(from: configuredRegistry(options: options))
-        if options.json {
-            Console.emit(Rendering(stdout: try SkilletJSON.encode(report) + "\n"))
-        } else {
-            let rows = report.adapters.map { [$0.id, $0.capabilities.joined(separator: ", ")] }
-            Console.emit(options.makeRenderer().renderTable(["ADAPTER", "CAPABILITIES"], rows))
+        let renderer = options.makeRenderer()
+        do {
+            let report = await HarnessInfoReport.build(from: try configuredRegistry(options: options))
+            if options.json {
+                Console.emit(Rendering(stdout: try SkilletJSON.encode(report) + "\n"))
+            } else {
+                let rows = report.adapters.map { [$0.id, $0.capabilities.joined(separator: ", ")] }
+                Console.emit(renderer.renderTable(["ADAPTER", "CAPABILITIES"], rows))
+            }
+        } catch let error as EDDError {
+            Console.emit(renderer.renderError(error))
+            throw SilentExit(code: error.exitCode.rawValue)
         }
     }
 }
@@ -48,33 +54,33 @@ struct HarnessInfoCommand: AsyncParsableCommand {
 
     func run() async throws {
         let renderer = options.makeRenderer()
-        let registry = configuredRegistry(options: options)
-
-        if let id, registry.adapter(id: HarnessID(id)) == nil {
-            let error = EDDError.usage(
-                message: "unknown harness id: \(id)",
-                remedy: "run `skillet harness list` to see registered adapters"
-            )
+        do {
+            let registry = try configuredRegistry(options: options)
+            if let id, registry.adapter(id: HarnessID(id)) == nil {
+                throw EDDError.usage(
+                    message: "unknown harness id: \(id)",
+                    remedy: "run `skillet harness list` to see registered adapters"
+                )
+            }
+            let chosen = id.map { wanted in
+                HarnessRegistry(adapters: registry.adapters.filter { $0.id.rawValue == wanted })
+            } ?? registry
+            let report = await HarnessInfoReport.build(from: chosen)
+            if options.json {
+                Console.emit(Rendering(stdout: try SkilletJSON.encode(report) + "\n"))
+            } else {
+                let rows = report.adapters.map { adapter -> [String] in
+                    var status = adapter.available
+                        ? "available (\(adapter.version ?? "?"))"
+                        : (adapter.detail ?? "unavailable")
+                    for warning in adapter.warnings { status += "  ⚠️ \(warning)" }
+                    return [adapter.id, adapter.capabilities.joined(separator: ", "), status]
+                }
+                Console.emit(renderer.renderTable(["ADAPTER", "CAPABILITIES", "STATUS"], rows))
+            }
+        } catch let error as EDDError {
             Console.emit(renderer.renderError(error))
             throw SilentExit(code: error.exitCode.rawValue)
-        }
-
-        let chosen = id.map { wanted in
-            HarnessRegistry(adapters: registry.adapters.filter { $0.id.rawValue == wanted })
-        } ?? registry
-        let report = await HarnessInfoReport.build(from: chosen)
-
-        if options.json {
-            Console.emit(Rendering(stdout: try SkilletJSON.encode(report) + "\n"))
-        } else {
-            let rows = report.adapters.map { adapter -> [String] in
-                var status = adapter.available
-                    ? "available (\(adapter.version ?? "?"))"
-                    : (adapter.detail ?? "unavailable")
-                for warning in adapter.warnings { status += "  ⚠️ \(warning)" }
-                return [adapter.id, adapter.capabilities.joined(separator: ", "), status]
-            }
-            Console.emit(renderer.renderTable(["ADAPTER", "CAPABILITIES", "STATUS"], rows))
         }
     }
 }

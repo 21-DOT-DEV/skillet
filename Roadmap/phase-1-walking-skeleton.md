@@ -1,8 +1,8 @@
 # Phase 1 — Walking Skeleton: Prove the Loop End-to-End
 
-**Status:** IN PROGRESS — F1, F2, F4, F5, F6, F8 complete; F7 (`run`) is the only feature remaining (`doctor` F3 moved to Phase 2)
+**Status:** COMPLETE — F1, F2, F4, F5, F6, F7, F8 all shipped (`doctor` F3 moved to Phase 2)
 **Horizon:** Now
-**Last Updated:** 2026-06-26
+**Last Updated:** 2026-06-28
 **Review:** completed-items cross-artifact audit → [phase-1-review.md](phase-1-review.md)
 
 ## Goal
@@ -68,7 +68,7 @@ sequence is re-ordered.
    - Success metrics:
      - A recorded Claude Code session (native JSONL) parses into a `Trace` — turns, tool calls, file changes, skill invocations — golden-tested vs a **synthetic** fixture mirroring the native format (real logs are not committed — constitution VI; the parser is re-derived from the live format, the predecessor port being absent).
      - The binary resolution chain (flag > env > config > PATH; vendored deferred) selects the right link and records which one won (the source is captured + printable; `harness which` surfaces it later).
-     - A seed-denylist version is refused when pinned (exit `3`); when auto-discovered it surfaces a **loud notice** (carried as `HarnessInfo.warnings`, shown by `harness info` on the TTY and in `--json`) but is not fatal. *Automatic fallback to a non-banned binary is a documented seam — the resolver returns a single candidate today; F7.*
+     - A seed-denylist version is refused when pinned (exit `3`); when auto-discovered it surfaces a **loud notice** (carried as `HarnessInfo.warnings`, shown by `harness info` on the TTY and in `--json`) but is not fatal. *Automatic fallback to a non-banned binary is a documented seam — the resolver returns a single candidate today; **Phase 7 / F50** (binary resolution chain & ban policy), re-deferred from F7 on 2026-06-27. F7's `run` refuses an auto-discovered-banned binary (exit 3) rather than auto-substituting one.*
      - `probe()` and `verifySkillVisibility` are implemented behind a fakeable process-launcher seam (logic unit-tested); `probe`'s live version/auth call is validated only by F7's opt-in env-gated smoke (claude-code isn't runnable in CI).
    - Known F6 gaps (tracked, by design): (C) `Trace.workspaceDiff.deleted` is always empty — deletions aren't modeled yet; (D) failed/`is_error` tool results are not captured, so a `Skill` invocation is recorded even when it errored; (#3) a missing/unresolved binary surfaces a raw launcher error rather than a P6 what/why/fix message — the live path is F7-gated. C/D/#3 land with their consumers (Phase 2+/F7).
    - Dependencies: Trace & adapter seam (F5). Needs a synthetic claude-code-format fixture; live paths are env-gated (claude-code unavailable in CI).
@@ -103,7 +103,7 @@ sequence is re-ordered.
    - Confidence: Medium — design §7.2, §13; Anthropic `references/schemas.md`.
    - Plan: [Specs/006-frozen-boundary-codecs/plan.md](../Specs/006-frozen-boundary-codecs/plan.md)
 
-7. **[F7]** The neutral runner — behavioral axis + pass^k (CLI: `skillet run`) — PLANNED · Ported
+7. **[F7]** The neutral runner — behavioral axis + pass^k (CLI: `skillet run`) — DONE · Ported
    - Purpose & user value: The entry point (D2) — execute a skill's behavioral
      evals in an isolated sandbox, grade each `expected_behavior` line with the
      (text) judge, and report `pass^k` reliability. Answers "does this skill
@@ -112,8 +112,8 @@ sequence is re-ordered.
      failures that feed gap #1.
    - Success metrics:
      - `run <skill>` runs every eval k times in a fresh `Workspace`, prints a per-eval PASS/FAIL/FLAKY table + aggregate `pass^k`, and exits `1` on any failure.
-     - An eval passes a trial only if *all* criteria pass; a planted "surface compliance without substance" case FAILs.
-     - `pass^k` is computed at observed k and recomputes identically offline from the on-disk run record.
+     - An eval passes a trial only if *all* criteria pass; a planted *claimed-but-not-created* case FAILs (existence/claim-mismatch, caught via the post-run workspace listing + trace facts). File-*content* correctness ("surface compliance without substance" for file-writing skills) is the grounded judge — Phase 2 (F16).
+     - `pass^k` is computed at observed k (= `min` recorded trials across evals; per-eval PASS/FAIL/FLAKY on each eval's own recorded set) and recomputes identically **offline from the committed `evaluations/benchmark.json`** (per-eval `passed`/`total`) — the gitignored `.skillet/runs` cache is deletable (P2/D3). Pure in `EDDCore`; new targets `RunKit` + `JudgeKit`; spend gated up front (design P9); exit codes `0/1/2/3/4`.
      - Executes a trivial task end-to-end through the **live** claude-code adapter (`probe` version+auth, `run` + §9.2 skill-injection), returning a parseable `RawTrace` — covered by one **opt-in, env-gated live smoke** (the only paid test; free CI skips it). *(The live half of F6, validated here against a real claude-code.)*
    - Dependencies: claude-code adapter (F6), boundary codecs (F8), text judge (in this feature).
    - Confidence: Medium — design §6.1 `run`, §10.
@@ -122,10 +122,11 @@ sequence is re-ordered.
      Phases 2 and 7. F7 also implements claude-code's live `run` execution + §9.2
      skill-injection (the body F6 leaves as a seam) and owns the env-gated live smoke
      that validates the real adapter path (probe/run/injection).
+   - Plan: [Specs/007](../Specs/007-neutral-runner/plan.md)
 
 ## Dependencies & Sequencing
 
-- **Build order (dependency-honest):** F1 → F2 *(done)* → F5 → F6 *(done)* → **F8 (boundary codecs)** *(done)* → F4 (lint) *(done)* → F7 (`run`). `doctor` (F3) moved to Phase 2 — off the critical path (F7 doesn't depend on it). **Fn** ids are stable, global, and position-independent (see [ROADMAP.md › Feature identifiers](../ROADMAP.md#feature-identifiers)); the Key Features list is grouped by id, not strictly by build order.
+- **Build order (dependency-honest):** F1 → F2 *(done)* → F5 → F6 *(done)* → **F8 (boundary codecs)** *(done)* → F4 (lint) *(done)* → F7 (`run`) *(done)*. `doctor` (F3) moved to Phase 2 — off the critical path (F7 doesn't depend on it). **Fn** ids are stable, global, and position-independent (see [ROADMAP.md › Feature identifiers](../ROADMAP.md#feature-identifiers)); the Key Features list is grouped by id, not strictly by build order.
 - Local dependencies: the runner (F7) needs the claude-code adapter (F6) + boundary codecs (F8) + the
   text judge; `lint` (F4) and `init` (F2) need only discovery (F1). (`doctor` (F3) and its deps —
   F5/F6 + `swift-yaml` + error-tier `lint` — moved to Phase 2.)
@@ -266,3 +267,18 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
   feature**. The frontmatter spec-conformance rules (previously deferred F4→F3) were re-homed to
   Phase 2's full lint catalog (F20). Adopted the global stable `Fn` id convention (see ROADMAP.md ›
   Feature identifiers; Phase 1's F1–F8 unchanged). New build order: F1, F2, F5, F6, F8, F4, F7.
+- 2026-06-27: F7 (`run`) plan authored ([Specs/007](../Specs/007-neutral-runner/plan.md)) — the last
+  Phase-1 feature. F7's success-metric **narrowed**: a planted *claimed-but-not-created* case fails
+  (existence/claim-mismatch via the post-run workspace listing + trace facts); file-*content*
+  correctness is the grounded judge (Phase 2 / F16). The **auto-discovered-banned automatic fallback
+  re-deferred F7 → F50** (Phase 7 binary-resolution); F7 *refuses* a banned binary (exit 3). No
+  scope/feature change.
+- 2026-06-28: **F7 (`run`) implemented — Phase 1 COMPLETE.** New targets `RunKit` (Workspace manager
+  + run/judge/aggregate loop + per-trial `timeout` watchdog + `.skillet/runs` forensics cache) and
+  `JudgeKit` (`Judge`/`JudgeEvidence`/`TextJudge`/`ReplayJudge` + a `JudgeRunner` seam; the real
+  `ClaudeCLIJudgeRunner` lives in RunKit so JudgeKit stays decoupled from HarnessKit). `pass^k` is pure
+  in `EDDCore` (`skillet.run/1`) and re-derives offline from the committed `evaluations/benchmark.json`
+  (P2/D3). `ClaudeCodeAdapter.run()` + the cwd/timeout/env `ProcessLauncher` land (live path env-gated
+  smoke only). `skillet run` estimates + gates spend (`confirm_above_trials`/`--yes`/`--no-input`/`-n`,
+  `--dry-run`; design P9), probes before spending, writes `benchmark.json` + `grading.json`, exit codes
+  `0/1/2/3/4`. 179 tests green. Plan → IMPLEMENTED. Phase 1 → **Foundation/COMPLETE**, Phase 2 → Now.

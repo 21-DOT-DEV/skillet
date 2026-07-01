@@ -2,10 +2,11 @@ import Foundation
 import EDDCore
 import TraceKit
 
-/// The first real harness adapter (F6). Ships the **validatable** surface: parse claude-code's native
-/// session JSONL → `Trace`, resolve + vet its binary (`probe`), and the static skill-visibility check.
-/// The live task execution (`run` + §9.2 skill-injection) lands in F7; `probe`'s live `--version` call
-/// is exercised here only via the injected `ProcessLauncher` (the real call is env-gated in F7).
+/// The claude-code harness adapter. Parses claude-code's native session JSONL → `Trace`, resolves +
+/// vets its binary (`probe`), enforces skill-visibility, and (F7) executes a task one-shot. Every path
+/// runs through the injected `ProcessLauncher`, so the logic is unit-tested with a fake; the *live*
+/// invocation contract (the exact `claude` flags below, auth, real session shape) is exercised only by
+/// F7's opt-in env-gated smoke, since claude-code isn't installable in CI.
 public struct ClaudeCodeAdapter: HarnessAdapter {
     public let id: HarnessID = "claude-code"
     public let capabilities: HarnessCapabilities = [.runTask, .skillInjection, .traceParsing, .sessionCapture]
@@ -15,28 +16,44 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
     let resolver: BinaryResolver
     let denylist: Denylist
     let environment: [String: String]
+    /// Per-trial watchdog for `run()` (config `runs.timeout`; the executable parses the duration).
+    let timeout: Duration
+    /// Cap (bytes) on a trial's captured stdout/stderr (config `runs.max_output_bytes`); `nil` ⇒ the
+    /// launcher's built-in default. A large-but-valid `stream-json` session must not be truncated into a
+    /// false failure — see F7 review round 7.
+    let outputLimitBytes: Int?
 
     public init(
         configPath: String? = nil,
         launcher: any ProcessLauncher = SubprocessLauncher(),
         resolver: BinaryResolver = BinaryResolver(),
         denylist: Denylist = .claudeCodeSeed,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        timeout: Duration = .seconds(600),
+        outputLimitBytes: Int? = nil
     ) {
         self.configPath = configPath
         self.launcher = launcher
         self.resolver = resolver
         self.denylist = denylist
         self.environment = environment
+        self.timeout = timeout
+        self.outputLimitBytes = outputLimitBytes
     }
 
-    public func probe() async throws -> HarnessInfo {
+    public func probe(strict: Bool) async throws -> HarnessInfo {
         guard let resolved = resolver.resolve(
             flag: nil, envVar: "SKILLET_CLAUDE_CODE_BIN", configPath: configPath, pathName: "claude"
         ) else {
             throw EDDError.harnessNotFound(harness: "claude-code")
         }
-        let output = try await launcher.run(resolved.path, ["--version"])
+        // A pinned-but-unreachable binary (bad path/permissions) is "not found", not an opaque crash.
+        let output: ProcessOutput
+        do {
+            output = try await launcher.run(resolved.path, ["--version"], workingDirectory: nil, timeout: .seconds(60), environment: nil, outputLimitBytes: nil)
+        } catch {
+            throw EDDError.harnessNotFound(harness: "claude-code")
+        }
         guard output.exitCode == 0 else { throw EDDError.harnessNotFound(harness: "claude-code") }
         let version = Self.parseVersion(output.stdout)
         let bypassed = environment["SKILLET_ALLOW_BANNED_CLAUDE_CODE"] != nil
@@ -48,13 +65,40 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
             // Explicitly pinned + banned → hard error, never a silent swap (§9.1).
             throw EDDError.harnessBanned(harness: "claude-code", version: version)
         case let .warnedFallback(version):
-            // Auto-discovered + banned → loud notice, but not fatal. Falling back to a non-banned
-            // binary is a documented seam (the resolver returns a single candidate today); F7.
+            // Auto-discovered + banned: `harness info` warns (not fatal); but `run` (strict) never
+            // spends on a known-bad version — refuse here (auto-fallback to another binary is F50).
+            if strict {
+                throw EDDError.harnessBanned(harness: "claude-code", version: version)
+            }
             warnings.append("claude-code \(version) is on the known-bad denylist (§9.1); "
                 + "pin a non-banned version, or set SKILLET_ALLOW_BANNED_CLAUDE_CODE=1 to override")
         }
-        // Auth: a real check is env-gated (F7). F6 reports available + assumes authenticated.
-        return HarnessInfo(id: id, version: version, authenticated: true, available: true, warnings: warnings)
+        // Auth (non-spending): `claude auth status` reports whether a credential is usable. `run`
+        // (strict) refuses before spending; `harness info` reports `authenticated: false` without failing.
+        let authenticated = await isAuthenticated(binary: resolved.path)
+        if strict && !authenticated {
+            throw EDDError.harnessUnauthenticated(harness: "claude-code")
+        }
+        return HarnessInfo(id: id, version: version, authenticated: authenticated, available: true, warnings: warnings)
+    }
+
+    /// Verify the resolved binary is authenticated via `claude auth status` — a documented, **non-spending**
+    /// check (reads the credential; no model call). Logged in ⇒ exit 0 + `{"loggedIn": true}`. Any error
+    /// (non-zero exit, unreachable, unparseable) is treated as not-authenticated.
+    private func isAuthenticated(binary: String) async -> Bool {
+        guard let output = try? await launcher.run(
+            binary, ["auth", "status", "--json"], workingDirectory: nil, timeout: .seconds(30), environment: nil, outputLimitBytes: nil
+        ), output.exitCode == 0 else {
+            return false
+        }
+        // Require the structured signal: only an explicit `loggedIn: true` counts. Exit 0 with output
+        // that's unparseable or missing `loggedIn` **fails closed** — never spend on an unverified state.
+        if let data = output.stdout.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let loggedIn = object["loggedIn"] as? Bool {
+            return loggedIn
+        }
+        return false
     }
 
     public func verifySkillVisibility(_ skill: SkillRef, strategy: InjectionStrategy) throws {
@@ -71,7 +115,46 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
     }
 
     public func run(_ task: TaskSpec, in workspace: Workspace, skills: SkillSet) async throws -> RawTrace {
-        throw HarnessError.notImplemented("live claude-code execution lands in F7")
+        guard let resolved = resolver.resolve(
+            flag: nil, envVar: "SKILLET_CLAUDE_CODE_BIN", configPath: configPath, pathName: "claude"
+        ) else {
+            throw EDDError.harnessNotFound(harness: "claude-code")
+        }
+        // Honor the injection contract (§9.2): the runner stages skills under the workspace discovery
+        // path (`<workspace>/.claude/skills/<name>/`). For `.only`, enforce that each requested skill is
+        // actually staged, so a staging failure is caught here rather than silently running skill-less.
+        // (Global `~/.claude/skills` can still be discovered — claude-code has no project-only-skills
+        // switch today; documented limitation, tracked for the isolation hardening in a later phase.)
+        if case let .only(load, _) = skills {
+            for ref in load {
+                let staged = workspace.root.appendingPathComponent(".claude/skills/\(ref.name)/SKILL.md")
+                guard FileManager.default.fileExists(atPath: staged.path) else {
+                    throw EDDError.skillNotVisible(skill: ref.name, reason: "not staged under the run workspace")
+                }
+            }
+        }
+        // The watchdog (`timeout`) and the sandbox cwd are enforced by the launcher; a non-zero exit
+        // means the trial could not run.
+        let output = try await launcher.run(
+            resolved.path,
+            Self.runArguments(prompt: task.query),
+            workingDirectory: workspace.root.path,
+            timeout: timeout,
+            environment: nil,
+            outputLimitBytes: outputLimitBytes
+        )
+        guard output.exitCode == 0 else {
+            throw HarnessError.executionFailed(harness: "claude-code", exitCode: output.exitCode, stderr: output.stderr)
+        }
+        return RawTrace(harness: id, raw: output.stdout)
+    }
+
+    /// The claude-code one-shot invocation (`-p`/print) that emits the session as JSONL on stdout for
+    /// `parseTrace`. `stream-json` requires `--verbose`; `acceptEdits` lets file-writing evals proceed
+    /// unattended inside the throwaway per-trial workspace. This live flag contract is validated/tuned
+    /// by F7's env-gated smoke (claude-code isn't runnable in CI) — the arg *shape* is unit-tested here.
+    static func runArguments(prompt: String) -> [String] {
+        ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"]
     }
 
     public func locateSessions(_ query: SessionQuery) async throws -> [NativeSessionRef] {

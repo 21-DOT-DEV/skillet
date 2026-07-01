@@ -63,6 +63,14 @@ public struct EvalCase: Sendable, Equatable {
     public var fields: [String: JSONValue]
     public init(fields: [String: JSONValue]) { self.fields = fields }
 
+    /// The case id — 2.0 `id`, if present (the runner falls back to a positional id otherwise).
+    /// skill-creator 2.0 ids are commonly **numeric**, so a JSON number is coerced to its string form
+    /// (`0`, not `0.0`) rather than dropped — otherwise records would lose the source eval id.
+    public var id: String? {
+        if let string = fields["id"]?.stringValue { return string }
+        if let number = fields["id"]?.numberValue { return Int(exactly: number).map(String.init) ?? String(number) }
+        return nil
+    }
     /// The task prompt — 2.0 `prompt`, else legacy `query`.
     public var prompt: String? { fields["prompt"]?.stringValue ?? fields["query"]?.stringValue }
     /// The assertions/criteria — 2.0 `expectations`, else local `assertions`, else legacy `expected_behavior`.

@@ -58,6 +58,49 @@ enum Fixture {
         return root
     }
 
+    /// A discoverable project with one skill ready for `skillet run`: SKILL.md + `evaluations/evals.json`
+    /// (skill-creator 2.0 form). `harnessPath` pins `harness.claude-code.path` (for exit-3 probe tests);
+    /// `evalsRaw` overrides the generated evals.json verbatim (for corrupt-artifact tests).
+    static func makeRunRepo(
+        skill: String = "demo",
+        evals: [(id: String, expectations: [String])] = [("e1", ["did the thing"])],
+        harnessPath: String? = nil,
+        judgeProvider: String? = nil,
+        evalsRaw: String? = nil
+    ) throws -> URL {
+        let root = try makeTempDirectory()
+        var yaml = "project:\n  skills_root: skills\n"
+        if let harnessPath { yaml += "harness:\n  claude-code:\n    path: \(harnessPath)\n" }
+        if let judgeProvider { yaml += "judge:\n  provider: \(judgeProvider)\n" }
+        try yaml.write(to: root.appendingPathComponent("skillet.yaml"), atomically: true, encoding: .utf8)
+
+        let dir = root.appendingPathComponent("skills/\(skill)", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("evaluations"), withIntermediateDirectories: true)
+        try "---\nname: \(skill)\ndescription: a demo skill for run integration tests\n---\nBody.\n"
+            .write(to: dir.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+
+        let evalsJSON: String
+        if let evalsRaw {
+            evalsJSON = evalsRaw
+        } else {
+            let cases = evals.map { c in
+                let exps = c.expectations.map { "\"\($0)\"" }.joined(separator: ",")
+                return "{\"id\":\"\(c.id)\",\"prompt\":\"do it\",\"expectations\":[\(exps)]}"
+            }.joined(separator: ",")
+            evalsJSON = "{\"skill_name\":\"\(skill)\",\"evals\":[\(cases)]}"
+        }
+        try evalsJSON.write(to: dir.appendingPathComponent("evaluations/evals.json"), atomically: true, encoding: .utf8)
+        return root
+    }
+
+    /// Write a `criterion → passed` replay verdict map (the hidden test-only judge seam); return its path.
+    static func writeReplayMap(_ map: [String: Bool], in root: URL) throws -> String {
+        let entries = map.map { "\"\($0.key)\":\($0.value)" }.joined(separator: ",")
+        let url = root.appendingPathComponent("replay-map.json")
+        try "{\(entries)}".write(to: url, atomically: true, encoding: .utf8)
+        return url.path
+    }
+
     static func remove(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
     }

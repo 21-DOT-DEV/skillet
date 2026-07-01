@@ -33,13 +33,17 @@ struct HarnessKitTests {
         }
     }
 
-    @Test("claude-code ships a real adapter; run() remains the F7 seam")
-    func claudeCodeRunSeam() async {
-        let adapter = ClaudeCodeAdapter()
+    @Test("claude-code run() is wired (F7): it executes through the launcher and returns a RawTrace")
+    func claudeCodeRunWired() async throws {
+        let adapter = ClaudeCodeAdapter(
+            launcher: FakeLauncher(output: ProcessOutput(stdout: "{}", stderr: "", exitCode: 0)),
+            resolver: BinaryResolver(probe: FakeExecutableProbe(pathLookup: ["claude": "/usr/bin/claude"]), environment: [:]),
+            environment: [:]
+        )
         #expect(adapter.capabilities.contains(.runTask))
-        await #expect(throws: HarnessError.self) {
-            _ = try await adapter.run(TaskSpec(query: "hi"), in: Workspace(root: URL(fileURLWithPath: "/tmp")), skills: .none)
-        }
+        // No longer the notImplemented seam — run() now executes and returns the harness's output.
+        let raw = try await adapter.run(TaskSpec(query: "hi"), in: Workspace(root: URL(fileURLWithPath: "/tmp")), skills: .none)
+        #expect(raw.harness == "claude-code")
     }
 
     @Test("harness-info report probes adapters and carries the schema")

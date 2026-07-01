@@ -18,22 +18,91 @@ public struct ProcessOutput: Sendable, Equatable {
     }
 }
 
-/// The single process-launch seam (constitution VI — no `Foundation.Process`). Injectable so `probe()`
+/// Process-launch failures the run loop classifies (design §10). A timeout is the per-trial watchdog
+/// firing — distinct from the child exiting non-zero on its own.
+public enum ProcessError: Error, Sendable, Equatable {
+    case timedOut(after: Duration)
+}
+
+/// The single process-launch seam (constitution VI — no `Foundation.Process`). Injectable so probe/run
 /// logic is unit-tested with a fake; the real launcher is used in production and F7's env-gated smoke.
+/// F7 widened the contract: a per-trial `timeout` watchdog, a sandbox `workingDirectory`, and an
+/// optional `environment` overlay (each `nil` ⇒ inherit / no limit).
 public protocol ProcessLauncher: Sendable {
-    func run(_ executable: String, _ arguments: [String]) async throws -> ProcessOutput
+    func run(
+        _ executable: String,
+        _ arguments: [String],
+        workingDirectory: String?,
+        timeout: Duration?,
+        environment: [String: String]?,
+        outputLimitBytes: Int?
+    ) async throws -> ProcessOutput
+}
+
+public extension ProcessLauncher {
+    /// Convenience for no-frills call sites (e.g. probe's `--version`): inherit cwd + env, no watchdog,
+    /// default output limit.
+    func run(_ executable: String, _ arguments: [String]) async throws -> ProcessOutput {
+        try await run(executable, arguments, workingDirectory: nil, timeout: nil, environment: nil, outputLimitBytes: nil)
+    }
 }
 
 /// The real launcher, over `swift-subprocess`.
 public struct SubprocessLauncher: ProcessLauncher {
+    /// Built-in stdout/stderr capture cap when a call passes `outputLimitBytes: nil` (e.g. probe). A
+    /// caller (a paid trial) overrides via `runs.max_output_bytes`. Bounded so a runaway child can't
+    /// exhaust memory; generous so a normal `stream-json` session isn't truncated into a false failure.
+    static let defaultOutputLimit = 64 << 20
+
     public init() {}
 
-    public func run(_ executable: String, _ arguments: [String]) async throws -> ProcessOutput {
+    public func run(
+        _ executable: String,
+        _ arguments: [String],
+        workingDirectory: String?,
+        timeout: Duration?,
+        environment: [String: String]?,
+        outputLimitBytes: Int?
+    ) async throws -> ProcessOutput {
+        let limit = outputLimitBytes ?? Self.defaultOutputLimit
+        // No watchdog → run directly.
+        guard let timeout else {
+            return try await Self.runOnce(executable, arguments, workingDirectory, environment, limit)
+        }
+        // Watchdog: race the child against a sleeper. Whichever finishes first wins; exiting the group
+        // cancels the loser — cancelling the child task makes swift-subprocess terminate the process.
+        return try await withThrowingTaskGroup(of: ProcessOutput?.self) { group in
+            group.addTask { try await Self.runOnce(executable, arguments, workingDirectory, environment, limit) }
+            group.addTask { try await Task.sleep(for: timeout); return nil }   // nil sentinel = timed out
+            defer { group.cancelAll() }
+            let first = try await group.next() ?? nil
+            if let output = first { return output }
+            throw ProcessError.timedOut(after: timeout)
+        }
+    }
+
+    /// One un-timed subprocess invocation.
+    private static func runOnce(
+        _ executable: String,
+        _ arguments: [String],
+        _ workingDirectory: String?,
+        _ environment: [String: String]?,
+        _ outputLimit: Int
+    ) async throws -> ProcessOutput {
+        // `nil` inherits the parent environment; a supplied overlay layers on top of it (so PATH etc.
+        // survive) rather than replacing it.
+        let env: Environment = environment.map { overlay in
+            .inherit.updating(Dictionary(uniqueKeysWithValues: overlay.map {
+                (Environment.Key(stringLiteral: $0.key), Optional($0.value))
+            }))
+        } ?? .inherit
         let result = try await Subprocess.run(
             .path(FilePath(executable)),
             arguments: .init(arguments),
-            output: .string(limit: 1 << 20),
-            error: .string(limit: 1 << 20)
+            environment: env,
+            workingDirectory: workingDirectory.map { FilePath($0) },
+            output: .string(limit: outputLimit),
+            error: .string(limit: outputLimit)
         )
         let exitCode: Int32
         if case .exited(let code) = result.terminationStatus {

@@ -84,6 +84,9 @@ public enum HarnessError: Error, Sendable, Equatable {
     case notImplemented(String)
     /// A capability the adapter does not have at all.
     case notSupported(capability: String)
+    /// The harness ran but exited non-zero — the trial could not be executed (the run loop classifies
+    /// this distinctly from a judged failure, design §10).
+    case executionFailed(harness: String, exitCode: Int32, stderr: String)
 }
 
 // MARK: - The adapter seam (§9.1)
@@ -95,7 +98,11 @@ public protocol HarnessAdapter: Sendable {
     var id: HarnessID { get }
     var capabilities: HarnessCapabilities { get }
 
-    func probe() async throws -> HarnessInfo
+    /// Resolve + vet the harness. `strict` is the spend-gating preflight (`run`): an auto-discovered
+    /// banned binary or an unauthenticated harness throws (exit 3) instead of merely warning, so a paid
+    /// run never starts on a known-bad or logged-out harness. Non-strict (`harness info`) reports the
+    /// same conditions as `warnings`/`authenticated: false` without throwing.
+    func probe(strict: Bool) async throws -> HarnessInfo
     func verifySkillVisibility(_ skill: SkillRef, strategy: InjectionStrategy) throws
     func run(_ task: TaskSpec, in workspace: Workspace, skills: SkillSet) async throws -> RawTrace
     func parseTrace(_ raw: RawTrace) throws -> Trace
@@ -104,9 +111,12 @@ public protocol HarnessAdapter: Sendable {
 }
 
 /// Capability-gated methods degrade **loudly** by default (§9.1): an adapter that doesn't override
-/// them is declaring it cannot do them, rather than silently no-opping. `probe()` has no default —
-/// every adapter must answer "are you there?".
+/// them is declaring it cannot do them, rather than silently no-opping. `probe(strict:)` has no default
+/// — every adapter must answer "are you there?"; the `probe()` convenience is the non-strict form.
 public extension HarnessAdapter {
+    /// The informational probe (`harness info`): warn-not-fail, never throws on banned/unauthenticated.
+    func probe() async throws -> HarnessInfo { try await probe(strict: false) }
+
     func verifySkillVisibility(_ skill: SkillRef, strategy: InjectionStrategy) throws {
         throw HarnessError.notSupported(capability: "skill_injection")
     }

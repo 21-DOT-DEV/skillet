@@ -51,4 +51,25 @@ struct ConfigLoaderTests {
         #expect(config.project?.skillsRoot == "skills")
         #expect(config.harness?.default == "claude-code")
     }
+
+    @Test("Decodes the F7 runs + judge knobs (k / max_output_bytes / confirm_above_trials / provider / model)")
+    func decodesRunsAndJudge() throws {
+        let yaml = """
+        project:
+          skills_root: skills
+        runs:
+          k: 5
+          confirm_above_trials: 40
+          max_output_bytes: 1048576
+        judge:
+          provider: claude-code
+          model: claude-sonnet-4-6
+        """
+        let config = try ConfigLoader.decode(yaml)
+        #expect(config.runs?.k == 5)
+        #expect(config.runs?.confirmAboveTrials == 40)
+        #expect(config.runs?.maxOutputBytes == 1_048_576)
+        #expect(config.judge?.provider == "claude-code")
+        #expect(config.judge?.model == "claude-sonnet-4-6")
+    }
 }

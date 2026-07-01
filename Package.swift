@@ -62,6 +62,13 @@ let package = Package(
                 .product(name: "SystemPackage", package: "swift-system")
             ]
         ),
+        // The judge (F7): grades each criterion against trial evidence. Takes a `JudgeRunner` seam, so
+        // the prompt/parse logic stays subprocess-free and testable; the real claude-CLI runner is in
+        // RunKit. Decoupled from HarnessKit — depends only on the pure core + the trace model.
+        .target(name: "JudgeKit", dependencies: ["EDDCore", "TraceKit"]),
+        // The runner (F7): the per-trial sandbox lifecycle + the run/judge/aggregate loop. The
+        // orchestrator that wires the harness adapter + judge over the pure pass^k core.
+        .target(name: "RunKit", dependencies: ["EDDCore", "TraceKit", "HarnessKit", "JudgeKit"]),
 
         // Isolated YAML config seam: swift-yaml + C++ interop live ONLY here. It exposes a pure-Swift
         // API (decodes into EDDCore's pure SkilletConfig), so consumers stay interop-free.
@@ -85,6 +92,8 @@ let package = Package(
                 "LintKit",
                 "TraceKit",
                 "HarnessKit",
+                "JudgeKit",
+                "RunKit",
                 // Config loading. Importing ConfigYAML pulls in C++ interop (viral to direct
                 // importers), so this leaf target is .Cxx too; the kits + pure core stay interop-free.
                 "ConfigYAML"
@@ -99,6 +108,8 @@ let package = Package(
         .testTarget(name: "RenderKitTests", dependencies: ["RenderKit"]),
         .testTarget(name: "LintKitTests", dependencies: ["LintKit"]),
         .testTarget(name: "HarnessKitTests", dependencies: ["HarnessKit"]),
+        .testTarget(name: "JudgeKitTests", dependencies: ["JudgeKit"]),
+        .testTarget(name: "RunKitTests", dependencies: ["RunKit"]),
         // Consumer of ConfigYAML — must also enable C++ interop (it's viral to direct importers).
         .testTarget(name: "ConfigYAMLTests", dependencies: ["ConfigYAML"], swiftSettings: [.interoperabilityMode(.Cxx)]),
 

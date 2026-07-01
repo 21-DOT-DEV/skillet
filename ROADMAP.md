@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.8.0
-**Last Updated:** 2026-06-26
+**Version:** v1.9.8
+**Last Updated:** 2026-07-01
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is
@@ -41,8 +41,8 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 
 | Horizon | Phase | Name / Goal | Status | Detail |
 |---|---|---|---|---|
-| Now | 1 | Walking Skeleton — prove the loop end-to-end | IN PROGRESS | [phase-1](Roadmap/phase-1-walking-skeleton.md) |
-| Next | 2 | Trustworthy Measurement & Static Gates | PLANNED | [phase-2](Roadmap/phase-2-measurement-static-gates.md) |
+| Foundation | 1 | Walking Skeleton — prove the loop end-to-end | COMPLETE | [phase-1](Roadmap/phase-1-walking-skeleton.md) |
+| Now | 2 | Trustworthy Measurement & Static Gates | PLANNED | [phase-2](Roadmap/phase-2-measurement-static-gates.md) |
 | Next | 3 | Discovery & Evidence Capture | PLANNED | [phase-3](Roadmap/phase-3-discovery-evidence.md) |
 | Next | 4 | Error Analysis — *Northstar gap #1* | PLANNED | [phase-4](Roadmap/phase-4-error-analysis.md) |
 | Next | 5 | The Computable Runbook — *differentiator #1* | PLANNED | [phase-5](Roadmap/phase-5-computable-runbook.md) |
@@ -50,11 +50,11 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 | Next | 7 | Multi-Harness Portability — *differentiator #2* | PLANNED | [phase-7](Roadmap/phase-7-multi-harness.md) |
 | Later | 8 | Beyond v1 — deeper analysis, broader reach | FUTURE | [phase-8](Roadmap/phase-8-beyond-v1.md) |
 
-- **Phase 1 (Now):** The thinnest end-to-end thread — `skillet run` one eval
+- **Phase 1 (Foundation, COMPLETE):** The thinnest end-to-end thread — `skillet run` one eval
   through `claude-code`, judged, with a `pass^k` result — plus just-enough
-  `init`/`lint`. Proves the architecture and delivers 30-second value. (`run`
-  is the only feature still open; the `doctor` preflight moved to Phase 2.)
-- **Phase 2 (Next):** Make deltas trustworthy — trigger axis, A/B baseline,
+  `init`/`lint`. Proves the architecture and delivers 30-second value. (All features
+  shipped; the `doctor` preflight moved to Phase 2.)
+- **Phase 2 (Now):** Make deltas trustworthy — trigger axis, A/B baseline,
   grounded judge, scorers, flaky hygiene, record/replay, the `doctor` preflight
   gate, the full free static-gate catalog, and TTY/HTML reporting.
 - **Phase 3 (Next):** Record production sessions and human friction as
@@ -128,11 +128,11 @@ Phase 1's `F1–F8` and Phase 8's `F10–F13` were already global and were prese
 
 ## Global Risks & Assumptions
 
-- **Phase 1 underway; later phases greenfield.** Phase 1 features F1 (project discovery &
-  output contract), F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6
-  (claude-code adapter), and F8 (frozen boundary codecs) are implemented (`Specs/001`–`006`;
-  130 tests green); the remainder of Phase 1 is just F7 (`run`), and Phases 2–8 — now including
-  `doctor` (F3, moved into Phase 2) — are PLANNED/FUTURE. Those statuses reflect design intent
+- **Phase 1 COMPLETE; later phases greenfield.** All Phase 1 features ship — F1 (project discovery
+  & output contract), F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6
+  (claude-code adapter), F8 (frozen boundary codecs), and now F7 (`skillet run` — the neutral runner,
+  `pass^k`, `RunKit`+`JudgeKit`) — `Specs/001`–`007`, 235 tests green. Phases 2–8 — now including
+  `doctor` (F3, moved into Phase 2) — are PLANNED/FUTURE: those statuses reflect design intent
   verified against the design doc (Medium confidence), not running code.
 - **"Ported" assumption.** The design doc says much of v1 is faithfully
   translated from a predecessor (`swift-skill-eval` + a Python trigger harness).
@@ -175,6 +175,84 @@ phases and the v1 scope line are unchanged.
 
 ## Change Log
 
+- v1.9.8 (2026-07-01): PATCH — **F7 review round 9** (judge trace-evidence conformance + reason tolerance +
+  config test coverage). The text judge's prompt now carries the plan-specified compact trace summary —
+  skill invocations + **tool-call names + files touched** (was skills only) — as **best-effort supporting
+  context** (may be empty on live runs), with the workspace listing the sole authoritative existence oracle;
+  `workspaceDiff` modification-detection stays with the F16 grounded judge so a live-degraded diff can't
+  cause a false FAIL. The strict verdict parser tolerates a **missing `reason` key** (optional/defaulted) —
+  a bare `{"verdict":"PASS"}` is a valid PASS, never flipped to FAIL over cosmetics. Added tests for the
+  init template's F7 defaults and a config decode of `runs`/`judge` knobs. 235 tests green. No scope change.
+- v1.9.7 (2026-06-30): PATCH — **F7 review round 8** (free-before-paid lint gate + judge/`-C`/forensics
+  correctness). `run` now **enforces the shipped free error-tier lint** (`L001`/`L003`) before any spend —
+  making the README's "free lint gates every paid run" real: after the eval loader (corrupt→4/missing→2
+  preserved) and before dry-run/confirm/probe/cache, an error-tier finding refuses with **exit 2** and
+  `skillet.lint/1` (command-contextual — `skillet lint`'s own finding stays exit 1); `doctor` still owns
+  the broader Phase-2 preflight. The judge's **trusted criterion moved out of the untrusted evidence JSON**;
+  `-C` is now validated by `harness list/info` (exit 3, was silently ignored); a symlinked `SKILL.md` is
+  rejected before any read (exit 4); trial **forensics keep the raw output + partial verdicts on a
+  parse/judge failure**; `grading.json` is documented in the frozen run-record family and the init template
+  gains `runs.max_output_bytes`. 232 tests green. No scope/feature change.
+- v1.9.6 (2026-06-30): PATCH — **F7 review round 7** (judge injection defense + capture/cache hardening).
+  The text judge is hardened against prompt injection from the model under test: the untrusted output is
+  presented as one JSON object (it can't spoof fake prompt sections), framed as untrusted data whose
+  embedded instructions must be ignored, and the verdict must be strict JSON `{"verdict","reason"}` — a
+  prose "PASS: …" no longer counts (fail-safe FAIL; prompt version v1→v2). The subprocess output-capture
+  limit is now configurable (`runs.max_output_bytes`, default 64 MiB) so a large-but-valid `stream-json`
+  session is no longer misread as a behavioral failure (a true infra class + retry stay F18). The
+  `.skillet` cache path is symlink-confined before any write (exit 4), matching the round-5 skill guard.
+  227 tests green. No scope/feature change.
+- v1.9.5 (2026-06-30): PATCH — **F7 review round 6** (benchmark.json boundary honesty + cache hygiene).
+  A compatibility audit against the **real** skill-creator eval-viewer + artifacts found the producer was
+  retyping/overloading the frozen contract. `benchmark.json` `runs[].configuration` is now the **string**
+  `"default"` (the viewer groups/color-codes on that exact value) instead of an object; `runs[]` is **one
+  row per trial** (`run_number` + that trial's `expectations[]` + a `result` that counts *expectations*, not
+  trials); and skillet's `pass^k` moved to the **additive `consistency` block** (the shape real artifacts
+  established), which is also the offline recompute source (with numeric-`eval_id` coercion so real records
+  aren't silently dropped). `run` now writes the self-owned `.skillet/.gitignore` before touching the cache
+  (no accidental forensics commit even without a prior `init`), and the cache run path gains a uuid suffix
+  (no same-second collision). 218 tests green. No scope/feature change.
+- v1.9.4 (2026-06-30): PATCH — **F7 review round 5** (config strictness + path confinement). The
+  config-consuming commands (`lint`, `harness info`, `run`) now load `skillet.yaml` through a shared
+  **strict** loader — a present-but-undecodable repo config, or a missing/undecodable `--config`, fails
+  loud (exit 2/4) instead of silently falling back to defaults. The skill dir + its `evaluations/` are
+  **symlink-confined** before any read or write (a symlinked path → exit 4), so a committed symlink can't
+  redirect a paid run's reads/writes outside the repo. The non-spending `claude auth status` preflight
+  **fails closed** on malformed output (an unverifiable auth state never spends). `--json --dry-run` now
+  emits the schema-tagged **`skillet.run-plan/1`** spend-free plan, and `benchmark.json` `runs[]` carry an
+  additive `pass_rate`. 214 tests green. No scope/feature change.
+- v1.9.3 (2026-06-29): PATCH — **F7 review round 4** (fixture / staging isolation). `files[]` now
+  allowlists the fixture namespace: `fixtures/**` and `evaluations/fixtures/**` are model-visible, while
+  everything else under `evaluations/**` (the eval definition, the run-record family, `sessions/`,
+  `findings/`, `friction/`) is rejected (exit 4) — so an eval can't hand the model under test its own
+  answers. Bundle + fixture staging switched to a recursive filtered copy that drops hidden files and
+  symlinks at **any** depth (not just top-level), closing nested `.env`/`.git` leaks. Aligns with the
+  inputs-vs-targets split in Inspect/lm-eval/promptfoo. 205 tests green. No scope/feature change.
+- v1.9.2 (2026-06-28): PATCH — **F7 review round 3** (security hardening). Eval ids no longer
+  path-traverse the `.skillet/runs` cache (index-based cache path; the real id stays in records);
+  **symlinks are rejected** in eval `files[]` fixtures *and* the skill bundle (recursive — no symlink
+  staged or followed, the escape/leak guard for a paid harness; the only symlinks in real skills are
+  `.build` build-cruft, so zero migration cost); zero-expectation evals are rejected before spend
+  (can't measure → exit 4) and a verdict-less trial never passes vacuously; the spend prompt requires
+  **both** stdin and stdout to be a TTY (else fails like `--no-input`). Added the plan's
+  evidence-asserting RunKit judge test. 201 tests green. No scope/feature change.
+- v1.9.1 (2026-06-28): PATCH — **F7 review-round hardening** (post-merge code review). Confined eval
+  `files[]` fixtures to the skill directory (reject absolute / `..` traversal — the standard path-traversal
+  guard, since a paid harness reads committed evals); coerced **numeric** eval ids into records (were
+  dropped to positional ids); rejected `--runs < 1` as a usage error; made a **judge-subprocess failure
+  an ungraded trial**, not a false criterion FAIL; switched skill staging to a **denylist** (exclude
+  `evaluations/` + hidden `.skillet`/`.git`/`.env`) — keeps real skills' non-standard bundle dirs
+  (`agents/`, `fixtures/`, `eval-viewer/`) a fixed allowlist would have dropped; refreshed stale test
+  counts. 195 tests green. No scope/feature change.
+- v1.9.0 (2026-06-28): MINOR — **Phase 1 COMPLETE: F7 (`skillet run`) implemented**, closing the
+  walking skeleton. The neutral runner runs a skill's evals k×/eval in fresh sandboxes, grades each
+  expectation with a `claude-code`-backed text judge (existence/claim-mismatch via the post-run
+  workspace listing + trace), and reports aggregate `pass^k` at observed k = `min` recorded — pure in
+  `EDDCore` and **recomputable offline from the committed `evaluations/benchmark.json`** (P2/D3). New
+  targets `RunKit` + `JudgeKit`; spend is estimated up front and gated (`confirm_above_trials`/`--yes`/
+  `--no-input`/`-n`,`--dry-run`, design P9); exit codes `0/1/2/3/4`; the live claude-code path is one
+  opt-in env-gated smoke (free CI uses a replay seam). `Specs/007`; 179 tests green. Phase 1 → **Foundation/COMPLETE**,
+  Phase 2 → **Now**. (Per-feature impl was historically PATCH; bumped MINOR for the horizon shift.)
 - v1.8.0 (2026-06-26): MINOR — **moved `doctor` (F3) from Phase 1 to Phase 2** and **reconciled the
   `Fn` identifier scheme across all phases**. `doctor` is off the walking-skeleton critical path (F7
   `run` doesn't depend on it) and its companions — the `--paid` canary, the full lint catalog, and

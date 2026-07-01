@@ -14,6 +14,10 @@ struct InitIntegrationTests {
 
         let fm = FileManager.default
         #expect(fm.fileExists(atPath: repo.appendingPathComponent("skillet.yaml").path))
+        // The emitted template surfaces the F7 defaults so users see the new controls (round-9 review).
+        let yaml = try String(contentsOf: repo.appendingPathComponent("skillet.yaml"), encoding: .utf8)
+        #expect(yaml.contains("max_output_bytes: 67108864"))
+        #expect(yaml.contains("provider: claude-code"))
         #expect(fm.fileExists(atPath: repo.appendingPathComponent(".skillet/.gitignore").path))
         for sub in ["friction", "findings", "sessions"] {
             #expect(fm.fileExists(atPath: repo.appendingPathComponent("skills/demo/evaluations/\(sub)").path))

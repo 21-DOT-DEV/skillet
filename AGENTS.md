@@ -4,8 +4,8 @@
 CLI for eval-driven development (EDD) of agent skills: capture real runs, turn hand-fixes into
 structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
 
-> **Status: Phase 1 in progress — F1, F2, F4, F5, F6, F8 landed.** The walking skeleton has begun. `Package.swift` plus
-> `EDDCore`, `TraceKit`, `ProjectKit`, `RenderKit`, `HarnessKit`, `ConfigYAML`, and the `skillet` executable exist, with unit + integration
+> **Status: Phase 1 COMPLETE — F1, F2, F4, F5, F6, F7, F8 landed.** The walking skeleton is proven end-to-end. `Package.swift` plus
+> `EDDCore`, `TraceKit`, `ProjectKit`, `RenderKit`, `HarnessKit`, `JudgeKit`, `RunKit`, `ConfigYAML`, and the `skillet` executable exist, with unit + integration
 > tests green (`swift build && swift test`). **F1 (project discovery & output contract) is
 > implemented**: `skillet` explains the loop, `-C <dir>`, `--json` (schema-tagged), `--color`/`NO_COLOR`,
 > and the typed §5.4 exit codes (0 ok · 2 usage · 3 environment reachable today). **F2 (`skillet init`)
@@ -14,7 +14,7 @@ structured evidence, and ship a `SKILL.md` edit only after a previously-failing 
 > link checks). **F5 (trace + harness seam) is implemented**: the `Trace` model (`skillet.trace/1`), the
 > full `HarnessAdapter` protocol with a `ReplayAdapter` double + a claude-code stub, and `skillet harness
 > list`/`info`. The `skillet` executable owns the full ArgumentParser command tree (no `skilletCLI`
-> library); `ProjectKit` is the discovery/config-IO home. **F6 (claude-code adapter) is implemented** (validatable core): the native-session-JSONL → `Trace` parser (golden-tested vs a synthetic fixture), the binary resolution chain (flag > env > config > PATH), the version denylist/ban policy, and `probe()`/`verifySkillVisibility` behind a fakeable launcher — `harness info` now probes the real adapter. `swift-yaml` is wired, isolated in a `.Cxx` `ConfigYAML` target (the kits + pure core stay interop-free; the executable is a `.Cxx` leaf). Live `run` lands in F7. **F4 (`skillet lint`) is implemented**: the free static gate — `SKILL-L001` (description >1024 Unicode code points, matching Anthropic's `quick_validate.py`), `SKILL-L003` (body-line budget, frontmatter+code excluded), `SKILL-L009` (has-evals, ≥3) — as a pure `LintKit` over a `SkillSource` the executable assembles (`ConfigYAML.parseFrontmatter` + the F8 `evals.json` codec); `skillet lint` exits 1 on any error-tier finding and emits `skillet.lint/1`. The rest of the command surface under "Planned" is still agreed *intent*,
+> library); `ProjectKit` is the discovery/config-IO home. **F6 (claude-code adapter) is implemented** (validatable core): the native-session-JSONL → `Trace` parser (golden-tested vs a synthetic fixture), the binary resolution chain (flag > env > config > PATH), the version denylist/ban policy, and `probe()`/`verifySkillVisibility` behind a fakeable launcher — `harness info` now probes the real adapter. `swift-yaml` is wired, isolated in a `.Cxx` `ConfigYAML` target (the kits + pure core stay interop-free; the executable is a `.Cxx` leaf). Live `run` ships in F7 (below). **F4 (`skillet lint`) is implemented**: the free static gate — `SKILL-L001` (description >1024 Unicode code points, matching Anthropic's `quick_validate.py`), `SKILL-L003` (body-line budget, frontmatter+code excluded), `SKILL-L009` (has-evals, ≥3) — as a pure `LintKit` over a `SkillSource` the executable assembles (`ConfigYAML.parseFrontmatter` + the F8 `evals.json` codec); `skillet lint` exits 1 on any error-tier finding and emits `skillet.lint/1`. **F7 (`skillet run`) is implemented**: the neutral runner — runs a skill's evals k×/eval in fresh sandboxes (`RunKit`), grades each expectation with a `claude-code`-backed, **injection-hardened** text judge (`JudgeKit`; the model-under-test's output is fed as JSON-structured *untrusted* evidence and the verdict must be strict JSON, prompt `v2`) against the run's response + the post-run workspace listing (a *claimed-but-not-created* file FAILs; file-content grounding is F16), and reports aggregate `pass^k` (`skillet.run/1`, pure in `EDDCore`, recomputable offline from the committed `evaluations/benchmark.json` — whose `runs[]` are viewer-faithful per-trial rows (`configuration:"default"`, expectation-count `result`) with skillet's `pass^k` in the additive `consistency` block, the recompute source); the trial count is estimated + spend-gated (design P9: `confirm_above_trials`/`--yes`/`--no-input`/`-n`,`--dry-run`); probes auth via the non-spending `claude auth status` + refuses banned/unauthenticated before spend; injects `.only(load:)`; exit codes `0/1/2/3/4`; a **free error-tier lint preflight** (`L001`/`L003`) refuses a lint-invalid skill before any spend (**exit 2** + `skillet.lint/1`, after the eval loader so corrupt/missing evals stay exit 4/2; `doctor` owns the broader Phase-2 gate); config-consuming commands (`lint`/`harness info`/`run`) load `skillet.yaml` **strictly** (a present-but-undecodable config — or a missing/undecodable `--config` — fails loud, never silent defaults); the non-spending auth preflight **fails closed** on a malformed `claude auth status`; the skill dir + `evaluations/` **and the `.skillet` cache** are **symlink-confined** before any read/write (exit 4 on a symlinked path); the subprocess output-capture limit is configurable (`runs.max_output_bytes`, 64 MiB default) so a large-but-valid `stream-json` session isn't a false failure; `--json --dry-run` emits the spend-free **`skillet.run-plan/1`** plan; `benchmark.json` `runs[].result` carries an additive `pass_rate`; the live claude-code path is one opt-in env-gated smoke (free CI uses a replay seam). The rest of the command surface under "Planned" is still agreed *intent*,
 > not shipped fact — don't assume a command/module exists until its feature lands. Update this file as
 > each feature/phase completes.
 
@@ -35,17 +35,19 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 [`21-DOT-DEV/.github`](https://github.com/21-DOT-DEV/.github) (`CONTRIBUTING.md`, `SECURITY.md`,
 `CODE_OF_CONDUCT.md`). There are intentionally no repo-local copies.
 
-## Commands (true now — Phase 1 / F1–F2, F4, F5, F6)
+## Commands (true now — Phase 1 / F1, F2, F4–F8)
 
 - `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`).
-- `swift test` — run the unit + integration suites (130 tests, all green). The integration suite drives
+- `swift test` — run the unit + integration suites (235 tests, all green). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
-  `skillet init --json`, `skillet lint [--json]`, `skillet harness list`, `skillet harness info [--json]`, `skillet --help`, `skillet --version`.
+  `skillet init --json`, `skillet lint [--json]`, `skillet harness list`, `skillet harness info [--json]`,
+  `skillet run [<skill>] [--runs <k>] [--dry-run] [--yes]` (paid: shells `claude` + the judge — gated by the spend estimate),
+  `skillet --help`, `skillet --version`.
 - `swift package generate-manual` / `generate-docc-reference` — regenerate the command reference from the parser.
 - `SKILLET_TEST_BINARY=<path> swift test` — point the integration harness at a specific binary.
 
-`init`, `lint`, `harness list`/`info`, and the claude-code adapter (F6 — parse + resolution + probe; live `run` is F7) are built; `doctor`/`run`/… are not yet — see Planned.
+`init`, `lint`, `run`, `harness list`/`info`, and the claude-code adapter (parse + resolution + probe + live `run`) are built; `doctor`/`capture`/`next`/… are not yet — see Planned.
 
 ## Binding conventions
 
@@ -114,8 +116,11 @@ from the first commit.
 ## Planned (per `ROADMAP.md` — agreed intent, NOT yet built)
 
 Treat everything in this section as a target to build toward, not as existing functionality —
-**except** the F1 substrate already shipped (`EDDCore`, `ProjectKit`, `RenderKit`, the `skillet`
-executable; see Commands above).
+**except** what Phase 1 already shipped (now COMPLETE): the `EDDCore`, `TraceKit`, `HarnessKit`,
+`LintKit`, `JudgeKit`, `RunKit`, `ProjectKit`, `RenderKit`, and `ConfigYAML` kits + the `skillet`
+executable with `init`/`lint`/`run`/`harness` (see the status banner + Commands above). The kits and
+commands still *planned* are the Phase 2+ ones — `ScoreKit`/`CorpusKit`/`AnalysisKit`/`IterateKit`
+and `doctor`/`capture`/`friction`/`triage`/`next`/`suggest`/`iterate`/`baseline`/`report`/… .
 
 ### Package architecture (design §11)
 

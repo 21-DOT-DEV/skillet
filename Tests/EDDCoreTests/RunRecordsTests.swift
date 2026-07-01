@@ -29,6 +29,22 @@ struct RunRecordsTests {
         #expect(b.metadata?["analyzer_model"] == .string("claude"))  // local extra field preserved
     }
 
+    @Test("benchmark.json round-trips the real skill-creator shape (default arm + consistency + per-run expectations)")
+    func benchmarkRealShape() throws {
+        // Modeled on a real skill-creator 2.0 artifact (consistency block + configuration:"default" +
+        // per-run expectation results). Synthetic — real artifacts are read-only and never committed (VI).
+        let json = """
+        {"consistency":{"flaky_eval_ids":[],"k":1,"meaningful":false,"per_eval":[{"eval_id":0,"flaky":false,"mean_pass_rate":1,"pass_power_k":1,"perfect_passes":1,"runs":1}],"suite_pass_power_k":1},
+         "metadata":{"skill_name":"demo","runs_per_configuration":1,"evals_run":[0]},
+         "runs":[{"configuration":"default","eval_id":0,"run_number":1,"expectations":[{"text":"t","passed":true,"evidence":"e"}],"result":{"pass_rate":1.0,"passed":1,"total":1}}],
+         "run_summary":{"default":{"pass_rate":{"max":1,"mean":1,"min":1,"stddev":0}}}}
+        """
+        let b = try roundTrips(BenchmarkFile.self, json)
+        #expect(b.runs[0].objectValue?["configuration"] == .string("default"))
+        #expect(b.fields["consistency"]?.objectValue?["suite_pass_power_k"] == .number(1))
+        #expect(RunReport(benchmark: b).evals.first?.id == "0")   // recompute reads consistency + coerces numeric id
+    }
+
     @Test("grading.json: text/passed/evidence + summary; round-trip")
     func grading() throws {
         let json = """

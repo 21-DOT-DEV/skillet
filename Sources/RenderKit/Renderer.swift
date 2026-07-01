@@ -61,6 +61,17 @@ public struct Renderer: Sendable {
         }
     }
 
+    /// `skillet run`'s output: the per-eval PASS/FAIL/FLAKY table + aggregate `pass^k` (human), or the
+    /// `skillet.run/1` payload (json).
+    public func renderRun(_ report: RunReport, nextSteps: [String] = []) throws -> Rendering {
+        switch mode {
+        case .json:
+            return Rendering(stdout: try SkilletJSON.encode(report) + "\n")
+        case .human:
+            return Rendering(stdout: humanRun(report, nextSteps: nextSteps))
+        }
+    }
+
     /// A generic aligned table for plumbing/listing output (e.g. `harness info`). Column widths come
     /// from the widest cell; the last column is left unpadded to avoid trailing whitespace.
     public func renderTable(_ headers: [String], _ rows: [[String]]) -> Rendering {
@@ -148,5 +159,21 @@ public struct Renderer: Sendable {
         let errors = "\(report.errors) error\(report.errors == 1 ? "" : "s")"
         let warnings = "\(report.warnings) warning\(report.warnings == 1 ? "" : "s")"
         return "\(report.errors > 0 ? red(errors) : errors) · \(warnings)"
+    }
+
+    private func humanRun(_ report: RunReport, nextSteps: [String]) -> String {
+        let allPass = !report.evals.isEmpty && report.passed == report.evals.count
+        // pass^k is only a number at observed k ≥ 2; below that, consistency is unmeasurable (§4 vocab).
+        let headline = report.measurable
+            ? String(format: "pass^k %.2f (k=%d)", report.passK, report.observedK)
+            : "consistency unmeasurable (k=\(report.observedK))"
+        var out = (allPass ? bold("✓ run: \(report.skill) — \(headline)") : red("✗ run: \(report.skill) — \(headline)")) + "\n"
+        let rows = report.evals.map { [$0.id, $0.status.rawValue, "\($0.passes)/\($0.recorded)"] }
+        out += renderTable(["EVAL", "STATUS", "PASSES"], rows).stdout
+        out += "\n\(report.passed) passed · \(report.flaky) flaky · \(report.failed) failed · observed k=\(report.observedK)\n"
+        if !nextSteps.isEmpty {
+            out += "\(bold("→ next:")) \(nextSteps.joined(separator: " · "))\n"
+        }
+        return out
     }
 }

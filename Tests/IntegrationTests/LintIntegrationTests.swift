@@ -31,6 +31,16 @@ struct LintIntegrationTests {
         #expect(out.stdout.contains(#""errors":2"#))
     }
 
+    @Test("lint shares the strict config loader: an undecodable repo skillet.yaml fails loud (exit 4)")
+    func invalidConfigRejected() async throws {
+        let root = try Fixture.makeLintRepo(description: "ok", evals: 3)
+        defer { Fixture.remove(root) }
+        try "lint:\n\tselect: [SKILL-L001]\n".write(   // tab indentation → invalid YAML
+            to: root.appendingPathComponent("skillet.yaml"), atomically: true, encoding: .utf8)
+        let out = try await SkilletHarness().run(["lint", "-C", root.path])
+        #expect(out.exitCode == 4)
+    }
+
     @Test("A <3-case evals.json warns but still exits 0")
     func shortEvalsWarns() async throws {
         let root = try Fixture.makeLintRepo(description: "ok", evals: 1)

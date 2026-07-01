@@ -34,9 +34,10 @@ public struct Diagnostic: Codable, Sendable, Equatable {
     }
 }
 
-/// The `--json` payload for `skillet lint` (`skillet.lint/1`): every diagnostic plus error/warn
-/// tallies so scripts can branch on the gate without re-counting. Additive within the major — new
-/// rules and fields slot in without a bump.
+/// The `--json` payload for `skillet lint` — and for `run`'s free lint preflight when it refuses a
+/// lint-error skill before spending (`skillet.lint/1`): every diagnostic plus error/warn tallies so
+/// scripts can branch on the gate without re-counting. Additive within the major — new rules and fields
+/// slot in without a bump. (Exit code is command-contextual: `lint` → 1, `run` preflight → 2.)
 public struct LintReport: SchemaIdentified, Sendable, Equatable {
     public static let schema = "skillet.lint/1"
     public let diagnostics: [Diagnostic]

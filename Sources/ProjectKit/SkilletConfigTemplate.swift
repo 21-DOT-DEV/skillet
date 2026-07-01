@@ -18,13 +18,14 @@ public enum SkilletConfigTemplate {
           confirm_above_trials: 25          # estimate + confirm beyond this (TTY)
           timeout: "10m"                    # per-trial watchdog
           infra_retries: 1                  # retry harness/network only — never judged failures
+          max_output_bytes: 67108864        # cap on a trial's captured stdout/stderr (64 MiB)
 
         harness:
           default: claude-code
           matrix: [claude-code, opencode]
 
         judge:
-          provider: anthropic-api
+          provider: claude-code             # adapter id with the judging capability (Phase 1: shells the claude CLI)
           model: claude-sonnet-4-6
 
         # The methodology's numbers, shipped as defaults, tunable per repo.

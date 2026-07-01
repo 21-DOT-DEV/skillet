@@ -7,9 +7,9 @@ edit only after a previously-failing eval proves it.
 Where autonomous skill *optimizers* (SkillOpt, EvoSkill) auto-accept or auto-commit their edits,
 skillet drafts and proves — **a human lands every write**.
 
-> **Status — Phase 1 (walking skeleton), in progress.** F1 (project discovery & output contract),
-> F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), and F6 (claude-code adapter)
-> have landed; the rest
+> **Status — Phase 1 (walking skeleton) COMPLETE.** F1 (project discovery & output contract),
+> F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6 (claude-code adapter), and
+> F7 (`skillet run` — the neutral runner with `pass^k`) have landed; the rest
 > of the loop lights up across later phases. See [ROADMAP.md](ROADMAP.md).
 
 ## How it works
@@ -29,14 +29,14 @@ flowchart LR
     I --> R --> D --> N --> F --> R
 
     classDef planned stroke-dasharray:5 5
-    class R,D,N,F planned
+    class D,N,F planned
 ```
 
 You **adopt** skillet once (`init`), then loop: **measure** with `run` (each eval repeated *k* times
 for a `pass^k` consistency score), **discover** real failures via `capture`/`friction`, **interpret**
 them with `triage` — `next` names the single highest-value action — then **fix and prove** the change
 with `suggest`/`iterate` in a throwaway worktree, and re-run. Free `lint` checks gate every paid
-`run`. Today `skillet init` and `skillet lint` ship (plus `skillet harness info` for setup); the rest lands across the
+`run`. Today `skillet init`, `skillet lint`, and `skillet run` ship (plus `skillet harness info` for setup); the rest lands across the
 roadmap phases.
 
 ## Install
@@ -60,6 +60,10 @@ skillet init                # adopt skillet in the current repo (idempotent)
 skillet init --json         # report created/skipped paths (schema: skillet.init/1)
 skillet lint                # free static analysis of SKILL.md (exit 1 on error-tier findings)
 skillet lint --json         # machine-readable findings (schema: skillet.lint/1)
+skillet run <skill>         # run the skill's evals k×, judge, report pass^k (paid; spend-gated)
+skillet run <skill> -n      # dry-run: preview the trial-count estimate, spend nothing
+skillet run --json          # machine-readable result (schema: skillet.run/1)
+skillet run --json -n        # spend-free plan preview (schema: skillet.run-plan/1)
 skillet harness info        # harness adapters, capabilities, probe status
 skillet harness info --json # machine-readable (schema: skillet.harness-info/1)
 ```
@@ -71,6 +75,7 @@ are the stable contract.
 
 ## Documentation
 
+- [Testing skillet end-to-end](Sources/skillet/skillet.docc/TestingEndToEnd.md) — a hands-on walkthrough of `init` → `lint` → `run`, including a real claude-code run via the Zed-bundled binary (a DocC article in the `skillet` catalog).
 - [AGENTS.md](AGENTS.md) — operational onboarding for humans and AI agents (commands, conventions, boundaries).
 - [skillet-design.md](skillet-design.md) — the product design (principles, command surface, file formats).
 - [ROADMAP.md](ROADMAP.md) + [Roadmap/](Roadmap/) — the phased plan.

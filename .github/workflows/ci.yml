@@ -35,17 +35,29 @@ jobs:
       DEVELOPER_DIR: "/Applications/Xcode_26.5.app/Contents/Developer"
     steps:
       - uses: actions/checkout@v6
-      # TEMPORARY diagnostics: the same swift-yaml rev built clean locally under this exact
-      # compiler build (17F42 / swiftlang-6.3.2.1.108) in nine configurations while CI failed —
-      # if this run still fails, the env dump + verbose swiftc invocations below are the diff
-      # that names the runner-side cause. Remove once macOS CI is green and explained.
-      - name: Toolchain (diagnostics)
+      # TEMPORARY forensics — remove when macOS is green. Every code/flag variable is now
+      # eliminated (round 5: identical compiler build, -target macosx14.0 via the platforms
+      # stanza, import present, flag-identical invocation — still fails, while the same
+      # inputs pass locally). The remaining suspect is the runner's DISK: image bakers strip
+      # Xcode contents, and a missing/stripped CxxStdlib.swiftmodule explains everything.
+      # Local control (Xcode 26.5, 17F42): all artifacts present, probe prints "probe-ok".
+      # Interpretation: probe FAILS + artifacts missing → stripped image (runner-images bug);
+      # probe FAILS + artifacts present → toolchain breakage on the host (swiftlang bug);
+      # probe PASSES → the failure is SwiftPM-build-specific, iterate on the probe.
+      - name: CxxStdlib forensics (temporary)
         run: |
           swift --version
           xcrun --show-sdk-path
-          env | sort
-      - name: Build (verbose — temporary)
-        run: swift build -v
+          TC="$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift"
+          echo "--- toolchain swift/macosx Cxx artifacts ---"
+          ls "$TC/macosx" | grep -i cxx || echo "!!! NO Cxx artifacts in toolchain"
+          echo "--- CxxStdlib.swiftmodule contents ---"
+          ls "$TC/macosx/CxxStdlib.swiftmodule" || echo "!!! CxxStdlib.swiftmodule MISSING"
+          echo "--- minimal std.string probe (isolates swift-yaml entirely) ---"
+          printf 'import CxxStdlib\nlet s = std.string("probe-ok")\nprint(String(s))\n' > /tmp/probe.swift
+          xcrun swiftc -cxx-interoperability-mode=default /tmp/probe.swift -o /tmp/probe && /tmp/probe || echo "!!! PROBE FAILED"
+      - name: Build
+        run: swift build
       - name: Test (free suite — live smoke self-skips)
         run: swift test
 

@@ -5,6 +5,7 @@
 | **Feature** | 002 — Adopt skillet in a repo (`skillet init`) |
 | **Phase** | 1 — Walking Skeleton ([Roadmap/phase-1-walking-skeleton.md](../../Roadmap/phase-1-walking-skeleton.md), F2) |
 | **Status** | IMPLEMENTED (2026-06-20) — 45 tests green; docs verified |
+| **Post-audit (2026-07-01)** | Verified by the [Phase-1 audit](../../Roadmap/phase-1-review.md). As-built deltas: the next-step line prints the honest **registered** subset (`lint · run` today; `doctor`/`next` join when they exist); dump-help is decoded with a local minimal type (no `ArgumentParserToolInfo` dependency); the 2026-06-23 `InitReport` fix lists the auto-created `evaluations/` parent; the template later gained the F7 knobs (`runs.max_output_bytes`, `judge.*` — F7 rounds 8–9). |
 | **Last updated** | 2026-06-20 |
 | **Builds on** | F1 (project discovery, output contract, `RenderKit`) — [spec 001](../001-project-discovery-output-contract/plan.md) |
 | **Authoritative refs** | design §6.1 `init`, §5.2 (config template + surgical writes), §7.1 (per-skill `evaluations/` layout), §4 (skill = dir with `SKILL.md`); constitution I/III/IV/VI/VII; clig.dev; swift-argument-parser doc tooling (`generate-manual`, `generate-docc-reference`, `--experimental-dump-help`) |

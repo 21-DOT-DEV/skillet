@@ -4,8 +4,9 @@
 CLI for eval-driven development (EDD) of agent skills: capture real runs, turn hand-fixes into
 structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
 
-> **Status: Phase 1 COMPLETE — F1, F2, F4, F5, F6, F7, F8 landed.** The walking skeleton is proven end-to-end. `Package.swift` plus
-> `EDDCore`, `TraceKit`, `ProjectKit`, `RenderKit`, `HarnessKit`, `JudgeKit`, `RunKit`, `ConfigYAML`, and the `skillet` executable exist, with unit + integration
+> **Status: Phase 1 COMPLETE — F1, F2, F4, F5, F6, F7, F8 landed** (completed-items audit:
+> [Roadmap/phase-1-review.md](Roadmap/phase-1-review.md)). The walking skeleton is proven end-to-end. `Package.swift` plus
+> `EDDCore`, `TraceKit`, `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `JudgeKit`, `RunKit`, `ConfigYAML`, and the `skillet` executable exist, with unit + integration
 > tests green (`swift build && swift test`). **F1 (project discovery & output contract) is
 > implemented**: `skillet` explains the loop, `-C <dir>`, `--json` (schema-tagged), `--color`/`NO_COLOR`,
 > and the typed §5.4 exit codes (0 ok · 2 usage · 3 environment reachable today). **F2 (`skillet init`)
@@ -24,7 +25,7 @@ structured evidence, and ship a `SKILL.md` edit only after a previously-failing 
   principles P1–P10, settled decisions D1–D7, command surface (§6), file formats (§7), gates
   engine (§8), harness abstraction (§9), package architecture (§11), distribution (§12), v1 scope
   (§13), open questions (§14).
-- **`ROADMAP.md`** (+ `docs/roadmap/phase-*.md`) — the phase plan. Authoritative for *sequence and
+- **`ROADMAP.md`** (+ `Roadmap/phase-*.md`) — the phase plan. Authoritative for *sequence and
   priority*. Phase 1 is the walking skeleton; do the earliest incomplete phase unless told
   otherwise.
 - **`.specify/memory/constitution.md`** — the development charter. **Authoritative for *how we
@@ -42,7 +43,7 @@ Contributing, security disclosure, and code of conduct are handled at the org le
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
   `skillet init --json`, `skillet lint [--json]`, `skillet harness list`, `skillet harness info [--json]`,
-  `skillet run [<skill>] [--runs <k>] [--dry-run] [--yes]` (paid: shells `claude` + the judge — gated by the spend estimate),
+  `skillet run [<skill>] [--runs <k>] [--dry-run] [--yes] [--no-input] [--keep-workspace]` (paid: shells `claude` + the judge — gated by the spend estimate),
   `skillet --help`, `skillet --version`.
 - `swift package generate-manual` / `generate-docc-reference` — regenerate the command reference from the parser.
 - `SKILLET_TEST_BINARY=<path> swift test` — point the integration harness at a specific binary.
@@ -66,7 +67,8 @@ from the first commit.
   direct importers** — so it is confined to the isolated **`ConfigYAML`** target
   (`.interoperabilityMode(.Cxx)`), which exposes a pure-Swift API (decoding into `EDDCore.SkilletConfig`).
   Consequence (validated by the F6 spike): the `skillet` executable, as a direct importer, is a **`.Cxx`
-  leaf** too — but every kit and the pure core stay interop-free (they take a decoded `SkilletConfig` as
+  leaf** too (as is `ConfigYAMLTests`, the codec's own test target — the third and last `.Cxx` island) —
+  but every kit and the pure core stay interop-free (they take a decoded `SkilletConfig` as
   input and never import `ConfigYAML`). `swift-subprocess` is now used by **`HarnessKit`** (the
   `ProcessLauncher` seam) as well as the integration-test harness; `swift-system` (`FilePath`) rides in
   with it. Known-good pins: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system`
@@ -169,7 +171,7 @@ free suite from env-gated live runs. **Test files: 300-line soft cap** (split su
 
 Phase 1 (walking skeleton) → 2 (measurement & static gates) → 3 (discovery/evidence) → 4 (error
 analysis) → 5 (computable runbook / `next`) → 6 (fix suggestion & iteration) → 7 (multi-harness
-matrix) → 8 (beyond v1). See `ROADMAP.md` and `docs/roadmap/`.
+matrix) → 8 (beyond v1). See `ROADMAP.md` and `Roadmap/`.
 
 ## Maintenance (sync contract)
 
@@ -183,7 +185,9 @@ matrix) → 8 (beyond v1). See `ROADMAP.md` and `docs/roadmap/`.
 - Add real `Commands` (e.g. `swift build`, `swift test`) only once they actually work.
 - **Documentation is verified, not just written** (Principle VII). Each new/changed command updates
   `README.md` usage + the *Commands* list, and the free test suite checks three layers: (1) the
-  documented command/flag surface against `skillet --experimental-dump-help` (`ArgumentParserToolInfo`);
+  documented command surface against `skillet --experimental-dump-help` (subcommand names today —
+  flag-level assertions are a tracked gap; decoded with a local minimal type, not an
+  `ArgumentParserToolInfo` dependency);
   (2) behavioral claims (exit codes, `--json` `schema`) by running the binary; (3) internal doc links
   resolve. The command *reference* can be regenerated from the parser via `swift package generate-manual`
   / `generate-docc-reference`. Checks assert **facts only — never the human/TTY prose** a command prints (P7).

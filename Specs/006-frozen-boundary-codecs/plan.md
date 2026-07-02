@@ -4,7 +4,8 @@
 |---|---|
 | **Feature** | F8 — frozen boundary-format codecs + golden tests (EDDCore; no new command) |
 | **Phase** | 1 — Walking Skeleton ([Roadmap/phase-1-walking-skeleton.md](../../Roadmap/phase-1-walking-skeleton.md), F8) |
-| **Status** | ✅ IMPLEMENTED (2026-06-24) — codecs + goldens green (95 tests); §7.2 *prose* reconciliation pending |
+| **Status** | ✅ IMPLEMENTED (2026-06-24) — codecs + goldens green (95 tests); §7.2 *prose* reconciliation pending *(completed 2026-07-01 → design v0.21)* |
+| **Post-audit (2026-07-01)** | Verified by the [Phase-1 audit](../../Roadmap/phase-1-review.md). Deltas: the `session-meta.json` codec named in §3's out-of-scope note did **not** land in F8 — it defers to Phase 3 with the bundle-layout contract; **v1.9.5 superseded §3's `BenchmarkFile` sketch** (`configuration` is the string `"default"`, not a `with_skill\|without_skill` enum; `runs[]` are per-trial; `pass^k` lives in the additive `consistency` block — the offline recompute source); the producer mapping (`RunRecordMapping`) landed in `EDDCore/Boundary` with F7 (disk writes in the executable). |
 | **Last updated** | 2026-06-24 |
 | **Re-sequence** | **F8 moves before F4** (build order → F1, F2, F5, F6, **F8**, F4, F7; doctor/F3 has since moved to Phase 2 — roadmap v1.8.0). F4 consumes F8's `evals.json` codec; F7 consumes the run-record family. |
 | **Builds on** | F1 (`SkilletJSON` envelope, golden-test harness); F6 (the `Trace`/`*.trace.json` codec already shipped; the synthetic-fixture discipline) |
@@ -30,7 +31,9 @@
 > would otherwise mask it). 96 tests green.
 >
 > **One item remains:** the §7.2 *design-doc text* reconciliation (the code is built to the 2.0 shapes;
-> the prose lags) — deferred while the design doc is being actively edited.
+> the prose lags) — deferred while the design doc is being actively edited. *(Completed 2026-07-01 by
+> the Phase-1 audit → design v0.21: 2.0 `evals.json` row, run-record family named, `scorecard.json`
+> exclusion recorded.)*
 
 ## 1. Goal
 

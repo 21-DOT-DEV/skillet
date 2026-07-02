@@ -8,7 +8,8 @@ Where autonomous skill *optimizers* (SkillOpt, EvoSkill) auto-accept or auto-com
 skillet drafts and proves — **a human lands every write**.
 
 > **Status — Phase 1 (walking skeleton) COMPLETE.** F1 (project discovery & output contract),
-> F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6 (claude-code adapter), and
+> F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6 (claude-code adapter),
+> F8 (frozen boundary codecs — the skill-creator formats round-trip faithfully), and
 > F7 (`skillet run` — the neutral runner with `pass^k`) have landed; the rest
 > of the loop lights up across later phases. See [ROADMAP.md](ROADMAP.md).
 

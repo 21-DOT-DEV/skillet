@@ -1,6 +1,6 @@
 # Product Roadmap — skillet
 
-**Version:** v1.9.8
+**Version:** v1.9.10
 **Last Updated:** 2026-07-01
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
@@ -172,9 +172,44 @@ phases and the v1 scope line are unchanged.
 - **Ablation arms** → design **§14-10**. Partial-skill A/B (drop a section / reference / rule) to
   isolate which part of a skill earns its tokens — feeds *evidence-to-edit ratio*. Touches the
   Phase 6 `run --ab` / `SkillSet`.
+- **`pass^1` alongside strict pass^k** → design **§14-11**. τ-bench's headline metric + unbiased
+  `E[C(c,k)/C(n,k)]` estimator (verified against the paper + official code — the strict all-trials
+  rule is skillet's deliberate conservative special case): an *additive* `pass_1` in `skillet.run/1`
+  + the `benchmark.json` `consistency` block, strict pass^k staying the reliability gate. From the
+  Phase-1 audit cross-reference ([phase-1-review §8](Roadmap/phase-1-review.md)).
 
 ## Change Log
 
+- v1.9.10 (2026-07-01): PATCH — **external cross-reference addendum** added to the Phase-1 audit
+  ([phase-1-review §8](Roadmap/phase-1-review.md)) after three adversarially-verified deep-research
+  passes (~29 primary sources): **nothing contradicts shipped Phase-1 behavior**. Verified supported:
+  pass^k ≡ τ-bench's metric (Chen et al. the correct ANY-pass contrast), FLAKY/hygiene-before-deltas
+  = the Google flaky-test canon, the existence-check-via-workspace-listing rule (Anthropic's canonical
+  final-state example; τ-bench/SWE-bench concur), **M1's free-suite-as-PR-gate** (lm-evaluation-harness
+  + Inspect AI run model-free zero-credential CI on every PR; walking-skeleton canon puts build/test
+  automation before the first feature), the held-out proof gate (DSPy/GEPA), and audit-citation
+  practice itself (IIA 14.1 / ISO 19011 / ADR). **M2 reframed**: required-explicit judge is a
+  deliberate reproducibility divergence (promptfoo silently defaults its grader from ambient
+  credentials — verified in docs + source). Two corrections applied: design v0.22 (the infra-only-retry
+  rule re-stated as skillet's own discipline — no primary source states it) and **§14-11 staged**
+  (additive `pass_1` reporting; τ-bench's unbiased estimator makes skillet's strict rule a deliberate
+  conservative special case) → Candidate Enhancements. F16 (grounded judge) framed as closure of
+  τ-bench's named "necessary but not sufficient" gap. §7-minors deferral confirmed (no urgency
+  evidence; clig.dev silent on inert flags). Design doc → v0.23. No scope, feature, or priority change.
+- v1.9.9 (2026-07-01): PATCH — **Phase-1 completed-items cross-artifact audit** →
+  [Roadmap/phase-1-review.md](Roadmap/phase-1-review.md). Every F1–F8 metric verified against
+  `Specs/001–007` + shipped code (235 tests green; free-only — the paid smoke not re-run):
+  **Phase-1-COMPLETE stands**; F6 gaps C/D confirmed open, gap **#3 closed** (typed `harnessNotFound`
+  what/why/fix at probe/preflight). Documentary drift reconciled: phase-doc F2/F6/F7 current-state
+  lines; AGENTS (`Roadmap/` paths, LintKit in the banner, `.Cxx` test-target note, dump-help claim
+  scoped to names); README (+F8); design → **v0.21** (§7.2 evals-2.0 row + run-record family +
+  `scorecard.json` exclusion, §9.1 F50 annotations, §9.3 synthetic-goldens wording, §10
+  consistency-block recompute, §14-4 shipped-state note, §14-8 F5→F45); docc walkthrough (no
+  `--harness-path` yet; CI "when wired"); post-audit notes on all seven plans. **Staged, not
+  applied** (audit §5): the CI workflow (constitution V — `.github/workflows/` is empty),
+  judge-model required-explicit (§14-4 / constitution II), committed-record provenance
+  (`judge_prompt_version`/`executor_binary_version`), and the constitution's stale swift-system
+  note. No scope, feature, or priority change.
 - v1.9.8 (2026-07-01): PATCH — **F7 review round 9** (judge trace-evidence conformance + reason tolerance +
   config test coverage). The text judge's prompt now carries the plan-specified compact trace summary —
   skill invocations + **tool-call names + files touched** (was skills only) — as **best-effort supporting

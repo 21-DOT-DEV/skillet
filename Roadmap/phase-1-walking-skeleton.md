@@ -2,8 +2,8 @@
 
 **Status:** COMPLETE — F1, F2, F4, F5, F6, F7, F8 all shipped (`doctor` F3 moved to Phase 2)
 **Horizon:** Now
-**Last Updated:** 2026-06-28
-**Review:** completed-items cross-artifact audit → [phase-1-review.md](phase-1-review.md)
+**Last Updated:** 2026-07-01
+**Review:** completed-items cross-artifact audit (2026-07-01) → [phase-1-review.md](phase-1-review.md)
 
 ## Goal
 
@@ -39,7 +39,7 @@ sequence is re-ordered.
      `evaluations/` — so a newcomer is productive without hand-authoring config.
    - Northstar: loop integrity (onboarding).
    - Success metrics:
-     - `init` writes a valid `skillet.yaml` + `evaluations/` skeleton, then prints the three next commands.
+     - `init` writes a valid `skillet.yaml` + `evaluations/` skeleton, then prints the next commands (the honest filter: only registered commands are suggested — `lint` · `run` today; `doctor` joins in Phase 2).
      - Re-running fills gaps and overwrites nothing (idempotency test passes).
    - Dependencies: Project discovery (F1).
    - Confidence: Medium — design §6.1 `init`.
@@ -70,7 +70,7 @@ sequence is re-ordered.
      - The binary resolution chain (flag > env > config > PATH; vendored deferred) selects the right link and records which one won (the source is captured + printable; `harness which` surfaces it later).
      - A seed-denylist version is refused when pinned (exit `3`); when auto-discovered it surfaces a **loud notice** (carried as `HarnessInfo.warnings`, shown by `harness info` on the TTY and in `--json`) but is not fatal. *Automatic fallback to a non-banned binary is a documented seam — the resolver returns a single candidate today; **Phase 7 / F50** (binary resolution chain & ban policy), re-deferred from F7 on 2026-06-27. F7's `run` refuses an auto-discovered-banned binary (exit 3) rather than auto-substituting one.*
      - `probe()` and `verifySkillVisibility` are implemented behind a fakeable process-launcher seam (logic unit-tested); `probe`'s live version/auth call is validated only by F7's opt-in env-gated smoke (claude-code isn't runnable in CI).
-   - Known F6 gaps (tracked, by design): (C) `Trace.workspaceDiff.deleted` is always empty — deletions aren't modeled yet; (D) failed/`is_error` tool results are not captured, so a `Skill` invocation is recorded even when it errored; (#3) a missing/unresolved binary surfaces a raw launcher error rather than a P6 what/why/fix message — the live path is F7-gated. C/D/#3 land with their consumers (Phase 2+/F7).
+   - Known F6 gaps (tracked, by design): (C) `Trace.workspaceDiff.deleted` is always empty — deletions aren't modeled yet; (D) failed/`is_error` tool results are not captured, so a `Skill` invocation is recorded even when it errored. *(#3 closed with F7:* a missing/unresolved binary now surfaces the typed `EDDError.harnessNotFound` what/why/fix message at probe/preflight; a raw error remains possible only on `run()`'s direct-launch race — [audit 2026-07-01](phase-1-review.md).*)* C/D land with their consumers (Phase 2+).
    - Dependencies: Trace & adapter seam (F5). Needs a synthetic claude-code-format fixture; live paths are env-gated (claude-code unavailable in CI).
    - Confidence: Medium — design §9, §13.
    - Plan: [Specs/004-claude-code-adapter/plan.md](../Specs/004-claude-code-adapter/plan.md)
@@ -113,7 +113,7 @@ sequence is re-ordered.
    - Success metrics:
      - `run <skill>` runs every eval k times in a fresh `Workspace`, prints a per-eval PASS/FAIL/FLAKY table + aggregate `pass^k`, and exits `1` on any failure.
      - An eval passes a trial only if *all* criteria pass; a planted *claimed-but-not-created* case FAILs (existence/claim-mismatch, caught via the post-run workspace listing + trace facts). File-*content* correctness ("surface compliance without substance" for file-writing skills) is the grounded judge — Phase 2 (F16).
-     - `pass^k` is computed at observed k (= `min` recorded trials across evals; per-eval PASS/FAIL/FLAKY on each eval's own recorded set) and recomputes identically **offline from the committed `evaluations/benchmark.json`** (per-eval `passed`/`total`) — the gitignored `.skillet/runs` cache is deletable (P2/D3). Pure in `EDDCore`; new targets `RunKit` + `JudgeKit`; spend gated up front (design P9); exit codes `0/1/2/3/4`.
+     - `pass^k` is computed at observed k (= `min` recorded trials across evals; per-eval PASS/FAIL/FLAKY on each eval's own recorded set) and recomputes identically **offline from the committed `evaluations/benchmark.json`** (reading the additive `consistency` block — `per_eval[].{perfect_passes,runs}`, per v1.9.5's viewer-faithful reshape) — the gitignored `.skillet/runs` cache is deletable (P2/D3). Pure in `EDDCore`; new targets `RunKit` + `JudgeKit`; spend gated up front (design P9); exit codes `0/1/2/3/4`.
      - Executes a trivial task end-to-end through the **live** claude-code adapter (`probe` version+auth, `run` + §9.2 skill-injection), returning a parseable `RawTrace` — covered by one **opt-in, env-gated live smoke** (the only paid test; free CI skips it). *(The live half of F6, validated here against a real claude-code.)*
    - Dependencies: claude-code adapter (F6), boundary codecs (F8), text judge (in this feature).
    - Confidence: Medium — design §6.1 `run`, §10.
@@ -282,3 +282,16 @@ tagged release + C++-interop; see AGENTS.md › Dependency notes).
   smoke only). `skillet run` estimates + gates spend (`confirm_above_trials`/`--yes`/`--no-input`/`-n`,
   `--dry-run`; design P9), probes before spending, writes `benchmark.json` + `grading.json`, exit codes
   `0/1/2/3/4`. 179 tests green. Plan → IMPLEMENTED. Phase 1 → **Foundation/COMPLETE**, Phase 2 → Now.
+- 2026-07-01: PATCH — **completed-items cross-artifact audit** → [phase-1-review.md](phase-1-review.md).
+  Every F1–F8 roadmap metric verified against `Specs/001–007` and the shipped code (235 tests green;
+  free-only — the paid live smoke was not re-run); **Phase-1-COMPLETE stands**. Three stale
+  current-state lines reconciled in this doc: the F2 metric's "three next commands" → the honest
+  registered subset (`lint` · `run` today); F6 gap **#3 marked closed** (typed `harnessNotFound`
+  what/why/fix at probe/preflight since F6/F7; raw-error residual only on `run()`'s direct-launch
+  race); the F7 offline-recompute parenthetical → the additive **`consistency` block** (stale
+  pre-v1.9.5 wording). Cross-artifact ripples: AGENTS paths/kit-list, README + F8, design → v0.21
+  (§7.2/§9.1/§9.3/§10/§14 prose reconciliation), per-plan post-audit deviation notes, ROADMAP v1.9.9.
+  **Four decisions staged, not applied** (audit §5): CI workflow (constitution V), judge-model
+  required-explicit (§14-4 / constitution II), committed-record provenance
+  (`judge_prompt_version`/`executor_binary_version`), the constitution's stale swift-system note.
+  Change-log history above left as written. No scope/feature change.

@@ -38,7 +38,10 @@ let package = Package(
         // YAML config parsing. No tagged release → pinned by revision (see Package.resolved). Its
         // `YAML` product needs C++ interop, so it is confined to the `ConfigYAML` target below; the
         // pure core (EDDCore) and the executable stay interop-free.
-        .package(url: "https://github.com/21-DOT-DEV/swift-yaml", revision: "e8d1769427b6781cc9088f2dfe029b44073fee52")
+        // Rev = branch fix/explicit-cxxstdlib-import (explicit CxxStdlib import for the std.string →
+        // String conversions — the macOS-CI fix). Repin to the main rev once merged; don't squash-merge
+        // upstream or this rev becomes unreachable.
+        .package(url: "https://github.com/21-DOT-DEV/swift-yaml", revision: "02ed774f562672becd282301ff890ab78ae9e55e")
     ],
     targets: [
         // MARK: Layer 0 — pure core (no I/O, no processes, no network)
@@ -123,5 +126,6 @@ let package = Package(
             ]
         )
     ],
-    swiftLanguageModes: [.v6]
+    swiftLanguageModes: [.v6],
+    cxxLanguageStandard: .cxx11
 )

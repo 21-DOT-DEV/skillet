@@ -1,0 +1,79 @@
+# Free CI — the model-free merge gate (constitution V: "CI in this repo *is* the Linux user").
+#
+# Both jobs run the full unit + integration suite with ZERO secrets and ZERO paid model
+# calls: the one paid test (the live smoke) is opt-in env-gated (SKILLET_LIVE_SMOKE) and
+# self-skips here — the same pattern lm-evaluation-harness and Inspect AI use for their
+# PR gates (evidence: Roadmap/phase-1-review.md §8, M1). Never add a provider credential
+# to this workflow; paid validation stays a local, consented, env-gated run.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS (Swift 6.3)
+    runs-on: macos-26
+    permissions:
+      contents: read
+    env:
+      # Pinned Xcode for determinism (the swift-bitcoinkernel convention). History, so nobody
+      # re-litigates it: runs on 26.4.1 (Swift 6.3.1) AND 26.5 (Swift 6.3.2 — the same compiler
+      # version as the local Xcode 27 beta) failed identically in swift-yaml, which proved the
+      # cause was never a Swift-version floor: swift-yaml's std.string → String conversions
+      # relied on the toolchain IMPLICITLY importing the CxxStdlib overlay (27 beta and Linux
+      # do; Xcode 26.x does not). Fixed upstream with an explicit `import CxxStdlib` in
+      # swift-yaml; skillet pins the fixed revision. Any Swift 6 Xcode works once repinned.
+      DEVELOPER_DIR: "/Applications/Xcode_26.5.app/Contents/Developer"
+    steps:
+      - uses: actions/checkout@v6
+      # TEMPORARY forensics, round 8 — remove when macOS is green. Round 7 exonerated the
+      # C++ standard: bare probes at default AND -std=c++11 pass on this runner, and a
+      # mini SwiftPM interop package of swift-yaml's shape passes at .cxx11 and .cxx17 —
+      # while swift-yaml inside skillet's graph fails in the same job. Two suspects left,
+      # both invisible to flags: (A) something intrinsic to swift-yaml's richer structure
+      # (two-level C++ targets + handwritten shims modulemap) → test by building the
+      # pinned swift-yaml STANDALONE on this runner; (B) shared clang-module-cache
+      # interaction across the graph's three .Cxx targets under this host's narrower
+      # parallelism (≈4 cores vs 10+ locally; build-order-dependent cache poisoning) →
+      # test with a serial (--jobs 1) skillet build. Note: if [B] passes it populates
+      # .build, so the Build step after it goes green incrementally — that green still
+      # means "serial works, parallel is the trigger" and the durable fix is then decided
+      # deliberately (not --jobs 1 forever).
+      - name: Forensics round 8 — standalone vs graph, serial vs parallel (temporary)
+        run: |
+          swift --version
+          echo "ncpu: $(sysctl -n hw.ncpu)"
+          echo "--- [A] swift-yaml STANDALONE @ pinned rev on this runner ---"
+          git clone -q https://github.com/21-DOT-DEV/swift-yaml /tmp/sy
+          git -C /tmp/sy checkout -q 02ed774f562672becd282301ff890ab78ae9e55e
+          (cd /tmp/sy && swift build > /tmp/sy-build.log 2>&1) && echo "RESULT[standalone]: PASSED" || { echo "RESULT[standalone]: FAILED"; grep -m2 "error:" /tmp/sy-build.log; }
+          echo "--- [B] skillet build --jobs 1 (serial schedule, fresh cache) ---"
+          swift build --jobs 1 > /tmp/serial-build.log 2>&1 && echo "RESULT[serial]: PASSED" || { echo "RESULT[serial]: FAILED"; grep -m2 "error:" /tmp/serial-build.log; }
+      - name: Build
+        run: swift build
+      - name: Test (free suite — live smoke self-skips)
+        run: swift test
+
+  linux:
+    name: Ubuntu (Swift 6.3)
+    runs-on: ubuntu-latest
+    container: swift:6.3 # official Swift image — deterministic toolchain, no third-party setup action
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      - name: Toolchain
+        run: swift --version
+      - name: Build
+        run: swift build
+      - name: Test (free suite — live smoke self-skips)
+        run: swift test

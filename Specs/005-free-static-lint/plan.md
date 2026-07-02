@@ -5,6 +5,7 @@
 | **Feature** | F4 — free static `SKILL.md` lint, error-tier core (CLI: `skillet lint`) |
 | **Phase** | 1 — Walking Skeleton ([Roadmap/phase-1-walking-skeleton.md](../../Roadmap/phase-1-walking-skeleton.md), F4) |
 | **Status** | ✅ IMPLEMENTED (2026-06-25) |
+| **Post-audit (2026-07-01)** | Verified by the [Phase-1 audit](../../Roadmap/phase-1-review.md). Post-plan consumers (rules unchanged): `run`'s free error-tier preflight (v1.9.7) reuses the shared `LintSupport` assembly — an error-tier finding is exit 2 there, exit 1 here (command-contextual); config-consuming commands load `skillet.yaml` strictly (v1.9.4). |
 | **Last updated** | 2026-06-26 |
 | **Builds on** | F1 (project discovery, output contract, exit codes); F2 (`evaluations/` scaffolding); F6 (the `ConfigYAML`→pure-model config-link + interop-containment pattern); **F8 (the `evals.json` codec — [Specs/006](../006-frozen-boundary-codecs/plan.md), re-sequenced ahead of F4)** |
 | **Authoritative refs** | design §6.1 `lint` (catalog + tiers + `--format`), §7.1 (repo layout), §7.2 (frozen `evals.json`), §5.2 (`[lint]` knobs + per-skill overlay), §5.4 (exit codes), §11 (`LintKit`, `EDDCore` codecs); constitution I (TDD), III (deterministic core), IV (frozen formats) |

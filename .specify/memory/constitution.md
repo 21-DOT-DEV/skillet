@@ -1,13 +1,15 @@
 <!--
 Sync Impact Report:
-- Version: 1.1.0 → 1.2.0 (clig.dev conformance practices)
-- Change Type: MINOR — materially expanded guidance under Principle IV (Human- and Agent-First,
-  Composable CLI): support `--version` and standard flag names including `--no-input`, stay
-  responsive with progress on long operations, and page large output; plus a Repository State
-  Discipline clarification that user-level XDG preferences are config inputs, not workflow state
-  (design Q7 adopted). Keeps the development charter in sync with skillet-design.md v0.5's clig.dev
-  conformance reconciliation (Appendix B).
-  No principle added or removed.
+- Version: 1.2.0 → 1.2.1 (Phase-1 audit M4 — factual syncs; no principle changed)
+- Change Type: PATCH — three factual corrections from the Phase-1 completed-items audit
+  (Roadmap/phase-1-review.md §5, M4): (1) Technology Stack: swift-system is a transitive
+  *production* dependency (HarnessKit's ProcessLauncher seam, via swift-subprocess's API surface),
+  not a test-only dep — the note now matches Package.swift; it rides in with the already-sanctioned
+  swift-subprocess, so the Principle VI sanctioned list is unchanged. (2) Package Architecture:
+  RenderKit restored to the layer-3 row (matches design §11 and the shipped DAG). (3) Principle VI:
+  the out-of-domain "onion/control credentials" phrase removed from the secrets rule (a copy-in
+  artifact); the MUST NOT is otherwise unchanged.
+  No principle added, removed, or reweighted.
 - Scope: skillet repository (/Users/csjones/Developer/skillet) — the SKILL.md Evaluation Toolkit, a public, open-source, multi-harness Swift CLI for eval-driven development (EDD) of agent skills
 - Orientation: This constitution governs HOW WE DEVELOP skillet (engineering process and
   non-negotiable development standards). It is orthogonal to — and deliberately distinct from —
@@ -250,8 +252,8 @@ single sanctioned way to launch processes keep the supply-chain and execution ri
   emitting an unsanitized bundle, and offers a remedy.
 - **MUST** run the bundled secret scanner detection-only and fully offline; its network validation
   step MUST stay disabled.
-- **MUST NOT** emit, log, or commit secrets, private keys, tokens, or onion/control credentials —
-  not in output, error messages, or the corpus.
+- **MUST NOT** emit, log, or commit secrets, private keys, or tokens — not in output, error
+  messages, or the corpus.
 - **MUST NOT** auto-commit, ever, and MUST NOT edit a live `SKILL.md` except via the explicit,
   opt-in `suggest --apply` content-anchored path (which refuses a dirty tree and stops short of the
   commit). `iterate` operates only in throwaway worktrees.
@@ -368,8 +370,10 @@ binds them (e.g., the sanctioned-dependency list in Principle VI).
   no tagged release yet (pin by revision); its `YAML` product needs C++ interop, so it is confined
   to an isolated codec seam to keep the pure core interop-free, and wired only when that codec lands
 - **Process execution**: `swift-subprocess` (sole sanctioned launcher)
-- **Test-only transitive dep**: `swift-system` (`FilePath`) — surfaced via `swift-subprocess` to the
-  `IntegrationTests` binary harness only; no shipped runtime dependency, so no amendment is required
+- **Transitive production dep**: `swift-system` (`FilePath`) — rides in with `swift-subprocess`,
+  whose API surfaces it; declared as `HarnessKit`'s `SystemPackage` dependency (the `ProcessLauncher`
+  seam) and used by the `IntegrationTests` harness. Sanctioned as part of the `swift-subprocess`
+  adoption — no separate supply-chain entry, so the Principle VI list is unchanged
 - **JSON / SARIF / frozen formats**: Foundation `Codable` (no added dependency)
 - **Secret scanning**: vendored `betterleaks` (MIT), per platform/arch, offline detection-only
 - **Cache**: system SQLite (cache only)
@@ -381,8 +385,8 @@ binds them (e.g., the sanctioned-dependency list in Principle VI).
 ### Package Architecture (design §11)
 
 `EDDCore` (pure) → TraceKit → { HarnessKit, JudgeKit, ScoreKit, LintKit, CorpusKit, ProjectKit } →
-AnalysisKit / RunKit / IterateKit → the `skillet` executable (ALL ArgumentParser commands +
-wiring, ~≤50 lines per command). There is **no separate `skilletCLI` library target** — the
+AnalysisKit / RunKit / IterateKit / RenderKit → the `skillet` executable (ALL ArgumentParser
+commands + wiring, ~≤50 lines per command). There is **no separate `skilletCLI` library target** — the
 executable itself is the top wiring layer. `ProjectKit` owns project discovery, config I/O, and
 `init` scaffolding (filesystem effects kept out of the executable so they remain unit-testable).
 
@@ -471,11 +475,17 @@ constitution is the development-principle layer. They are kept in sync, not dupl
 
 ## Version History
 
-**Version**: 1.2.0
+**Version**: 1.2.1
 **Ratified**: 2026-06-18
-**Last Amended**: 2026-06-20
+**Last Amended**: 2026-07-01
 
 **Changelog**:
+- **1.2.1** (2026-07-01): PATCH amendment — factual syncs from the Phase-1 completed-items audit
+  (M4, Roadmap/phase-1-review.md §5): the Technology Stack note now records `swift-system` as a
+  transitive *production* dependency (HarnessKit's `ProcessLauncher` seam, via the sanctioned
+  `swift-subprocess`) rather than test-only; `RenderKit` restored to the Package Architecture
+  layer diagram (matches design §11); the out-of-domain "onion/control credentials" phrase removed
+  from Principle VI's secrets rule. No principle added, removed, or changed in force.
 - **1.2.0** (2026-06-20): MINOR amendment — Principle IV (Human- and Agent-First, Composable CLI)
   gains concrete clig.dev-derived practices: support `--version` and standard flag names including
   `--no-input` (the agent/script complement to `--yes`) and `-n`/`--dry-run`; stay responsive with

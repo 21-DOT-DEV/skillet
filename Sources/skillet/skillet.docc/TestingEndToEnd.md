@@ -15,7 +15,7 @@ It stays on *running* the commands. It doesn't teach how to author an effective 
 
 You supply Claude one of two ways: a normal Claude Code install on your `PATH`, or — if you don't have one — the binary an editor's coding agent bundles (Xcode or Zed). Step 5 covers both.
 
-> Note: In CI you run only the free stages. The `--replay` path is the gate every pull request uses; the single paid path is an opt-in, env-gated smoke test (`SKILLET_LIVE_SMOKE=1`).
+> Note: In CI (`.github/workflows/ci.yml`) you run only the free stages. The `--replay` path is the pull-request gate; the single paid path is an opt-in, env-gated smoke test (`SKILLET_LIVE_SMOKE=1`).
 
 ## Prerequisites
 
@@ -97,7 +97,7 @@ skillet run greeter --replay
 ```
 
 ```
-✓ run: greeter — pass^k 1.00 (k=3)
+✓ run: greeter — pass^k 1.00 (k=3) · pass^1 1.00
 EVAL  STATUS  PASSES
 0     pass    3/3
 1     pass    3/3
@@ -109,7 +109,7 @@ This writes `skills/greeter/evaluations/benchmark.json` and `grading.json`.
 
 ## 5. Provide a Claude binary
 
-`run` shells the `claude` CLI. skillet resolves it in order: `--harness-path` flag → `SKILLET_CLAUDE_CODE_BIN` env → `harness.claude-code.path` in `skillet.yaml` → `PATH`.
+`run` shells the `claude` CLI. skillet resolves it in order: `SKILLET_CLAUDE_CODE_BIN` env → `harness.claude-code.path` in `skillet.yaml` → `PATH` (a `--harness-path` flag is reserved as the chain's first link but is not wired yet — Phase 7).
 
 **Default — Claude Code on `PATH`.** If you installed Claude Code the usual way (`npm i -g @anthropic-ai/claude-code`, or the [native installer](https://code.claude.com/docs/en/setup)), skillet finds it automatically — nothing to configure. Confirm it's present and authenticated (neither call spends):
 

@@ -1,6 +1,6 @@
 # Product Roadmap — skillet
 
-**Version:** v1.9.8
+**Version:** v1.10.0
 **Last Updated:** 2026-07-01
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
@@ -140,9 +140,9 @@ Phase 1's `F1–F8` and Phase 8's `F10–F13` were already global and were prese
   not a verified status; per design §13 the schedule risk concentrates in the
   `Net-new` column.
 - **Open questions resolved to doc defaults.** Design §14 choices are assumed at
-  their stated defaults (`opencode` as the second adapter; Apache-2.0;
-  required-explicit judge model; static `concurrency` knob). Items resting on
-  these carry `needs-research`.
+  their stated defaults (`opencode` as the second adapter; Apache-2.0; static
+  `concurrency` knob — the judge-model question is now **decided**: required-explicit,
+  §14-4 / v1.10.0). Items resting on the remaining assumptions carry `needs-research`.
 - **Trademark risk.** Palo Alto Networks ships a "Skillet" product family (design
   Appendix C / Open Q1); a public launch needs a trademark sanity check first. A
   June-2026 GitHub sweep found **no collision *inside the eval space*** — the PAN
@@ -175,6 +175,54 @@ phases and the v1 scope line are unchanged.
 
 ## Change Log
 
+- v1.10.0 (2026-07-01): MINOR — **audit remediation slate landed** (M1–M3 + §14-11 adopted; M4
+  drafted, pending maintainer ratification — [phase-1-review §5/§8](Roadmap/phase-1-review.md)).
+  (1) **M1:** `.github/workflows/ci.yml` — the constitution-V free-suite gate (macOS + Ubuntu via the
+  official `swift:6.3` container; zero secrets, zero paid calls; the live smoke self-skips) —
+  authored and logically verified; the first live run (and any Linux-first-build fallout) lands with
+  the next push. (2) **M2 / design §14-4 DECIDED — required-explicit judge model:** the config decode
+  carries no model fallback and `run` refuses an absent `judge.model` (exit 2, what/why/fix; the
+  replay/test seam exempt; `init` writes one). **Migration (pre-1.0 breaking):** hand-rolled configs
+  without `judge.model` must add it — or re-run `skillet init`. A deliberate divergence from the
+  surveyed silent-default convention (promptfoo's ambient-credential grader). (3) **M3:** committed
+  records gain additive provenance — `benchmark.json` `metadata.executor_binary_version` +
+  `metadata.judge.prompt_version`, and a `grading.json` `judge` block — via the new pure
+  `EDDCore.RunProvenance`; `run` now probes the replay seam too (canned, free) so every record names
+  its executor. (4) **§14-11 DECIDED — adopted:** additive `pass_1` in `skillet.run/1` +
+  `suite_pass_1` in the `consistency` block (mean per-eval trial pass rate — τ-bench's headline
+  metric, meaningful even at k = 1); strict all-trials `pass^k` stays the reliability gate
+  (graduated out of *Candidate Enhancements*). Design doc → v0.24/v0.25. 237 tests green. No phase
+  or priority change.
+- v1.9.10 (2026-07-01): PATCH — **external cross-reference addendum** added to the Phase-1 audit
+  ([phase-1-review §8](Roadmap/phase-1-review.md)) after three adversarially-verified deep-research
+  passes (~29 primary sources): **nothing contradicts shipped Phase-1 behavior**. Verified supported:
+  pass^k ≡ τ-bench's metric (Chen et al. the correct ANY-pass contrast), FLAKY/hygiene-before-deltas
+  = the Google flaky-test canon, the existence-check-via-workspace-listing rule (Anthropic's canonical
+  final-state example; τ-bench/SWE-bench concur), **M1's free-suite-as-PR-gate** (lm-evaluation-harness
+  + Inspect AI run model-free zero-credential CI on every PR; walking-skeleton canon puts build/test
+  automation before the first feature), the held-out proof gate (DSPy/GEPA), and audit-citation
+  practice itself (IIA 14.1 / ISO 19011 / ADR). **M2 reframed**: required-explicit judge is a
+  deliberate reproducibility divergence (promptfoo silently defaults its grader from ambient
+  credentials — verified in docs + source). Two corrections applied: design v0.22 (the infra-only-retry
+  rule re-stated as skillet's own discipline — no primary source states it) and **§14-11 staged**
+  (additive `pass_1` reporting; τ-bench's unbiased estimator makes skillet's strict rule a deliberate
+  conservative special case) → Candidate Enhancements. F16 (grounded judge) framed as closure of
+  τ-bench's named "necessary but not sufficient" gap. §7-minors deferral confirmed (no urgency
+  evidence; clig.dev silent on inert flags). Design doc → v0.23. No scope, feature, or priority change.
+- v1.9.9 (2026-07-01): PATCH — **Phase-1 completed-items cross-artifact audit** →
+  [Roadmap/phase-1-review.md](Roadmap/phase-1-review.md). Every F1–F8 metric verified against
+  `Specs/001–007` + shipped code (235 tests green; free-only — the paid smoke not re-run):
+  **Phase-1-COMPLETE stands**; F6 gaps C/D confirmed open, gap **#3 closed** (typed `harnessNotFound`
+  what/why/fix at probe/preflight). Documentary drift reconciled: phase-doc F2/F6/F7 current-state
+  lines; AGENTS (`Roadmap/` paths, LintKit in the banner, `.Cxx` test-target note, dump-help claim
+  scoped to names); README (+F8); design → **v0.21** (§7.2 evals-2.0 row + run-record family +
+  `scorecard.json` exclusion, §9.1 F50 annotations, §9.3 synthetic-goldens wording, §10
+  consistency-block recompute, §14-4 shipped-state note, §14-8 F5→F45); docc walkthrough (no
+  `--harness-path` yet; CI "when wired"); post-audit notes on all seven plans. **Staged, not
+  applied** (audit §5): the CI workflow (constitution V — `.github/workflows/` is empty),
+  judge-model required-explicit (§14-4 / constitution II), committed-record provenance
+  (`judge_prompt_version`/`executor_binary_version`), and the constitution's stale swift-system
+  note. No scope, feature, or priority change.
 - v1.9.8 (2026-07-01): PATCH — **F7 review round 9** (judge trace-evidence conformance + reason tolerance +
   config test coverage). The text judge's prompt now carries the plan-specified compact trace summary —
   skill invocations + **tool-call names + files touched** (was skills only) — as **best-effort supporting

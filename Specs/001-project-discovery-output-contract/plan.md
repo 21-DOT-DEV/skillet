@@ -5,6 +5,7 @@
 | **Feature** | 001 — Project discovery & output contract |
 | **Phase** | 1 — Walking Skeleton ([Roadmap/phase-1-walking-skeleton.md](../../Roadmap/phase-1-walking-skeleton.md), F1) |
 | **Status** | IMPLEMENTED (2026-06-20) — all success criteria met; 32 unit + integration tests green |
+| **Post-audit (2026-07-01)** | Verified by the [Phase-1 audit](../../Roadmap/phase-1-review.md). As-built deltas: `EDDError` shipped as flat cases + a computed `exitCode` (not the planned nested shape — behaviorally equivalent); goldens are inline literals, not files; `-q`/`-v` are parsed but not yet wired to any output change (audit A15). |
 | **Last updated** | 2026-06-20 |
 | **Authoritative refs** | design §5.1–5.5 (invocation, exit codes, output contract), §6.3 (help/discoverability), Appendix B (clig.dev checklist), §11 (architecture); constitution I/III/IV/V |
 | **Workflow** | Standalone plan (spec-kit workflow intentionally skipped) |

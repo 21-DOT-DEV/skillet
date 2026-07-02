@@ -108,7 +108,9 @@ struct RunCommand: AsyncParsableCommand {
             // Assemble the harness + judge; probe before spending so a missing/banned binary fails fast (3).
             let timeout = DurationString.parse(runsCfg.timeout) ?? .seconds(600)
             let backend = try buildAdapterAndJudge(config: config, judge: judgeCfg, timeout: timeout, outputLimitBytes: runsCfg.maxOutputBytes)
-            if !replay { _ = try await backend.adapter.probe(strict: true) }   // refuse banned/unauth before spend
+            // Strict for the paid path (refuse banned/unauth before spend); replay's probe is canned and
+            // free — probed anyway so the executor's version is stamped into the records (M3 provenance).
+            let harnessInfo = try await backend.adapter.probe(strict: !replay)
 
             let skillRef = SkillRef(name: skillName, path: skillDir.path)
             try assertCacheNotSymlinked(projectRoot: root)   // confine cache writes to the repo (no symlink escape)
@@ -120,9 +122,15 @@ struct RunCommand: AsyncParsableCommand {
                 skill: skillRef, evals: cases, k: k,
                 injection: .only(load: [skillRef]), base: base, keepWorkspace: keepWorkspace
             )
-            // Stamp the ACTUAL judge backend in records (not the configured value) — P3 review fix.
+            // Stamp the ACTUAL judge backend + executor version in records (not configured values) —
+            // P3 review fix + M3 provenance: re-grade and harness-vs-skill attribution need the truth.
+            let provenance = RunProvenance(
+                judgeProvider: backend.provider, judgeModel: backend.model,
+                judgePromptVersion: backend.promptVersion,
+                executorBinaryVersion: harnessInfo.version.isEmpty ? "unknown" : harnessInfo.version
+            )
             try writeRecords(outcome: outcome, skillDir: skillDir, harness: backend.adapter.id.rawValue, k: k,
-                             judge: SkilletConfig.Judge(provider: backend.provider, model: backend.model), base: base)
+                             provenance: provenance, base: base)
 
             Console.emit(try renderer.renderRun(outcome.report, nextSteps: Self.nextSteps()))
             // pass^k demands all k trials pass: any FAIL or FLAKY is a measured failure (exit 1).
@@ -181,15 +189,18 @@ struct RunCommand: AsyncParsableCommand {
         return cases
     }
 
-    /// The harness adapter + judge, plus the **actual** judge `provider`/`model` for record stamping.
-    /// Production: `claude-code` adapter + a `claude`-CLI-backed text judge (binary resolved once,
-    /// shared by both). Tests: the offline replay wiring. An unsupported `judge.provider` fails fast
-    /// rather than silently running claude-code while records claim otherwise (P3 review fix).
+    /// The harness adapter + judge, plus the **actual** judge `provider`/`model`/`promptVersion` for
+    /// record stamping. Production: `claude-code` adapter + a `claude`-CLI-backed text judge (binary
+    /// resolved once, shared by both). Tests: the offline replay wiring. An unsupported `judge.provider`
+    /// fails fast rather than silently running claude-code while records claim otherwise (P3 review fix).
+    /// `judge.model` is **required-explicit** (§14-4, decided): a paid run refuses (exit 2) when it's
+    /// absent rather than silently picking one — the reproducibility hazard the surveyed tools carry.
+    /// The replay path is exempt: no real judge is built there (canned verdicts, nothing spent).
     private func buildAdapterAndJudge(
         config: SkilletConfig?, judge judgeCfg: SkilletConfig.Judge, timeout: Duration, outputLimitBytes: Int
-    ) throws -> (adapter: any HarnessAdapter, judge: any Judge, provider: String, model: String) {
+    ) throws -> (adapter: any HarnessAdapter, judge: any Judge, provider: String, model: String, promptVersion: String) {
         if replay {
-            return (ReplayAdapter(), ReplayJudge(loadReplayMap(), defaultPass: replayMap == nil), "replay", "replay")
+            return (ReplayAdapter(), ReplayJudge(loadReplayMap(), defaultPass: replayMap == nil), "replay", "replay", "replay")
         }
         guard judgeCfg.provider == "claude-code" else {
             throw EDDError.usage(
@@ -197,13 +208,19 @@ struct RunCommand: AsyncParsableCommand {
                 remedy: "set judge.provider: claude-code in skillet.yaml (the only implemented provider)"
             )
         }
+        guard let model = judgeCfg.model?.trimmingCharacters(in: .whitespaces), !model.isEmpty else {
+            throw EDDError.usage(
+                message: "judge.model is not set — a paid run needs an explicit judge model so verdicts are reproducible across machines",
+                remedy: "add `model: <judge model>` under `judge:` in skillet.yaml (`skillet init` writes one)"
+            )
+        }
         let claudePath = config?.harness?.claudeCode?.path
         guard let resolved = BinaryResolver().resolve(flag: nil, envVar: "SKILLET_CLAUDE_CODE_BIN", configPath: claudePath, pathName: "claude") else {
             throw EDDError.harnessNotFound(harness: "claude-code")
         }
         let adapter = ClaudeCodeAdapter(configPath: claudePath, timeout: timeout, outputLimitBytes: outputLimitBytes)
-        let judge = TextJudge(runner: ClaudeCLIJudgeRunner(binaryPath: resolved.path), model: judgeCfg.model)
-        return (adapter, judge, "claude-code", judgeCfg.model)
+        let judge = TextJudge(runner: ClaudeCLIJudgeRunner(binaryPath: resolved.path), model: model)
+        return (adapter, judge, "claude-code", model, TextJudge.promptVersion)
     }
 
     /// Validate that every declared eval fixture (`files[]`, resolved against the skill directory)
@@ -318,14 +335,14 @@ struct RunCommand: AsyncParsableCommand {
     /// Write the committed records (the eval-viewer contract + the `pass^k` source of truth) into the
     /// skill's `evaluations/`, and a run summary into the deletable cache. The human commits the
     /// `evaluations/` files (P5 — skillet never auto-commits).
-    private func writeRecords(outcome: Runner.Outcome, skillDir: URL, harness: String, k: Int, judge: SkilletConfig.Judge, base: URL) throws {
+    private func writeRecords(outcome: Runner.Outcome, skillDir: URL, harness: String, k: Int, provenance: RunProvenance, base: URL) throws {
         let evalDir = skillDir.appendingPathComponent("evaluations", isDirectory: true)
         try FileManager.default.createDirectory(at: evalDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
-        try encoder.encode(BenchmarkFile(report: outcome.report, evals: outcome.evals, harness: harness, k: k, judge: judge))
+        try encoder.encode(BenchmarkFile(report: outcome.report, evals: outcome.evals, harness: harness, k: k, provenance: provenance))
             .write(to: evalDir.appendingPathComponent("benchmark.json"))
-        try encoder.encode(GradingFile(evals: outcome.evals))
+        try encoder.encode(GradingFile(evals: outcome.evals, provenance: provenance))
             .write(to: evalDir.appendingPathComponent("grading.json"))
         if let runJSON = try? SkilletJSON.encode(outcome.report) {
             try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)

@@ -26,10 +26,12 @@ struct RunConfigTests {
         #expect(r.concurrency == 1)       // untouched default
     }
 
-    @Test("Judge: the default provider is claude-code (the F7 amendment)")
+    @Test("Judge: provider defaults to claude-code; model has NO fallback — required-explicit (§14-4)")
     func judgeDefaults() throws {
         let j = try JSONDecoder().decode(SkilletConfig.Judge.self, from: Data("{}".utf8))
         #expect(j.provider == "claude-code")
-        #expect(j.model == "claude-sonnet-4-6")
+        #expect(j.model == nil)   // deliberately no shipped default: `run` refuses without an explicit model
+        let explicit = try JSONDecoder().decode(SkilletConfig.Judge.self, from: Data(#"{"model":"m-1"}"#.utf8))
+        #expect(explicit.model == "m-1")
     }
 }

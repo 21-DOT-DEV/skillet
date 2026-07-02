@@ -35,27 +35,48 @@ jobs:
       DEVELOPER_DIR: "/Applications/Xcode_26.5.app/Contents/Developer"
     steps:
       - uses: actions/checkout@v6
-      # TEMPORARY forensics — remove when macOS is green. Every code/flag variable is now
-      # eliminated (round 5: identical compiler build, -target macosx14.0 via the platforms
-      # stanza, import present, flag-identical invocation — still fails, while the same
-      # inputs pass locally). The remaining suspect is the runner's DISK: image bakers strip
-      # Xcode contents, and a missing/stripped CxxStdlib.swiftmodule explains everything.
-      # Local control (Xcode 26.5, 17F42): all artifacts present, probe prints "probe-ok".
-      # Interpretation: probe FAILS + artifacts missing → stripped image (runner-images bug);
-      # probe FAILS + artifacts present → toolchain breakage on the host (swiftlang bug);
-      # probe PASSES → the failure is SwiftPM-build-specific, iterate on the probe.
-      - name: CxxStdlib forensics (temporary)
+      # TEMPORARY forensics, round 7 — remove when macOS is green. Round 6 proved the
+      # runner's toolchain is complete (all Cxx artifacts present) and the bare
+      # import-CxxStdlib probe PASSES there at clang's default C++ standard. Remaining
+      # suspect: swift-yaml's cxxLanguageStandard .cxx11 — below the documented C++14
+      # interop minimum (swift.org/documentation/cxx-interop/status). This matrix
+      # discriminates it with a self-contained mini-package replicating swift-yaml's
+      # shape (C++ target returning std::string → interop Swift target String(...)):
+      # mini FAILS @cxx11 + PASSES @cxx17 → cause + fix confirmed on the runner itself,
+      # and the mini is a standalone swiftlang bug-report repro. All four data points
+      # print even on a red round (runs before the build).
+      - name: CxxStdlib forensics matrix (temporary)
         run: |
           swift --version
-          xcrun --show-sdk-path
-          TC="$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift"
-          echo "--- toolchain swift/macosx Cxx artifacts ---"
-          ls "$TC/macosx" | grep -i cxx || echo "!!! NO Cxx artifacts in toolchain"
-          echo "--- CxxStdlib.swiftmodule contents ---"
-          ls "$TC/macosx/CxxStdlib.swiftmodule" || echo "!!! CxxStdlib.swiftmodule MISSING"
-          echo "--- minimal std.string probe (isolates swift-yaml entirely) ---"
+          echo "--- [1] bare probe @ default std ---"
           printf 'import CxxStdlib\nlet s = std.string("probe-ok")\nprint(String(s))\n' > /tmp/probe.swift
-          xcrun swiftc -cxx-interoperability-mode=default /tmp/probe.swift -o /tmp/probe && /tmp/probe || echo "!!! PROBE FAILED"
+          xcrun swiftc -cxx-interoperability-mode=default /tmp/probe.swift -o /tmp/probe && /tmp/probe || echo "RESULT[bare-default]: FAILED"
+          echo "--- [2] bare probe @ -std=c++11 ---"
+          xcrun swiftc -cxx-interoperability-mode=default -Xcc -std=c++11 /tmp/probe.swift -o /tmp/probe2 && /tmp/probe2 || echo "RESULT[bare-c++11]: FAILED"
+          mkdir -p /tmp/mini/Sources/shim/include /tmp/mini/Sources/app
+          cat > /tmp/mini/Package.swift <<'PKG'
+          // swift-tools-version: 6.1
+          import PackageDescription
+          let package = Package(
+              name: "mini",
+              platforms: [.macOS(.v14)],
+              targets: [
+                  .target(name: "shim"),
+                  .executableTarget(name: "app", dependencies: ["shim"],
+                      swiftSettings: [.interoperabilityMode(.Cxx)])
+              ],
+              cxxLanguageStandard: .cxx11
+          )
+          PKG
+          printf '#pragma once\n#include <string>\nstd::string greet();\n' > /tmp/mini/Sources/shim/include/shim.h
+          printf '#include "shim.h"\nstd::string greet() { return std::string("mini-ok"); }\n' > /tmp/mini/Sources/shim/shim.cpp
+          printf 'import shim\nimport CxxStdlib\nprint(String(greet()))\n' > /tmp/mini/Sources/app/main.swift
+          for STD in cxx11 cxx17; do
+            echo "--- [mini] cxxLanguageStandard .$STD ---"
+            sed -i '' "s/\.cxx[0-9]*/.$STD/" /tmp/mini/Package.swift
+            rm -rf /tmp/mini/.build
+            (cd /tmp/mini && swift run) || echo "RESULT[mini-$STD]: FAILED"
+          done
       - name: Build
         run: swift build
       - name: Test (free suite — live smoke self-skips)

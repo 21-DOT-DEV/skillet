@@ -15,7 +15,7 @@ It stays on *running* the commands. It doesn't teach how to author an effective 
 
 You supply Claude one of two ways: a normal Claude Code install on your `PATH`, or — if you don't have one — the binary an editor's coding agent bundles (Xcode or Zed). Step 5 covers both.
 
-> Note: In CI (when wired) you run only the free stages. The `--replay` path is the pull-request gate; the single paid path is an opt-in, env-gated smoke test (`SKILLET_LIVE_SMOKE=1`).
+> Note: In CI (`.github/workflows/ci.yml`) you run only the free stages. The `--replay` path is the pull-request gate; the single paid path is an opt-in, env-gated smoke test (`SKILLET_LIVE_SMOKE=1`).
 
 ## Prerequisites
 

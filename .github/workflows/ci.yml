@@ -1,0 +1,45 @@
+# Free CI — the model-free merge gate (constitution V: "CI in this repo *is* the Linux user").
+#
+# Both jobs run the full unit + integration suite with ZERO secrets and ZERO paid model
+# calls: the one paid test (the live smoke) is opt-in env-gated (SKILLET_LIVE_SMOKE) and
+# self-skips here — the same pattern lm-evaluation-harness and Inspect AI use for their
+# PR gates (evidence: Roadmap/phase-1-review.md §8, M1). Never add a provider credential
+# to this workflow; paid validation stays a local, consented, env-gated run.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos:
+    name: macOS (Swift 6)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The default Xcode toolchain must be Swift ≥ 6 (swiftLanguageModes: [.v6]); pin
+      # DEVELOPER_DIR here if a runner image ever regresses below that.
+      - name: Toolchain
+        run: swift --version
+      - name: Build
+        run: swift build
+      - name: Test (free suite — live smoke self-skips)
+        run: swift test
+
+  linux:
+    name: Ubuntu (Swift 6.3)
+    runs-on: ubuntu-latest
+    container: swift:6.3 # official Swift image — deterministic toolchain, no third-party setup action
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain
+        run: swift --version
+      - name: Build
+        run: swift build
+      - name: Test (free suite — live smoke self-skips)
+        run: swift test

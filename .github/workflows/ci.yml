@@ -48,16 +48,68 @@ jobs:
       # .build, so the Build step after it goes green incrementally — that green still
       # means "serial works, parallel is the trigger" and the durable fix is then decided
       # deliberately (not --jobs 1 forever).
-      - name: Forensics round 8 — standalone vs graph, serial vs parallel (temporary)
+      # Round 9. Round 8: swift-yaml STANDALONE fails on this runner (skillet's graph and
+      # scheduling exonerated — serial failed too). Round 7's minimal mini passes here, so
+      # the trigger is one of swift-yaml's structural deltas, or environment content the
+      # ClangImporter consults (swiftlang/swift#74696 class — wrong-path module maps; the
+      # runner bakes in a CLT installation). Three experiments, each decisive:
+      # [A] mini + swift-yaml-style handwritten modulemap (requires cplusplus, plain header)
+      # [B] mini as a TWO-LEVEL chain: shim target textually #includes headers owned by a
+      #     second C++ target's module — swift-yaml's exact composition
+      # [C] remove the baked-in CommandLineTools, rebuild standalone swift-yaml fresh —
+      #     a PASS here convicts CLT content interference (#74696 class)
+      - name: Forensics round 9 — modulemap style, module chain, CLT interference (temporary)
         run: |
           swift --version
-          echo "ncpu: $(sysctl -n hw.ncpu)"
-          echo "--- [A] swift-yaml STANDALONE @ pinned rev on this runner ---"
+          pkgutil --pkg-info=com.apple.pkg.CLTools_Executables 2>/dev/null | grep version || echo "(no CLT receipt)"
+          ls /Library/Developer/CommandLineTools/SDKs 2>/dev/null || echo "(no CLT SDKs)"
+          make_mini() { # $1=dir  $2=with_custom_modulemap(yes/no)
+            rm -rf "$1"; mkdir -p "$1/Sources/shim/include" "$1/Sources/app"
+            cat > "$1/Package.swift" <<'PKG'
+          // swift-tools-version: 6.1
+          import PackageDescription
+          let package = Package(name: "mini", platforms: [.macOS(.v14)],
+              targets: [
+                  .target(name: "shim"),
+                  .executableTarget(name: "app", dependencies: ["shim"],
+                      swiftSettings: [.interoperabilityMode(.Cxx)])],
+              cxxLanguageStandard: .cxx11)
+          PKG
+            printf '#pragma once\n#include <string>\nstd::string greet();\n' > "$1/Sources/shim/include/shim.h"
+            printf '#include "shim.h"\nstd::string greet() { return std::string("mini-ok"); }\n' > "$1/Sources/shim/shim.cpp"
+            printf 'import shim\nimport CxxStdlib\nprint(String(greet()))\n' > "$1/Sources/app/main.swift"
+            if [ "$2" = yes ]; then
+              printf 'module shim {\n  header "shim.h"\n  requires cplusplus\n  export *\n}\n' > "$1/Sources/shim/include/module.modulemap"
+            fi
+          }
+          echo "--- [A] mini + handwritten modulemap (requires cplusplus) ---"
+          make_mini /tmp/miniA yes
+          (cd /tmp/miniA && swift run) || echo "RESULT[A-modulemap]: FAILED"
+          echo "--- [B] mini as two-level chain with cross-owned textual include ---"
+          rm -rf /tmp/miniB; mkdir -p /tmp/miniB/Sources/libb/include /tmp/miniB/Sources/shim/include /tmp/miniB/Sources/app
+          cat > /tmp/miniB/Package.swift <<'PKG'
+          // swift-tools-version: 6.1
+          import PackageDescription
+          let package = Package(name: "mini", platforms: [.macOS(.v14)],
+              targets: [
+                  .target(name: "libb"),
+                  .target(name: "shim", dependencies: ["libb"]),
+                  .executableTarget(name: "app", dependencies: ["shim"],
+                      swiftSettings: [.interoperabilityMode(.Cxx)])],
+              cxxLanguageStandard: .cxx11)
+          PKG
+          printf '#pragma once\n#include <string>\nstd::string base();\n' > /tmp/miniB/Sources/libb/include/b.h
+          printf '#include "b.h"\nstd::string base() { return std::string("mini-ok"); }\n' > /tmp/miniB/Sources/libb/b.cpp
+          printf '#pragma once\n#include <string>\n#include "b.h"\ninline std::string greet() { return base(); }\n' > /tmp/miniB/Sources/shim/include/shim.h
+          printf '#include "shim.h"\n' > /tmp/miniB/Sources/shim/shim.cpp
+          printf 'module shim {\n  header "shim.h"\n  requires cplusplus\n  export *\n}\n' > /tmp/miniB/Sources/shim/include/module.modulemap
+          printf 'import shim\nimport CxxStdlib\nprint(String(greet()))\n' > /tmp/miniB/Sources/app/main.swift
+          (cd /tmp/miniB && swift run) || echo "RESULT[B-chain]: FAILED"
+          echo "--- [C] remove CommandLineTools, rebuild standalone swift-yaml fresh ---"
           git clone -q https://github.com/21-DOT-DEV/swift-yaml /tmp/sy
           git -C /tmp/sy checkout -q 02ed774f562672becd282301ff890ab78ae9e55e
-          (cd /tmp/sy && swift build > /tmp/sy-build.log 2>&1) && echo "RESULT[standalone]: PASSED" || { echo "RESULT[standalone]: FAILED"; grep -m2 "error:" /tmp/sy-build.log; }
-          echo "--- [B] skillet build --jobs 1 (serial schedule, fresh cache) ---"
-          swift build --jobs 1 > /tmp/serial-build.log 2>&1 && echo "RESULT[serial]: PASSED" || { echo "RESULT[serial]: FAILED"; grep -m2 "error:" /tmp/serial-build.log; }
+          sudo rm -rf /Library/Developer/CommandLineTools
+          (cd /tmp/sy && swift build > /tmp/sy.log 2>&1) && echo "RESULT[C-noCLT]: PASSED" || { echo "RESULT[C-noCLT]: FAILED"; grep -m2 "error:" /tmp/sy.log; }
       - name: Build
         run: swift build
       - name: Test (free suite — live smoke self-skips)

@@ -68,5 +68,19 @@ struct PassKTests {
         #expect(json.contains(#""schema":"skillet.run/1""#))
         #expect(json.contains(#""observed_k":2"#))
         #expect(json.contains(#""pass_k":1"#))
+        #expect(json.contains(#""pass_1":1"#))   // additive (§14-11) — exact frozen spelling
+    }
+
+    @Test("pass^1 (mean per-eval trial pass rate) complements strict pass^k — well-defined even at k=1 (§14-11)")
+    func passOne() {
+        let report = RunReport(skill: "demo", results: [
+            EvalResult(evalId: "a", trials: [trial(true), trial(true), trial(true)]),   // rate 1.0
+            EvalResult(evalId: "b", trials: [trial(true), trial(false)])                // rate 0.5
+        ])
+        #expect(report.passOne == 0.75)   // mean(1.0, 0.5) — τ-bench's headline metric
+        #expect(report.passK == 0.5)      // the strict all-trials gate stays primary (and stricter)
+        let single = RunReport(skill: "demo", results: [EvalResult(evalId: "a", trials: [trial(true)])])
+        #expect(!single.measurable)       // pass^k needs observed k ≥ 2 …
+        #expect(single.passOne == 1)      // … but pass^1 is meaningful at k = 1
     }
 }

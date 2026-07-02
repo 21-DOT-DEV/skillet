@@ -1,6 +1,6 @@
 # Product Roadmap — skillet
 
-**Version:** v1.9.10
+**Version:** v1.10.0
 **Last Updated:** 2026-07-01
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
@@ -140,9 +140,9 @@ Phase 1's `F1–F8` and Phase 8's `F10–F13` were already global and were prese
   not a verified status; per design §13 the schedule risk concentrates in the
   `Net-new` column.
 - **Open questions resolved to doc defaults.** Design §14 choices are assumed at
-  their stated defaults (`opencode` as the second adapter; Apache-2.0;
-  required-explicit judge model; static `concurrency` knob). Items resting on
-  these carry `needs-research`.
+  their stated defaults (`opencode` as the second adapter; Apache-2.0; static
+  `concurrency` knob — the judge-model question is now **decided**: required-explicit,
+  §14-4 / v1.10.0). Items resting on the remaining assumptions carry `needs-research`.
 - **Trademark risk.** Palo Alto Networks ships a "Skillet" product family (design
   Appendix C / Open Q1); a public launch needs a trademark sanity check first. A
   June-2026 GitHub sweep found **no collision *inside the eval space*** — the PAN
@@ -172,14 +172,27 @@ phases and the v1 scope line are unchanged.
 - **Ablation arms** → design **§14-10**. Partial-skill A/B (drop a section / reference / rule) to
   isolate which part of a skill earns its tokens — feeds *evidence-to-edit ratio*. Touches the
   Phase 6 `run --ab` / `SkillSet`.
-- **`pass^1` alongside strict pass^k** → design **§14-11**. τ-bench's headline metric + unbiased
-  `E[C(c,k)/C(n,k)]` estimator (verified against the paper + official code — the strict all-trials
-  rule is skillet's deliberate conservative special case): an *additive* `pass_1` in `skillet.run/1`
-  + the `benchmark.json` `consistency` block, strict pass^k staying the reliability gate. From the
-  Phase-1 audit cross-reference ([phase-1-review §8](Roadmap/phase-1-review.md)).
 
 ## Change Log
 
+- v1.10.0 (2026-07-01): MINOR — **audit remediation slate landed** (M1–M3 + §14-11 adopted; M4
+  drafted, pending maintainer ratification — [phase-1-review §5/§8](Roadmap/phase-1-review.md)).
+  (1) **M1:** `.github/workflows/ci.yml` — the constitution-V free-suite gate (macOS + Ubuntu via the
+  official `swift:6.3` container; zero secrets, zero paid calls; the live smoke self-skips) —
+  authored and logically verified; the first live run (and any Linux-first-build fallout) lands with
+  the next push. (2) **M2 / design §14-4 DECIDED — required-explicit judge model:** the config decode
+  carries no model fallback and `run` refuses an absent `judge.model` (exit 2, what/why/fix; the
+  replay/test seam exempt; `init` writes one). **Migration (pre-1.0 breaking):** hand-rolled configs
+  without `judge.model` must add it — or re-run `skillet init`. A deliberate divergence from the
+  surveyed silent-default convention (promptfoo's ambient-credential grader). (3) **M3:** committed
+  records gain additive provenance — `benchmark.json` `metadata.executor_binary_version` +
+  `metadata.judge.prompt_version`, and a `grading.json` `judge` block — via the new pure
+  `EDDCore.RunProvenance`; `run` now probes the replay seam too (canned, free) so every record names
+  its executor. (4) **§14-11 DECIDED — adopted:** additive `pass_1` in `skillet.run/1` +
+  `suite_pass_1` in the `consistency` block (mean per-eval trial pass rate — τ-bench's headline
+  metric, meaningful even at k = 1); strict all-trials `pass^k` stays the reliability gate
+  (graduated out of *Candidate Enhancements*). Design doc → v0.24/v0.25. 237 tests green. No phase
+  or priority change.
 - v1.9.10 (2026-07-01): PATCH — **external cross-reference addendum** added to the Phase-1 audit
   ([phase-1-review §8](Roadmap/phase-1-review.md)) after three adversarially-verified deep-research
   passes (~29 primary sources): **nothing contradicts shipped Phase-1 behavior**. Verified supported:

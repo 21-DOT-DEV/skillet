@@ -35,6 +35,7 @@ struct RunRecordMappingTests {
         let consistency = bench.fields["consistency"]?.objectValue
         #expect(consistency?["k"] == .number(2))
         #expect(consistency?["suite_pass_power_k"] == .number(0.5))       // 1 of 2 evals pass^k
+        #expect(consistency?["suite_pass_1"] == .number(0.75))            // mean(2/2, 1/2) — additive §14-11
         #expect(consistency?["flaky_eval_ids"]?.arrayValue == [.string("b")])
         let perEvalA = consistency?["per_eval"]?.arrayValue?.first?.objectValue
         #expect(perEvalA?["eval_id"] == .string("a"))

@@ -116,6 +116,12 @@ Claims are the phase doc's success metrics (abbreviated); evidence is indicative
 
 *External evidence per finding: [§8](#8-external-cross-reference-addendum-2026-07-01).*
 
+**Dispositions (2026-07-01):** M1 implemented — `.github/workflows/ci.yml` authored (first verified
+run lands with the next push) · M2 implemented — §14-4 decided, required-explicit (`run` exit 2 on an
+absent `judge.model`) · M3 implemented — additive provenance in `benchmark.json`/`grading.json` via
+`RunProvenance` · M4 drafted, pending maintainer ratification. §8's R1 (`pass_1`) was adopted and
+shipped the same day (§14-11 → Decided). ROADMAP v1.10.0 carries the consolidated entry.
+
 - **M1 · No CI workflow exists.** Constitution V MUSTs (macOS 14+ & Ubuntu LTS build/test, merge gates, free-suite-always) have no workflow behind them; every "free CI" statement across the docs describes a suite that today runs only locally. *Recommend:* commit the free-suite workflow (macOS + Ubuntu, `swift test --skip slow`) before the next feature lands, or record an explicit CI deferral in the constitution.
 - **M2 · `judge.model` is not required-explicit.** Constitution II: "MUST … require an explicit judge model"; design §14-4 assumes required-explicit. Shipped: `init` writes it explicitly (half satisfied) but the decode silently defaults to `claude-sonnet-4-6` when absent (`SkilletConfig.swift:128-144`). *Recommend:* decide §14-4 — either enforce (absent key → error naming the fix) or amend the assumption; until decided this is a standing constitution-II deviation.
 - **M3 · Committed-record provenance gap.** Design §7.2/§9.1 say `benchmark.json` carries `executor_binary_version` and `judge_prompt_version`; shipped committed records carry judge provider+model only — `judge_prompt_version` survives only in the deletable cache (`verdicts.json`), and `executor_binary_version` appears nowhere in the codebase. Cross-run deltas can't yet be attributed harness-vs-skill from committed files, and v1- vs v2-graded runs are indistinguishable after a cache wipe. *Recommend:* additive metadata fields in the F7 writer (small, frozen-format-safe) — natural home: early Phase 2 (F19 record/replay or with F16).
@@ -187,7 +193,9 @@ evidence-driven finding**:
   paper *and* `sierra-research/tau-bench` `run.py`). skillet's binary all-recorded-trials rule equals
   that estimator only at k = n; under mixed recorded counts it is **strictly conservative
   (downward-biased)** — a legitimate reliability stance, but the report should carry `pass_1` for
-  comparability and document the conservatism.
+  comparability and document the conservatism. *(Adopted + shipped 2026-07-01: `pass_1` in
+  `skillet.run/1`, `suite_pass_1` in `consistency`, conservatism documented in design §10 —
+  §14-11 → Decided.)*
 
 **On existence-now / content-later (F16):** a defensible **one-phase** staging — but every mature
 exemplar verifies *content* from inception (τ-bench record values; SWE-bench executing tests;

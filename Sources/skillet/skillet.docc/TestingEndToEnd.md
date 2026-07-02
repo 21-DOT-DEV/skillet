@@ -97,7 +97,7 @@ skillet run greeter --replay
 ```
 
 ```
-✓ run: greeter — pass^k 1.00 (k=3)
+✓ run: greeter — pass^k 1.00 (k=3) · pass^1 1.00
 EVAL  STATUS  PASSES
 0     pass    3/3
 1     pass    3/3

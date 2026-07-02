@@ -100,6 +100,7 @@ public extension BenchmarkFile {
                 "k": .number(Double(k)),
                 "meaningful": .bool(report.measurable),
                 "suite_pass_power_k": .number(report.passK),
+                "suite_pass_1": .number(report.passOne),   // additive (§14-11): τ-bench's headline metric
                 "flaky_eval_ids": .array(report.evals.filter { $0.status == .flaky }.map { .string($0.id) }),
                 "per_eval": .array(perEval)
             ]),

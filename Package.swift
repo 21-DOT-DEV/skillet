@@ -41,7 +41,7 @@ let package = Package(
         // Rev = branch fix/explicit-cxxstdlib-import (explicit CxxStdlib import for the std.string →
         // String conversions — the macOS-CI fix). Repin to the main rev once merged; don't squash-merge
         // upstream or this rev becomes unreachable.
-        .package(url: "https://github.com/21-DOT-DEV/swift-yaml", revision: "ee4c3e981062e19dc4ffc5d43b015201e7946842")
+        .package(url: "https://github.com/21-DOT-DEV/swift-yaml", revision: "02ed774f562672becd282301ff890ab78ae9e55e")
     ],
     targets: [
         // MARK: Layer 0 — pure core (no I/O, no processes, no network)

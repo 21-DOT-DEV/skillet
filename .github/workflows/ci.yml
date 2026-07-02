@@ -25,10 +25,13 @@ jobs:
     permissions:
       contents: read
     env:
-      # Pinned Xcode — the swift-bitcoinkernel convention (apple-builds.yml). swift-yaml's
-      # C++ interop (std.string → Swift.String) needs the Swift 6.3 toolchain: the image's
-      # unpinned default Xcode failed the workflow's first run on exactly that conversion.
-      DEVELOPER_DIR: "/Applications/Xcode_26.4.app/Contents/Developer"
+      # Pinned Xcode (the swift-bitcoinkernel convention) — but the PIN TARGET is a Swift
+      # version, not an Xcode: swift-yaml's CxxStdlib conversions (std.string → Swift.String)
+      # require Darwin Swift ≥ 6.3.2. Verified against xcodereleases.com build data:
+      # Xcode 26.4.1 = Swift 6.3.1 → FAILS (run 28577148729); Xcode 26.5 = Swift 6.3.2 →
+      # the exact toolchain proven locally (Xcode 27 beta ships the same 6.3.2 line);
+      # Xcode 26.6 = Swift 6.3.3 (untested, likely fine). Keep ≥ 26.5 when bumping.
+      DEVELOPER_DIR: "/Applications/Xcode_26.5.app/Contents/Developer"
     steps:
       - uses: actions/checkout@v6
       - name: Toolchain

@@ -48,10 +48,11 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 - `swift package generate-manual` / `generate-docc-reference` — regenerate the command reference from the parser.
 - `SKILLET_TEST_BINARY=<path> swift test` — point the integration harness at a specific binary.
 - CI: `.github/workflows/ci.yml` runs the free suite on macOS (`macos-26`, `DEVELOPER_DIR` pinned to
-  **Xcode 26.5 = Darwin Swift 6.3.2** — swift-yaml's CxxStdlib `std.string → String` conversions
-  need ≥ 6.3.2; 26.4.1's Swift 6.3.1 fails on exactly that) + Ubuntu (official `swift:6.3`
-  container) on every push/PR — zero secrets, zero paid calls; the live smoke self-skips (opt-in
-  locally via `SKILLET_LIVE_SMOKE=1`).
+  Xcode 26.5 for determinism) + Ubuntu (official `swift:6.3` container) on every push/PR — zero
+  secrets, zero paid calls; the live smoke self-skips (opt-in locally via `SKILLET_LIVE_SMOKE=1`).
+  Historical note: swift-yaml pre-fix relied on the toolchain *implicitly* importing the CxxStdlib
+  overlay (Xcode 27 beta/Linux do, Xcode 26.x doesn't) — fixed upstream with an explicit
+  `import CxxStdlib`, so no Swift-version floor exists beyond Swift 6.
 
 `init`, `lint`, `run`, `harness list`/`info`, and the claude-code adapter (parse + resolution + probe + live `run`) are built; `doctor`/`capture`/`next`/… are not yet — see Planned.
 

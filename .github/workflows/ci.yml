@@ -25,12 +25,13 @@ jobs:
     permissions:
       contents: read
     env:
-      # Pinned Xcode (the swift-bitcoinkernel convention) — but the PIN TARGET is a Swift
-      # version, not an Xcode: swift-yaml's CxxStdlib conversions (std.string → Swift.String)
-      # require Darwin Swift ≥ 6.3.2. Verified against xcodereleases.com build data:
-      # Xcode 26.4.1 = Swift 6.3.1 → FAILS (run 28577148729); Xcode 26.5 = Swift 6.3.2 →
-      # the exact toolchain proven locally (Xcode 27 beta ships the same 6.3.2 line);
-      # Xcode 26.6 = Swift 6.3.3 (untested, likely fine). Keep ≥ 26.5 when bumping.
+      # Pinned Xcode for determinism (the swift-bitcoinkernel convention). History, so nobody
+      # re-litigates it: runs on 26.4.1 (Swift 6.3.1) AND 26.5 (Swift 6.3.2 — the same compiler
+      # version as the local Xcode 27 beta) failed identically in swift-yaml, which proved the
+      # cause was never a Swift-version floor: swift-yaml's std.string → String conversions
+      # relied on the toolchain IMPLICITLY importing the CxxStdlib overlay (27 beta and Linux
+      # do; Xcode 26.x does not). Fixed upstream with an explicit `import CxxStdlib` in
+      # swift-yaml; skillet pins the fixed revision. Any Swift 6 Xcode works once repinned.
       DEVELOPER_DIR: "/Applications/Xcode_26.5.app/Contents/Developer"
     steps:
       - uses: actions/checkout@v6

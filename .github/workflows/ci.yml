@@ -12,18 +12,25 @@ on:
     branches: [main]
   pull_request:
 
+permissions: {}
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   macos:
-    name: macOS (Swift 6)
-    runs-on: macos-latest
+    name: macOS (Swift 6.3)
+    runs-on: macos-26
+    permissions:
+      contents: read
+    env:
+      # Pinned Xcode — the swift-bitcoinkernel convention (apple-builds.yml). swift-yaml's
+      # C++ interop (std.string → Swift.String) needs the Swift 6.3 toolchain: the image's
+      # unpinned default Xcode failed the workflow's first run on exactly that conversion.
+      DEVELOPER_DIR: "/Applications/Xcode_26.4.app/Contents/Developer"
     steps:
-      - uses: actions/checkout@v4
-      # The default Xcode toolchain must be Swift ≥ 6 (swiftLanguageModes: [.v6]); pin
-      # DEVELOPER_DIR here if a runner image ever regresses below that.
+      - uses: actions/checkout@v6
       - name: Toolchain
         run: swift --version
       - name: Build
@@ -35,8 +42,10 @@ jobs:
     name: Ubuntu (Swift 6.3)
     runs-on: ubuntu-latest
     container: swift:6.3 # official Swift image — deterministic toolchain, no third-party setup action
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Toolchain
         run: swift --version
       - name: Build

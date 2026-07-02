@@ -35,10 +35,17 @@ jobs:
       DEVELOPER_DIR: "/Applications/Xcode_26.5.app/Contents/Developer"
     steps:
       - uses: actions/checkout@v6
-      - name: Toolchain
-        run: swift --version
-      - name: Build
-        run: swift build
+      # TEMPORARY diagnostics: the same swift-yaml rev built clean locally under this exact
+      # compiler build (17F42 / swiftlang-6.3.2.1.108) in nine configurations while CI failed —
+      # if this run still fails, the env dump + verbose swiftc invocations below are the diff
+      # that names the runner-side cause. Remove once macOS CI is green and explained.
+      - name: Toolchain (diagnostics)
+        run: |
+          swift --version
+          xcrun --show-sdk-path
+          env | sort
+      - name: Build (verbose — temporary)
+        run: swift build -v
       - name: Test (free suite — live smoke self-skips)
         run: swift test
 

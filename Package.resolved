@@ -1,5 +1,5 @@
 {
-  "originHash" : "d1fefbcb6fbe764dd64fcb17dd2d2d65ef1cc61524f2501c63f6b77baf20c583",
+  "originHash" : "5bce7813792132234658c32b5f362e2795b7a5bcfcbf48de5d881a35a9b497a1",
   "pins" : [
     {
       "identity" : "swift-argument-parser",
@@ -33,8 +33,7 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/21-DOT-DEV/swift-yaml",
       "state" : {
-        "branch" : "main",
-        "revision" : "e8d1769427b6781cc9088f2dfe029b44073fee52"
+        "revision" : "ee4c3e981062e19dc4ffc5d43b015201e7946842"
       }
     }
   ],

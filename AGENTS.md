@@ -69,7 +69,7 @@ from the first commit.
   formats use Foundation `Codable` (no added dependency). Secret scanning uses a vendored
   `betterleaks` (MIT) companion. The cache MAY use system SQLite.
 - **Dependency notes (implementation reality):** `swift-yaml` has **no tagged release**, so it is
-  **pinned by revision** (`e8d1769…`). Its `YAML` product needs **C++ interop**, which is **viral to
+  **pinned by revision** (`ee4c3e98…`). Its `YAML` product needs **C++ interop**, which is **viral to
   direct importers** — so it is confined to the isolated **`ConfigYAML`** target
   (`.interoperabilityMode(.Cxx)`), which exposes a pure-Swift API (decoding into `EDDCore.SkilletConfig`).
   Consequence (validated by the F6 spike): the `skillet` executable, as a direct importer, is a **`.Cxx`
@@ -78,7 +78,7 @@ from the first commit.
   input and never import `ConfigYAML`). `swift-subprocess` is now used by **`HarnessKit`** (the
   `ProcessLauncher` seam) as well as the integration-test harness; `swift-system` (`FilePath`) rides in
   with it. Known-good pins: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system`
-  1.5.0, `swift-yaml` rev `e8d1769…`.
+  1.5.0, `swift-yaml` rev `ee4c3e98…`.
 - **`swift-subprocess` is the only sanctioned way to launch a process** — no `Foundation.Process`,
   no raw `posix_spawn`. All process execution lives in the effectful layers.
 - **`EDDCore` is pure and synchronous** — it spawns nothing and performs no I/O beyond its inputs.

@@ -58,7 +58,52 @@ jobs:
       #     second C++ target's module — swift-yaml's exact composition
       # [C] remove the baked-in CommandLineTools, rebuild standalone swift-yaml fresh —
       #     a PASS here convicts CLT content interference (#74696 class)
-      - name: Forensics round 9 — modulemap style, module chain, CLT interference (temporary)
+      - name: Forensics round 10 — checksums + descent ladder on real swift-yaml (temporary)
+        run: |
+          echo "=== [CHK] runner file checksums vs local controls ==="
+          TC="$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx"
+          SDK="$(xcrun --show-sdk-path)"
+          for spec in \
+            "CxxStdlib.swiftinterface|$TC/CxxStdlib.swiftmodule/arm64-apple-macos.swiftinterface|bd562a117dab75cd0e3a7687b80496fb" \
+            "libcxxshim.modulemap|$TC/libcxxshim.modulemap|fb7a2e1c39de3548fc17ea99ca47a541" \
+            "sdk-libc++-modulemap|$SDK/usr/include/c++/v1/module.modulemap|8b63fbc5dc7344c8d507f2f89b046dba"; do
+            NAME="${spec%%|*}"; REST="${spec#*|}"; FILE="${REST%%|*}"; LOCAL="${REST#*|}"
+            GOT=$(md5 -q "$FILE" 2>/dev/null || echo "MISSING")
+            [ "$GOT" = "$LOCAL" ] && echo "CHK[$NAME]: MATCH" || echo "CHK[$NAME]: DIFFERS (runner=$GOT local=$LOCAL)"
+          done
+          echo "=== descent ladder: reduce REAL swift-yaml until FAIL flips to PASS ==="
+          git clone -q https://github.com/21-DOT-DEV/swift-yaml /tmp/sy0
+          git -C /tmp/sy0 checkout -q 02ed774f562672becd282301ff890ab78ae9e55e
+          SHIMH=Sources/yamlcppShims/include/yamlcpp_shims.h
+          variant() { # $1=name  $2=script to mutate $D
+            D="/tmp/$1"; rm -rf "$D"; cp -R /tmp/sy0 "$D"; rm -rf "$D/.git" "$D/.build"
+            eval "$2"
+            (cd "$D" && swift build --target YAML > "/tmp/$1.log" 2>&1) \
+              && echo "RESULT[$1]: PASSED" \
+              || { echo "RESULT[$1]: FAILED"; grep -m1 "error:" "/tmp/$1.log"; }
+          }
+          PROBE='import yamlcppShims
+          #if canImport(CxxStdlib)
+          import CxxStdlib
+          #endif
+          public func probe(_ s: std.string) -> String { String(s) }'
+          mkhdr() { # $1=dest header path, then stdin = extra includes
+            { printf "#pragma once\n#include <cstddef>\n#include <string>\n"; cat; printf "namespace yamlx {}\n"; } > "$1"
+          }
+          echo "--- V1: Swift side reduced to one conversion behind the REAL shims ---"
+          variant V1 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"'
+          echo "--- V2: V1 + shims header = string + yaml-cpp/yaml.h only ---"
+          variant V2 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"; printf "#include \"yaml-cpp/yaml.h\"\n" | mkhdr "$D/$SHIMH"; printf "#include \"yamlcpp_shims.h\"\n" > "$D/Sources/yamlcppShims/shims.cpp"'
+          echo "--- V3: V1 + shims header = string only (yamlcpp module present, headers not included) ---"
+          variant V3 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"; printf "" | mkhdr "$D/$SHIMH"; printf "#include \"yamlcpp_shims.h\"\n" > "$D/Sources/yamlcppShims/shims.cpp"'
+          echo "--- V4: like V2 but only the parser/exceptions include group ---"
+          variant V4 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"; printf "#include \"yaml-cpp/parser.h\"\n#include \"yaml-cpp/exceptions.h\"\n" | mkhdr "$D/$SHIMH"; printf "#include \"yamlcpp_shims.h\"\n" > "$D/Sources/yamlcppShims/shims.cpp"'
+          echo "--- V5: like V2 but only the emitter group (drags <sstream>/<locale>) ---"
+          variant V5 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"; printf "#include \"yaml-cpp/emitter.h\"\n#include \"yaml-cpp/emitterstyle.h\"\n#include \"yaml-cpp/stlemitter.h\"\n" | mkhdr "$D/$SHIMH"; printf "#include \"yamlcpp_shims.h\"\n" > "$D/Sources/yamlcppShims/shims.cpp"'
+          echo "--- V6: like V2 but only the node/* group ---"
+          variant V6 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"; printf "#include \"yaml-cpp/node/node.h\"\n#include \"yaml-cpp/node/impl.h\"\n#include \"yaml-cpp/node/convert.h\"\n#include \"yaml-cpp/node/iterator.h\"\n#include \"yaml-cpp/node/detail/impl.h\"\n#include \"yaml-cpp/node/parse.h\"\n#include \"yaml-cpp/node/emit.h\"\n" | mkhdr "$D/$SHIMH"; printf "#include \"yamlcpp_shims.h\"\n" > "$D/Sources/yamlcppShims/shims.cpp"'
+      - name: Forensics round 9 — modulemap style, module chain, CLT interference (SUPERSEDED, kept for one round)
+        if: false
         run: |
           swift --version
           pkgutil --pkg-info=com.apple.pkg.CLTools_Executables 2>/dev/null | grep version || echo "(no CLT receipt)"

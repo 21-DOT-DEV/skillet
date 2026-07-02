@@ -66,12 +66,14 @@ enum Fixture {
         evals: [(id: String, expectations: [String])] = [("e1", ["did the thing"])],
         harnessPath: String? = nil,
         judgeProvider: String? = nil,
+        judgeModel: String? = "claude-sonnet-4-6",   // required-explicit (§14-4); nil = omit the key
         evalsRaw: String? = nil
     ) throws -> URL {
         let root = try makeTempDirectory()
         var yaml = "project:\n  skills_root: skills\n"
         if let harnessPath { yaml += "harness:\n  claude-code:\n    path: \(harnessPath)\n" }
-        if let judgeProvider { yaml += "judge:\n  provider: \(judgeProvider)\n" }
+        yaml += "judge:\n  provider: \(judgeProvider ?? "claude-code")\n"
+        if let judgeModel { yaml += "  model: \(judgeModel)\n" }
         try yaml.write(to: root.appendingPathComponent("skillet.yaml"), atomically: true, encoding: .utf8)
 
         let dir = root.appendingPathComponent("skills/\(skill)", isDirectory: true)

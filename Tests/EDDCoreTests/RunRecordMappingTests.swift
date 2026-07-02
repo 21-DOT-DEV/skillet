@@ -11,7 +11,9 @@ struct RunRecordMappingTests {
     private func trial(_ passed: Bool, _ criteria: [String] = ["c"]) -> TrialResult {
         TrialResult(exit: .passed, verdicts: criteria.map { verdict($0, passed) })
     }
-    private let judge = SkilletConfig.Judge()
+    private let provenance = RunProvenance(
+        judgeProvider: "claude-code", judgeModel: "m", judgePromptVersion: "v2", executorBinaryVersion: "2.1.191"
+    )
 
     @Test("benchmark.json: per-trial viewer-shaped runs[], skillet-owned consistency, run_summary.default")
     func benchmarkShape() {
@@ -19,7 +21,7 @@ struct RunRecordMappingTests {
             EvalResult(evalId: "a", trials: [trial(true, ["x", "y"]), trial(true, ["x", "y"])]),   // 2 trials × 2 expectations, all pass → PASS
             EvalResult(evalId: "b", trials: [trial(true, ["z"]), trial(false, ["z"])])             // 1/2 trials → FLAKY
         ]
-        let bench = BenchmarkFile(report: RunReport(skill: "demo", results: evals), evals: evals, harness: "replay", k: 2, judge: judge)
+        let bench = BenchmarkFile(report: RunReport(skill: "demo", results: evals), evals: evals, harness: "replay", k: 2, provenance: provenance)
         #expect(bench.skillName == "demo")
         #expect(bench.runs.count == 4)   // ONE ROW PER TRIAL (2 evals × 2 trials), not per eval
 
@@ -41,14 +43,20 @@ struct RunRecordMappingTests {
         #expect(perEvalA?["pass_power_k"] == .number(1))
 
         #expect(bench.runSummary?["default"]?.objectValue?["pass_rate"]?.objectValue?["max"] == .number(1))
-        #expect(bench.metadata?["judge"]?.objectValue?["provider"]?.stringValue == "claude-code")
+        // M3 provenance: the exact judge (incl. prompt version) + executor version are COMMITTED —
+        // a cross-run delta stays attributable after `rm -rf .skillet` (design §7.2/§9.4).
+        let judgeMeta = bench.metadata?["judge"]?.objectValue
+        #expect(judgeMeta?["provider"]?.stringValue == "claude-code")
+        #expect(judgeMeta?["model"]?.stringValue == "m")
+        #expect(judgeMeta?["prompt_version"]?.stringValue == "v2")
+        #expect(bench.metadata?["executor_binary_version"]?.stringValue == "2.1.191")
     }
 
     @Test("runs[].result counts EXPECTATIONS in that trial, not trials — no viewer-semantics overload")
     func resultIsExpectationCounts() {
         // One eval, one trial, 3 expectations, 2 pass → result is 2/3, NOT the trial-level 0/1 or 1/1.
         let evals = [EvalResult(evalId: "a", trials: [TrialResult(exit: .passed, verdicts: [verdict("x", true), verdict("y", true), verdict("z", false)])])]
-        let result = BenchmarkFile(report: RunReport(skill: "demo", results: evals), evals: evals, harness: "replay", k: 1, judge: judge)
+        let result = BenchmarkFile(report: RunReport(skill: "demo", results: evals), evals: evals, harness: "replay", k: 1, provenance: provenance)
             .runs.first?.objectValue?["result"]?.objectValue
         #expect(result?["passed"] == .number(2))
         #expect(result?["failed"] == .number(1))
@@ -65,7 +73,7 @@ struct RunRecordMappingTests {
         ]
         let live = RunReport(skill: "demo", results: evals)
         // Producer side: serialize the committed record.
-        let json = String(decoding: try JSONEncoder().encode(BenchmarkFile(report: live, evals: evals, harness: "replay", k: 2, judge: judge)), as: UTF8.self)
+        let json = String(decoding: try JSONEncoder().encode(BenchmarkFile(report: live, evals: evals, harness: "replay", k: 2, provenance: provenance)), as: UTF8.self)
         // Consumer side: read it back and recompute pass^k offline from consistency — no in-memory results, no cache.
         let reloaded = try JSONDecoder().decode(BenchmarkFile.self, from: Data(json.utf8))
         #expect(RunReport(benchmark: reloaded) == live)
@@ -91,8 +99,12 @@ struct RunRecordMappingTests {
             EvalResult(evalId: "a", trials: [trial(true, ["x"]), trial(true, ["x"])]),    // x: 2/2 → passed
             EvalResult(evalId: "b", trials: [trial(true, ["y"]), trial(false, ["y"])])    // y: 1/2 → not consistent
         ]
-        let grading = GradingFile(evals: evals)
+        let grading = GradingFile(evals: evals, provenance: provenance)
         #expect(grading.expectations.count == 2)
+        // M3: grading verdicts carry their judge (provider/model/prompt version) — re-grade provenance.
+        let judgeBlock = grading.fields["judge"]?.objectValue
+        #expect(judgeBlock?["prompt_version"]?.stringValue == "v2")
+        #expect(judgeBlock?["model"]?.stringValue == "m")
         let x = grading.expectations.first { $0.objectValue?["text"]?.stringValue == "x" }
         let y = grading.expectations.first { $0.objectValue?["text"]?.stringValue == "y" }
         #expect(x?.objectValue?["passed"]?.boolValue == true)
@@ -106,7 +118,7 @@ struct RunRecordMappingTests {
     @Test("A trial with no verdicts (errored) contributes no grading rows")
     func gradingSkipsErroredEvals() {
         let evals = [EvalResult(evalId: "e", trials: [TrialResult(exit: .timeout, verdicts: [])])]
-        let grading = GradingFile(evals: evals)
+        let grading = GradingFile(evals: evals, provenance: provenance)
         #expect(grading.expectations.isEmpty)
         #expect(grading.total == 0)
     }
@@ -117,7 +129,7 @@ struct RunRecordMappingTests {
             trial(true, ["x"]),                          // judged + passed
             TrialResult(exit: .timeout, verdicts: [])    // no verdicts for "x"
         ])]
-        let grading = GradingFile(evals: evals)
+        let grading = GradingFile(evals: evals, provenance: provenance)
         let x = grading.expectations.first { $0.objectValue?["text"]?.stringValue == "x" }
         #expect(x?.objectValue?["passed"]?.boolValue == false)   // not judged in every trial
         #expect(x?.objectValue?["evidence"]?.stringValue?.contains("not graded") == true)

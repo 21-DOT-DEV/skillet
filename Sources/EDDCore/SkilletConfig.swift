@@ -124,12 +124,15 @@ public struct SkilletConfig: Codable, Sendable, Equatable {
 
     /// The `judge:` knobs (design §5.2): which adapter backs the judge and which model it targets.
     /// `provider` is an adapter id with the judging capability — Phase 1 default `claude-code` (the
-    /// text judge shells the resolved `claude` CLI). Absent keys fall back to the shipped defaults.
+    /// text judge shells the resolved `claude` CLI). `model` is **required-explicit** (design §14-4,
+    /// decided 2026-07-01): there is deliberately no shipped fallback — a silently-defaulted judge is
+    /// the cross-machine reproducibility hazard skillet refuses (the same eval config must never be
+    /// graded by different models on different machines). `init` writes one; `run` errors when absent.
     public struct Judge: Codable, Sendable, Equatable {
         public var provider: String
-        public var model: String
+        public var model: String?
 
-        public init(provider: String = "claude-code", model: String = "claude-sonnet-4-6") {
+        public init(provider: String = "claude-code", model: String? = nil) {
             self.provider = provider
             self.model = model
         }
@@ -139,7 +142,7 @@ public struct SkilletConfig: Codable, Sendable, Equatable {
         public init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "claude-code"
-            model = try container.decodeIfPresent(String.self, forKey: .model) ?? "claude-sonnet-4-6"
+            model = try container.decodeIfPresent(String.self, forKey: .model)
         }
     }
 }

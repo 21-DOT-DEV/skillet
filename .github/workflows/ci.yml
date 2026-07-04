@@ -25,17 +25,7 @@ jobs:
     permissions:
       contents: read
     env:
-      # Pinned Xcode for determinism (the swift-bitcoinkernel convention). History, so nobody
-      # re-litigates the 2026-06 macOS-only failures (ten forensic rounds — this file's git
-      # history): never a Swift-version floor or an SDK/CLT delta. swift-yaml converted
-      # std.string → String through the CxxStdlib overlay initializer, which drops out of
-      # overload resolution whenever the converting file is type-checked in the same frontend
-      # invocation as its siblings — whole-module builds, or the multi-file batches the driver
-      # forms on a low-core host. This runner has ~3 cores → batched → failed; many-core local
-      # debug builds ≈ one file per batch → "works locally". Upstream Swift bug
-      # (forums.swift.org/t/74393; deterministic repro: swift-yaml Projects/InteropRepro).
-      # Fixed upstream by never letting std::string cross into Swift (CStr char*+len view);
-      # swift-yaml's own CI now gates debug AND release. Any Swift 6 Xcode works here.
+      # Pinned Xcode for determinism (the swift-bitcoinkernel convention); any Swift 6 Xcode works.
       DEVELOPER_DIR: "/Applications/Xcode_26.5.app/Contents/Developer"
     steps:
       - uses: actions/checkout@v6

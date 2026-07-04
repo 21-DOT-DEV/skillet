@@ -35,15 +35,10 @@ let package = Package(
         // Provides `FilePath` for HarnessKit's launcher and the integration-test harness
         // (via swift-subprocess).
         .package(url: "https://github.com/apple/swift-system", exact: "1.5.0"),
-        // YAML config parsing. No tagged release → pinned by revision (see Package.resolved). Its
-        // `YAML` product needs C++ interop, so it is confined to the `ConfigYAML` target below; the
-        // pure core (EDDCore) and the executable stay interop-free.
-        // Rev = FIX-INTEROP head, the macOS-CI fix (== the rev main fast-forwards to): std::string
-        // never crosses into Swift — the CxxStdlib overlay's String(std.string) drops out of overload
-        // resolution when the converting file is type-checked with its siblings (whole-module builds,
-        // or a low-core host's multi-file batches; forums.swift.org/t/74393) — swift-yaml hands over
-        // a char*+len view (CStr) instead. Don't squash-merge upstream or this rev becomes unreachable.
-        .package(url: "https://github.com/21-DOT-DEV/swift-yaml", revision: "d896619c926d3834169b46ba8035a64b2b6304f7")
+        // YAML config parsing. No tagged release → pinned to a main revision (see Package.resolved).
+        // Its `YAML` product needs C++ interop, so it is confined to the `ConfigYAML` target below;
+        // the pure core (EDDCore) and the executable stay interop-free.
+        .package(url: "https://github.com/21-DOT-DEV/swift-yaml", revision: "048f714f8c09aa4f27b53d6835299eca4651f825")
     ],
     targets: [
         // MARK: Layer 0 — pure core (no I/O, no processes, no network)

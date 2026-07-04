@@ -35,10 +35,10 @@ let package = Package(
         // Provides `FilePath` for HarnessKit's launcher and the integration-test harness
         // (via swift-subprocess).
         .package(url: "https://github.com/apple/swift-system", exact: "1.5.0"),
-        // YAML config parsing. No tagged release → pinned by revision (see Package.resolved). Its
-        // `YAML` product needs C++ interop, so it is confined to the `ConfigYAML` target below; the
-        // pure core (EDDCore) and the executable stay interop-free.
-        .package(url: "https://github.com/21-DOT-DEV/swift-yaml", revision: "e8d1769427b6781cc9088f2dfe029b44073fee52")
+        // YAML config parsing. No tagged release → pinned to a main revision (see Package.resolved).
+        // Its `YAML` product needs C++ interop, so it is confined to the `ConfigYAML` target below;
+        // the pure core (EDDCore) and the executable stay interop-free.
+        .package(url: "https://github.com/21-DOT-DEV/swift-yaml", revision: "048f714f8c09aa4f27b53d6835299eca4651f825")
     ],
     targets: [
         // MARK: Layer 0 — pure core (no I/O, no processes, no network)
@@ -123,5 +123,6 @@ let package = Package(
             ]
         )
     ],
-    swiftLanguageModes: [.v6]
+    swiftLanguageModes: [.v6],
+    cxxLanguageStandard: .cxx11
 )

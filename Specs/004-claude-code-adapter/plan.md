@@ -5,6 +5,7 @@
 | **Feature** | F6 — claude-code adapter (trace parser, resolution & probe; live `run` in F7) |
 | **Phase** | 1 — Walking Skeleton ([Roadmap/phase-1-walking-skeleton.md](../../Roadmap/phase-1-walking-skeleton.md), F6) |
 | **Status** | ✅ IMPLEMENTED (2026-06-21) — 76 tests green |
+| **Post-audit (2026-07-01)** | Verified by the [Phase-1 audit](../../Roadmap/phase-1-review.md). Deltas: the automatic denylist fallback was re-deferred **F7 → F50** (2026-06-27) — shipped behavior *refuses* an auto-discovered-banned binary at `run` (exit 3) and warns via `HarnessInfo.warnings` in `harness info`; `Denylist.Decision.warnedFallback` keeps its pre-F50 name; the synthetic fixture shipped inline (no `Fixtures/` dir); `probe` evolved to `probe(strict:)` with the non-spending auth check (F7). Gaps C/D remain open; gap **#3 closed** (typed `harnessNotFound` what/why/fix). |
 | **Last updated** | 2026-06-21 |
 | **Builds on** | F5 (`HarnessAdapter` seam, `Trace`, `HarnessKit`, registry) — [spec 003](../003-normalized-trace-harness-seam/plan.md); F1/F2 (`EDDCore`, `RenderKit`, executable) |
 | **Authoritative refs** | design §9.1 (adapter protocol, resolution + ban policy), §9.2 (injection/visibility), §9.3 (normalized trace + claude-code session JSONL), §9.5 (adapter matrix), §13 (v1 scope; `Trace.usage` is v1.x); constitution III/V/VI |

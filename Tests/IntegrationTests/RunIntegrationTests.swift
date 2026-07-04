@@ -143,6 +143,21 @@ struct RunIntegrationTests {
         // The ACTUAL judge backend is stamped (replay here), not the configured claude-code default.
         let metadata = try #require(json["metadata"] as? [String: Any])
         #expect(((metadata["judge"] as? [String: Any])?["provider"] as? String) == "replay")
+        // M3 provenance in the COMMITTED record: judge prompt version + executor binary version
+        // (probe-reported — "replay-1" on the replay seam) survive the cache wipe above.
+        #expect(((metadata["judge"] as? [String: Any])?["prompt_version"] as? String) == "replay")
+        #expect((metadata["executor_binary_version"] as? String) == "replay-1")
+    }
+
+    @Test("run refuses without an explicit judge.model (exit 2) — required-explicit, design §14-4")
+    func missingJudgeModelRefused() async throws {
+        // No judge.model in the config. The pinned-but-bogus binary proves the refusal fires BEFORE
+        // binary resolution/probe (otherwise this would be the probe's exit 3); nothing is spent.
+        let root = try Fixture.makeRunRepo(harnessPath: "/no/such/claude", judgeModel: nil); defer { Fixture.remove(root) }
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo"])
+        #expect(out.exitCode == 2)
+        #expect(out.stderr.contains("judge.model"))
+        #expect(!FileManager.default.fileExists(atPath: benchmarkPath(root)))   // no records written
     }
 
     @Test("run writes .skillet/.gitignore so the cache stays ignored even without a prior init")

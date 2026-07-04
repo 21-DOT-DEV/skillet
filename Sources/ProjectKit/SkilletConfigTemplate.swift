@@ -26,7 +26,7 @@ public enum SkilletConfigTemplate {
 
         judge:
           provider: claude-code             # adapter id with the judging capability (Phase 1: shells the claude CLI)
-          model: claude-sonnet-4-6
+          model: claude-sonnet-4-6          # required — paid runs refuse without an explicit judge model (design §14-4)
 
         # The methodology's numbers, shipped as defaults, tunable per repo.
         gates:

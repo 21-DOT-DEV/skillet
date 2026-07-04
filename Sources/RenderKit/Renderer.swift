@@ -164,9 +164,10 @@ public struct Renderer: Sendable {
     private func humanRun(_ report: RunReport, nextSteps: [String]) -> String {
         let allPass = !report.evals.isEmpty && report.passed == report.evals.count
         // pass^k is only a number at observed k ≥ 2; below that, consistency is unmeasurable (§4 vocab).
+        // pass^1 (the mean trial pass rate, §14-11) is well-defined at any k, so it always shows.
         let headline = report.measurable
-            ? String(format: "pass^k %.2f (k=%d)", report.passK, report.observedK)
-            : "consistency unmeasurable (k=\(report.observedK))"
+            ? String(format: "pass^k %.2f (k=%d) · pass^1 %.2f", report.passK, report.observedK, report.passOne)
+            : String(format: "consistency unmeasurable (k=%d) · pass^1 %.2f", report.observedK, report.passOne)
         var out = (allPass ? bold("✓ run: \(report.skill) — \(headline)") : red("✗ run: \(report.skill) — \(headline)")) + "\n"
         let rows = report.evals.map { [$0.id, $0.status.rawValue, "\($0.passes)/\($0.recorded)"] }
         out += renderTable(["EVAL", "STATUS", "PASSES"], rows).stdout

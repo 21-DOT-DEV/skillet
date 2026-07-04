@@ -92,12 +92,22 @@ public struct RunReport: SchemaIdentified, Sendable, Equatable {
     public let observedK: Int
     /// Fraction of evals that PASS. Meaningful only when `measurable` (observed k ≥ 2).
     public let passK: Double
+    /// Mean per-eval trial pass rate (`passes/recorded`, averaged over evals) — τ-bench's headline
+    /// `pass^1` (design §14-11, adopted 2026-07-01): the *comparability* number, well-defined even at
+    /// k = 1. Additive in `skillet.run/1`; the strict all-trials `passK` stays the reliability gate
+    /// (deliberately conservative vs τ-bench's unbiased estimator under mixed recorded counts).
+    public let passOne: Double
     /// Whether `pass^k` is meaningful (observed k ≥ 2); below that, consistency is "unmeasurable".
     public let measurable: Bool
     public let evals: [Row]
     public let passed: Int
     public let flaky: Int
     public let failed: Int
+
+    enum CodingKeys: String, CodingKey {
+        case skill, observedK, passK, measurable, evals, passed, flaky, failed
+        case passOne = "pass_1"   // exact frozen spelling; the snake-case strategy leaves it unchanged
+    }
 
     public struct Row: Codable, Sendable, Equatable {
         public let id: String
@@ -126,6 +136,9 @@ public struct RunReport: SchemaIdentified, Sendable, Equatable {
         self.flaky = evals.filter { $0.status == .flaky }.count
         self.failed = evals.filter { $0.status == .fail }.count
         self.passK = evals.isEmpty ? 0 : Double(passed) / Double(evals.count)
+        self.passOne = evals.isEmpty ? 0 : evals
+            .map { $0.recorded == 0 ? 0 : Double($0.passes) / Double($0.recorded) }
+            .reduce(0, +) / Double(evals.count)
         self.measurable = observedK >= 2
     }
 }

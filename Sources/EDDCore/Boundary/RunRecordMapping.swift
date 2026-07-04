@@ -8,6 +8,25 @@ import Foundation
 /// `expectations`/`summary` with viewer-exact `text`/`passed`/`evidence`) are the frozen surface;
 /// inner fields evolve additively (F8 tolerant-reader discipline).
 
+/// Provenance stamped into the **committed** records (audit M3; design §7.2/§9.4, constitution II):
+/// the exact judge (provider / model / prompt version) and the executor's binary version that produced
+/// a result — so a cross-run delta is attributable to a harness change vs a skill change, and v1- vs
+/// v2-graded runs stay distinguishable after a cache wipe. Provenance not captured at run time is
+/// unrecoverable later; `"unknown"` is the defined sentinel (§7.4) when a field can't be resolved.
+public struct RunProvenance: Sendable, Equatable {
+    public let judgeProvider: String
+    public let judgeModel: String
+    public let judgePromptVersion: String
+    public let executorBinaryVersion: String
+
+    public init(judgeProvider: String, judgeModel: String, judgePromptVersion: String, executorBinaryVersion: String) {
+        self.judgeProvider = judgeProvider
+        self.judgeModel = judgeModel
+        self.judgePromptVersion = judgePromptVersion
+        self.executorBinaryVersion = executorBinaryVersion
+    }
+}
+
 public extension BenchmarkFile {
     /// Build the committed `benchmark.json` from a run — **viewer-faithful at the boundary, skillet-owned
     /// for pass^k**. `runs[]` is **one row per trial** (`configuration:"default"` — F7's single behavioral
@@ -16,7 +35,7 @@ public extension BenchmarkFile {
     /// skillet's improved pass^k lives in the additive `consistency` block (the shape real skill-creator
     /// artifacts established) and re-derives offline from `consistency.per_eval` — never from the gitignored
     /// cache (P2/D3), and never by overloading the viewer's per-run `result` semantics.
-    init(report: RunReport, evals: [EvalResult], harness: String, k: Int, judge: SkilletConfig.Judge) {
+    init(report: RunReport, evals: [EvalResult], harness: String, k: Int, provenance: RunProvenance) {
         // One viewer-faithful row per trial; `result` counts are EXPECTATIONS graded in that trial.
         var runRows: [JSONValue] = []
         var allTrialRates: [Double] = []
@@ -68,13 +87,20 @@ public extension BenchmarkFile {
                 "k": .number(Double(k)),
                 "runs_per_configuration": .number(Double(k)),
                 "evals_run": .array(report.evals.map { .string($0.id) }),
-                "judge": .object(["provider": .string(judge.provider), "model": .string(judge.model)])
+                // Additive provenance (M3; §7.2): the exact judge + executor version behind these numbers.
+                "executor_binary_version": .string(provenance.executorBinaryVersion),
+                "judge": .object([
+                    "provider": .string(provenance.judgeProvider),
+                    "model": .string(provenance.judgeModel),
+                    "prompt_version": .string(provenance.judgePromptVersion)
+                ])
             ]),
             "runs": .array(runRows),
             "consistency": .object([
                 "k": .number(Double(k)),
                 "meaningful": .bool(report.measurable),
                 "suite_pass_power_k": .number(report.passK),
+                "suite_pass_1": .number(report.passOne),   // additive (§14-11): τ-bench's headline metric
                 "flaky_eval_ids": .array(report.evals.filter { $0.status == .flaky }.map { .string($0.id) }),
                 "per_eval": .array(perEval)
             ]),
@@ -127,7 +153,9 @@ public extension GradingFile {
     /// iff that criterion held in **every** recorded trial (`pass^k`-consistent); `evidence` is a
     /// representative judge rationale (the first failing trial's, else the first trial's). Criteria are
     /// positional + identical across a trial's verdicts, indexed by the first trial that produced any.
-    init(evals: [EvalResult]) {
+    /// Carries an additive `judge` block (M3): these verdicts are judge-produced, so which judge —
+    /// provider, model, prompt version — is part of the record's meaning (re-grade provenance, §9.4).
+    init(evals: [EvalResult], provenance: RunProvenance) {
         var rows: [JSONValue] = []
         for eval in evals {
             guard let template = eval.trials.first(where: { !$0.verdicts.isEmpty }) else { continue }
@@ -158,6 +186,11 @@ public extension GradingFile {
                 "failed": .number(Double(total - passed)),
                 "total": .number(Double(total)),
                 "pass_rate": .number(total == 0 ? 0 : Double(passed) / Double(total))
+            ]),
+            "judge": .object([
+                "provider": .string(provenance.judgeProvider),
+                "model": .string(provenance.judgeModel),
+                "prompt_version": .string(provenance.judgePromptVersion)
             ])
         ])
     }

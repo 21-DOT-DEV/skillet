@@ -25,7 +25,7 @@ jobs:
     permissions:
       contents: read
     env:
-      # Pinned Xcode for determinism (the swift-bitcoinkernel convention); any Swift 6 Xcode works.
+      # Pinned Xcode for determinism; any Swift 6 Xcode works.
       DEVELOPER_DIR: "/Applications/Xcode_26.5.app/Contents/Developer"
     steps:
       - uses: actions/checkout@v6

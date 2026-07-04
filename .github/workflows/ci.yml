@@ -26,135 +26,21 @@ jobs:
       contents: read
     env:
       # Pinned Xcode for determinism (the swift-bitcoinkernel convention). History, so nobody
-      # re-litigates it: runs on 26.4.1 (Swift 6.3.1) AND 26.5 (Swift 6.3.2 — the same compiler
-      # version as the local Xcode 27 beta) failed identically in swift-yaml, which proved the
-      # cause was never a Swift-version floor: swift-yaml's std.string → String conversions
-      # relied on the toolchain IMPLICITLY importing the CxxStdlib overlay (27 beta and Linux
-      # do; Xcode 26.x does not). Fixed upstream with an explicit `import CxxStdlib` in
-      # swift-yaml; skillet pins the fixed revision. Any Swift 6 Xcode works once repinned.
+      # re-litigates the 2026-06 macOS-only failures (ten forensic rounds — this file's git
+      # history): never a Swift-version floor or an SDK/CLT delta. swift-yaml converted
+      # std.string → String through the CxxStdlib overlay initializer, which drops out of
+      # overload resolution whenever the converting file is type-checked in the same frontend
+      # invocation as its siblings — whole-module builds, or the multi-file batches the driver
+      # forms on a low-core host. This runner has ~3 cores → batched → failed; many-core local
+      # debug builds ≈ one file per batch → "works locally". Upstream Swift bug
+      # (forums.swift.org/t/74393; deterministic repro: swift-yaml Projects/InteropRepro).
+      # Fixed upstream by never letting std::string cross into Swift (CStr char*+len view);
+      # swift-yaml's own CI now gates debug AND release. Any Swift 6 Xcode works here.
       DEVELOPER_DIR: "/Applications/Xcode_26.5.app/Contents/Developer"
     steps:
       - uses: actions/checkout@v6
-      # TEMPORARY forensics, round 8 — remove when macOS is green. Round 7 exonerated the
-      # C++ standard: bare probes at default AND -std=c++11 pass on this runner, and a
-      # mini SwiftPM interop package of swift-yaml's shape passes at .cxx11 and .cxx17 —
-      # while swift-yaml inside skillet's graph fails in the same job. Two suspects left,
-      # both invisible to flags: (A) something intrinsic to swift-yaml's richer structure
-      # (two-level C++ targets + handwritten shims modulemap) → test by building the
-      # pinned swift-yaml STANDALONE on this runner; (B) shared clang-module-cache
-      # interaction across the graph's three .Cxx targets under this host's narrower
-      # parallelism (≈4 cores vs 10+ locally; build-order-dependent cache poisoning) →
-      # test with a serial (--jobs 1) skillet build. Note: if [B] passes it populates
-      # .build, so the Build step after it goes green incrementally — that green still
-      # means "serial works, parallel is the trigger" and the durable fix is then decided
-      # deliberately (not --jobs 1 forever).
-      # Round 9. Round 8: swift-yaml STANDALONE fails on this runner (skillet's graph and
-      # scheduling exonerated — serial failed too). Round 7's minimal mini passes here, so
-      # the trigger is one of swift-yaml's structural deltas, or environment content the
-      # ClangImporter consults (swiftlang/swift#74696 class — wrong-path module maps; the
-      # runner bakes in a CLT installation). Three experiments, each decisive:
-      # [A] mini + swift-yaml-style handwritten modulemap (requires cplusplus, plain header)
-      # [B] mini as a TWO-LEVEL chain: shim target textually #includes headers owned by a
-      #     second C++ target's module — swift-yaml's exact composition
-      # [C] remove the baked-in CommandLineTools, rebuild standalone swift-yaml fresh —
-      #     a PASS here convicts CLT content interference (#74696 class)
-      - name: Forensics round 10 — checksums + descent ladder on real swift-yaml (temporary)
-        run: |
-          echo "=== [CHK] runner file checksums vs local controls ==="
-          TC="$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/macosx"
-          SDK="$(xcrun --show-sdk-path)"
-          for spec in \
-            "CxxStdlib.swiftinterface|$TC/CxxStdlib.swiftmodule/arm64-apple-macos.swiftinterface|bd562a117dab75cd0e3a7687b80496fb" \
-            "libcxxshim.modulemap|$TC/libcxxshim.modulemap|fb7a2e1c39de3548fc17ea99ca47a541" \
-            "sdk-libc++-modulemap|$SDK/usr/include/c++/v1/module.modulemap|8b63fbc5dc7344c8d507f2f89b046dba"; do
-            NAME="${spec%%|*}"; REST="${spec#*|}"; FILE="${REST%%|*}"; LOCAL="${REST#*|}"
-            GOT=$(md5 -q "$FILE" 2>/dev/null || echo "MISSING")
-            [ "$GOT" = "$LOCAL" ] && echo "CHK[$NAME]: MATCH" || echo "CHK[$NAME]: DIFFERS (runner=$GOT local=$LOCAL)"
-          done
-          echo "=== descent ladder: reduce REAL swift-yaml until FAIL flips to PASS ==="
-          git clone -q https://github.com/21-DOT-DEV/swift-yaml /tmp/sy0
-          git -C /tmp/sy0 checkout -q 02ed774f562672becd282301ff890ab78ae9e55e
-          SHIMH=Sources/yamlcppShims/include/yamlcpp_shims.h
-          variant() { # $1=name  $2=script to mutate $D
-            D="/tmp/$1"; rm -rf "$D"; cp -R /tmp/sy0 "$D"; rm -rf "$D/.git" "$D/.build"
-            eval "$2"
-            (cd "$D" && swift build --target YAML > "/tmp/$1.log" 2>&1) \
-              && echo "RESULT[$1]: PASSED" \
-              || { echo "RESULT[$1]: FAILED"; grep -m1 "error:" "/tmp/$1.log"; }
-          }
-          PROBE='import yamlcppShims
-          #if canImport(CxxStdlib)
-          import CxxStdlib
-          #endif
-          public func probe(_ s: std.string) -> String { String(s) }'
-          mkhdr() { # $1=dest header path, then stdin = extra includes
-            { printf "#pragma once\n#include <cstddef>\n#include <string>\n"; cat; printf "namespace yamlx {}\n"; } > "$1"
-          }
-          echo "--- V1: Swift side reduced to one conversion behind the REAL shims ---"
-          variant V1 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"'
-          echo "--- V2: V1 + shims header = string + yaml-cpp/yaml.h only ---"
-          variant V2 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"; printf "#include \"yaml-cpp/yaml.h\"\n" | mkhdr "$D/$SHIMH"; printf "#include \"yamlcpp_shims.h\"\n" > "$D/Sources/yamlcppShims/shims.cpp"'
-          echo "--- V3: V1 + shims header = string only (yamlcpp module present, headers not included) ---"
-          variant V3 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"; printf "" | mkhdr "$D/$SHIMH"; printf "#include \"yamlcpp_shims.h\"\n" > "$D/Sources/yamlcppShims/shims.cpp"'
-          echo "--- V4: like V2 but only the parser/exceptions include group ---"
-          variant V4 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"; printf "#include \"yaml-cpp/parser.h\"\n#include \"yaml-cpp/exceptions.h\"\n" | mkhdr "$D/$SHIMH"; printf "#include \"yamlcpp_shims.h\"\n" > "$D/Sources/yamlcppShims/shims.cpp"'
-          echo "--- V5: like V2 but only the emitter group (drags <sstream>/<locale>) ---"
-          variant V5 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"; printf "#include \"yaml-cpp/emitter.h\"\n#include \"yaml-cpp/emitterstyle.h\"\n#include \"yaml-cpp/stlemitter.h\"\n" | mkhdr "$D/$SHIMH"; printf "#include \"yamlcpp_shims.h\"\n" > "$D/Sources/yamlcppShims/shims.cpp"'
-          echo "--- V6: like V2 but only the node/* group ---"
-          variant V6 'rm "$D"/Sources/YAML/*.swift; printf "%s\n" "$PROBE" > "$D/Sources/YAML/Probe.swift"; printf "#include \"yaml-cpp/node/node.h\"\n#include \"yaml-cpp/node/impl.h\"\n#include \"yaml-cpp/node/convert.h\"\n#include \"yaml-cpp/node/iterator.h\"\n#include \"yaml-cpp/node/detail/impl.h\"\n#include \"yaml-cpp/node/parse.h\"\n#include \"yaml-cpp/node/emit.h\"\n" | mkhdr "$D/$SHIMH"; printf "#include \"yamlcpp_shims.h\"\n" > "$D/Sources/yamlcppShims/shims.cpp"'
-      - name: Forensics round 9 — modulemap style, module chain, CLT interference (SUPERSEDED, kept for one round)
-        if: false
-        run: |
-          swift --version
-          pkgutil --pkg-info=com.apple.pkg.CLTools_Executables 2>/dev/null | grep version || echo "(no CLT receipt)"
-          ls /Library/Developer/CommandLineTools/SDKs 2>/dev/null || echo "(no CLT SDKs)"
-          make_mini() { # $1=dir  $2=with_custom_modulemap(yes/no)
-            rm -rf "$1"; mkdir -p "$1/Sources/shim/include" "$1/Sources/app"
-            cat > "$1/Package.swift" <<'PKG'
-          // swift-tools-version: 6.1
-          import PackageDescription
-          let package = Package(name: "mini", platforms: [.macOS(.v14)],
-              targets: [
-                  .target(name: "shim"),
-                  .executableTarget(name: "app", dependencies: ["shim"],
-                      swiftSettings: [.interoperabilityMode(.Cxx)])],
-              cxxLanguageStandard: .cxx11)
-          PKG
-            printf '#pragma once\n#include <string>\nstd::string greet();\n' > "$1/Sources/shim/include/shim.h"
-            printf '#include "shim.h"\nstd::string greet() { return std::string("mini-ok"); }\n' > "$1/Sources/shim/shim.cpp"
-            printf 'import shim\nimport CxxStdlib\nprint(String(greet()))\n' > "$1/Sources/app/main.swift"
-            if [ "$2" = yes ]; then
-              printf 'module shim {\n  header "shim.h"\n  requires cplusplus\n  export *\n}\n' > "$1/Sources/shim/include/module.modulemap"
-            fi
-          }
-          echo "--- [A] mini + handwritten modulemap (requires cplusplus) ---"
-          make_mini /tmp/miniA yes
-          (cd /tmp/miniA && swift run) || echo "RESULT[A-modulemap]: FAILED"
-          echo "--- [B] mini as two-level chain with cross-owned textual include ---"
-          rm -rf /tmp/miniB; mkdir -p /tmp/miniB/Sources/libb/include /tmp/miniB/Sources/shim/include /tmp/miniB/Sources/app
-          cat > /tmp/miniB/Package.swift <<'PKG'
-          // swift-tools-version: 6.1
-          import PackageDescription
-          let package = Package(name: "mini", platforms: [.macOS(.v14)],
-              targets: [
-                  .target(name: "libb"),
-                  .target(name: "shim", dependencies: ["libb"]),
-                  .executableTarget(name: "app", dependencies: ["shim"],
-                      swiftSettings: [.interoperabilityMode(.Cxx)])],
-              cxxLanguageStandard: .cxx11)
-          PKG
-          printf '#pragma once\n#include <string>\nstd::string base();\n' > /tmp/miniB/Sources/libb/include/b.h
-          printf '#include "b.h"\nstd::string base() { return std::string("mini-ok"); }\n' > /tmp/miniB/Sources/libb/b.cpp
-          printf '#pragma once\n#include <string>\n#include "b.h"\ninline std::string greet() { return base(); }\n' > /tmp/miniB/Sources/shim/include/shim.h
-          printf '#include "shim.h"\n' > /tmp/miniB/Sources/shim/shim.cpp
-          printf 'module shim {\n  header "shim.h"\n  requires cplusplus\n  export *\n}\n' > /tmp/miniB/Sources/shim/include/module.modulemap
-          printf 'import shim\nimport CxxStdlib\nprint(String(greet()))\n' > /tmp/miniB/Sources/app/main.swift
-          (cd /tmp/miniB && swift run) || echo "RESULT[B-chain]: FAILED"
-          echo "--- [C] remove CommandLineTools, rebuild standalone swift-yaml fresh ---"
-          git clone -q https://github.com/21-DOT-DEV/swift-yaml /tmp/sy
-          git -C /tmp/sy checkout -q 02ed774f562672becd282301ff890ab78ae9e55e
-          sudo rm -rf /Library/Developer/CommandLineTools
-          (cd /tmp/sy && swift build > /tmp/sy.log 2>&1) && echo "RESULT[C-noCLT]: PASSED" || { echo "RESULT[C-noCLT]: FAILED"; grep -m2 "error:" /tmp/sy.log; }
+      - name: Toolchain
+        run: swift --version
       - name: Build
         run: swift build
       - name: Test (free suite — live smoke self-skips)

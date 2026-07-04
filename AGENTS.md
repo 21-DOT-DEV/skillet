@@ -50,9 +50,13 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 - CI: `.github/workflows/ci.yml` runs the free suite on macOS (`macos-26`, `DEVELOPER_DIR` pinned to
   Xcode 26.5 for determinism) + Ubuntu (official `swift:6.3` container) on every push/PR — zero
   secrets, zero paid calls; the live smoke self-skips (opt-in locally via `SKILLET_LIVE_SMOKE=1`).
-  Historical note: swift-yaml pre-fix relied on the toolchain *implicitly* importing the CxxStdlib
-  overlay (Xcode 27 beta/Linux do, Xcode 26.x doesn't) — fixed upstream with an explicit
-  `import CxxStdlib`, so no Swift-version floor exists beyond Swift 6.
+  Historical note: the 2026-06 macOS-only CI failures were an upstream Swift C++-interop bug — the
+  CxxStdlib overlay's `String(std.string)` initializer drops out of overload resolution whenever the
+  converting file is type-checked in the same frontend invocation as its siblings (whole-module
+  builds, or the multi-file batches a low-core runner's driver forms; forums.swift.org/t/74393),
+  which is why it never reproduced on many-core local machines. Fixed upstream in swift-yaml by
+  never letting `std::string` cross into Swift (`CStr` char*+len view; repro + full diagnosis in
+  swift-yaml's `Projects/`). No Swift-version floor exists beyond Swift 6.
 
 `init`, `lint`, `run`, `harness list`/`info`, and the claude-code adapter (parse + resolution + probe + live `run`) are built; `doctor`/`capture`/`next`/… are not yet — see Planned.
 
@@ -69,7 +73,7 @@ from the first commit.
   formats use Foundation `Codable` (no added dependency). Secret scanning uses a vendored
   `betterleaks` (MIT) companion. The cache MAY use system SQLite.
 - **Dependency notes (implementation reality):** `swift-yaml` has **no tagged release**, so it is
-  **pinned by revision** (`ee4c3e98…`). Its `YAML` product needs **C++ interop**, which is **viral to
+  **pinned by revision** (`d896619c…`). Its `YAML` product needs **C++ interop**, which is **viral to
   direct importers** — so it is confined to the isolated **`ConfigYAML`** target
   (`.interoperabilityMode(.Cxx)`), which exposes a pure-Swift API (decoding into `EDDCore.SkilletConfig`).
   Consequence (validated by the F6 spike): the `skillet` executable, as a direct importer, is a **`.Cxx`
@@ -78,7 +82,7 @@ from the first commit.
   input and never import `ConfigYAML`). `swift-subprocess` is now used by **`HarnessKit`** (the
   `ProcessLauncher` seam) as well as the integration-test harness; `swift-system` (`FilePath`) rides in
   with it. Known-good pins: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system`
-  1.5.0, `swift-yaml` rev `ee4c3e98…`.
+  1.5.0, `swift-yaml` rev `d896619c…`.
 - **`swift-subprocess` is the only sanctioned way to launch a process** — no `Foundation.Process`,
   no raw `posix_spawn`. All process execution lives in the effectful layers.
 - **`EDDCore` is pure and synchronous** — it spawns nothing and performs no I/O beyond its inputs.

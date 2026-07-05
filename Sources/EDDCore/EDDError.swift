@@ -67,6 +67,12 @@ public enum EDDError: Error, Sendable, Equatable {
         }
     }
 
+    /// The env-var fragment for a harness id (`claude-code` → `CLAUDE_CODE`), so remedies print the
+    /// real, copy-pasteable variable name rather than a `<ID>` placeholder (P6).
+    static func envID(_ harness: String) -> String {
+        harness.uppercased().replacing("-", with: "_")
+    }
+
     /// The exact next action that fixes the error.
     public var remedy: String {
         switch self {
@@ -77,9 +83,9 @@ public enum EDDError: Error, Sendable, Equatable {
         case .projectNotFound:
             "run from inside a skills repository, or initialize one with `skillet init`"
         case let .harnessNotFound(harness):
-            "install \(harness), or set its path via --harness-path, SKILLET_<ID>_BIN, or harness.<id>.path"
-        case .harnessBanned:
-            "pin a non-banned version, or set SKILLET_ALLOW_BANNED_<ID>=1 to override deliberately"
+            "install \(harness), or set its path via --harness-path, SKILLET_\(Self.envID(harness))_BIN, or harness.\(harness).path"
+        case let .harnessBanned(harness, _):
+            "pin a non-banned version, or set SKILLET_ALLOW_BANNED_\(Self.envID(harness))=1 to override deliberately"
         case let .harnessUnauthenticated(harness):
             "authenticate \(harness) (e.g. `claude auth login`, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN), then re-run"
         case .skillNotVisible:

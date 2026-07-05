@@ -58,6 +58,7 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         let version = Self.parseVersion(output.stdout)
         let bypassed = environment["SKILLET_ALLOW_BANNED_CLAUDE_CODE"] != nil
         var warnings: [String] = []
+        var bannedVersion: String?
         switch denylist.check(version: version, pinned: resolved.isPinned, bypassed: bypassed) {
         case .allowed:
             break
@@ -70,6 +71,7 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
             if strict {
                 throw EDDError.harnessBanned(harness: "claude-code", version: version)
             }
+            bannedVersion = version
             warnings.append("claude-code \(version) is on the known-bad denylist (§9.1); "
                 + "pin a non-banned version, or set SKILLET_ALLOW_BANNED_CLAUDE_CODE=1 to override")
         }
@@ -79,7 +81,16 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         if strict && !authenticated {
             throw EDDError.harnessUnauthenticated(harness: "claude-code")
         }
-        return HarnessInfo(id: id, version: version, authenticated: authenticated, available: true, warnings: warnings)
+        return HarnessInfo(
+            id: id,
+            version: version,
+            authenticated: authenticated,
+            available: true,
+            warnings: warnings,
+            binaryPath: resolved.path,
+            source: resolved.source.rawValue,
+            bannedVersion: bannedVersion
+        )
     }
 
     /// Verify the resolved binary is authenticated via `claude auth status` — a documented, **non-spending**
@@ -102,11 +113,20 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
     }
 
     public func verifySkillVisibility(_ skill: SkillRef, strategy: InjectionStrategy) throws {
-        // Static $0 check (§9.2): the target SKILL.md must resolve under the discovery path. The
-        // discovery-only (siblings-listable-not-injected) half is refined when validated live (F7/F3).
-        let skillFile = URL(fileURLWithPath: skill.path).appendingPathComponent("SKILL.md")
-        guard FileManager.default.fileExists(atPath: skillFile.path) else {
-            throw EDDError.skillNotVisible(skill: skill.name, reason: "no SKILL.md at \(skill.path)")
+        // Static $0 positive-load check (§9.2): the *whole* model-visible bundle — SKILL.md,
+        // references/, and every other staged entry — must survive the staging filter, or the harness
+        // runs with a silently incomplete skill (the --skill-path false-negative class, P6). The
+        // discovery-only (siblings-listable-not-injected) half stays deferred until the `visible:`
+        // set is exercised live (F3 phase notes).
+        let result = SkillBundleAudit.audit(skillDirectory: URL(fileURLWithPath: skill.path, isDirectory: true))
+        if let issue = result.skillMDIssue {
+            throw EDDError.skillNotVisible(skill: skill.name, reason: issue)
+        }
+        if !result.symlinks.isEmpty {
+            throw EDDError.skillNotVisible(
+                skill: skill.name,
+                reason: "staging silently drops symlinked bundle entries: \(result.symlinks.joined(separator: ", "))"
+            )
         }
     }
 

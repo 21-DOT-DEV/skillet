@@ -4,30 +4,30 @@
 CLI for eval-driven development (EDD) of agent skills: capture real runs, turn hand-fixes into
 structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
 
-> **Status: Phase 1 COMPLETE — F1, F2, F4, F5, F6, F7, F8 landed** (completed-items audit:
-> [Roadmap/phase-1-review.md](Roadmap/phase-1-review.md)). The walking skeleton is proven end-to-end. `Package.swift` plus
-> `EDDCore`, `TraceKit`, `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `JudgeKit`, `RunKit`, `ConfigYAML`, and the `skillet` executable exist, with unit + integration
-> tests green (`swift build && swift test`). **F1 (project discovery & output contract) is
-> implemented**: `skillet` explains the loop, `-C <dir>`, `--json` (schema-tagged), `--color`/`NO_COLOR`,
-> and the typed §5.4 exit codes (0 ok · 2 usage · 3 environment reachable today). **F2 (`skillet init`)
-> is implemented**: idempotent project scaffolding (`skillet.yaml`, per-skill `evaluations/`, a
-> self-owned `.skillet/.gitignore`), plus the verified-docs harness (dump-help surface + behavioral +
-> link checks). **F5 (trace + harness seam) is implemented**: the `Trace` model (`skillet.trace/1`), the
-> full `HarnessAdapter` protocol with a `ReplayAdapter` double + a claude-code stub, and `skillet harness
-> list`/`info`. The `skillet` executable owns the full ArgumentParser command tree (no `skilletCLI`
-> library); `ProjectKit` is the discovery/config-IO home. **F6 (claude-code adapter) is implemented** (validatable core): the native-session-JSONL → `Trace` parser (golden-tested vs a synthetic fixture), the binary resolution chain (flag > env > config > PATH), the version denylist/ban policy, and `probe()`/`verifySkillVisibility` behind a fakeable launcher — `harness info` now probes the real adapter. `swift-yaml` is wired, isolated in a `.Cxx` `ConfigYAML` target (the kits + pure core stay interop-free; the executable is a `.Cxx` leaf). Live `run` ships in F7 (below). **F4 (`skillet lint`) is implemented**: the free static gate — `SKILL-L001` (description >1024 Unicode code points, matching Anthropic's `quick_validate.py`), `SKILL-L003` (body-line budget, frontmatter+code excluded), `SKILL-L009` (has-evals, ≥3) — as a pure `LintKit` over a `SkillSource` the executable assembles (`ConfigYAML.parseFrontmatter` + the F8 `evals.json` codec); `skillet lint` exits 1 on any error-tier finding and emits `skillet.lint/1`. **F7 (`skillet run`) is implemented**: the neutral runner — runs a skill's evals k×/eval in fresh sandboxes (`RunKit`), grades each expectation with a `claude-code`-backed, **injection-hardened** text judge (`JudgeKit`; the model-under-test's output is fed as JSON-structured *untrusted* evidence and the verdict must be strict JSON, prompt `v2`) against the run's response + the post-run workspace listing (a *claimed-but-not-created* file FAILs; file-content grounding is F16), and reports aggregate `pass^k` **plus the additive `pass^1`** (mean trial pass rate — §14-11, decided; well-defined even at k = 1) (`skillet.run/1`, pure in `EDDCore`, recomputable offline from the committed `evaluations/benchmark.json` — whose `runs[]` are viewer-faithful per-trial rows (`configuration:"default"`, expectation-count `result`) with skillet's `pass^k` in the additive `consistency` block, the recompute source); the trial count is estimated + spend-gated (design P9: `confirm_above_trials`/`--yes`/`--no-input`/`-n`,`--dry-run`); probes auth via the non-spending `claude auth status` + refuses banned/unauthenticated before spend; injects `.only(load:)`; exit codes `0/1/2/3/4`; **`judge.model` is required-explicit** (absent → exit 2; design §14-4 decided — no silent judge default, the replay seam exempt) and the committed records stamp **provenance** (`benchmark.json` `metadata.executor_binary_version` + `judge.prompt_version`, `grading.json` `judge` block) so re-grades and harness-vs-skill deltas survive a cache wipe; a **free error-tier lint preflight** (`L001`/`L003`) refuses a lint-invalid skill before any spend (**exit 2** + `skillet.lint/1`, after the eval loader so corrupt/missing evals stay exit 4/2; `doctor` owns the broader Phase-2 gate); config-consuming commands (`lint`/`harness info`/`run`) load `skillet.yaml` **strictly** (a present-but-undecodable config — or a missing/undecodable `--config` — fails loud, never silent defaults); the non-spending auth preflight **fails closed** on a malformed `claude auth status`; the skill dir + `evaluations/` **and the `.skillet` cache** are **symlink-confined** before any read/write (exit 4 on a symlinked path); the subprocess output-capture limit is configurable (`runs.max_output_bytes`, 64 MiB default) so a large-but-valid `stream-json` session isn't a false failure; `--json --dry-run` emits the spend-free **`skillet.run-plan/1`** plan; `benchmark.json` `runs[].result` carries an additive `pass_rate`; the live claude-code path is one opt-in env-gated smoke (free CI uses a replay seam). The rest of the command surface under "Planned" is still agreed *intent*,
-> not shipped fact — don't assume a command/module exists until its feature lands. Update this file as
-> each feature/phase completes.
+> **Status: Phase 1 COMPLETE — F1, F2, F4–F8 landed** ([completed-items audit](Roadmap/phase-1-review.md));
+> **Phase 2 IN PROGRESS — F3 (`skillet doctor`, the $0 preflight) shipped 2026-07-04**
+> ([Specs/008](Specs/008-doctor-preflight/plan.md)). `Package.swift` plus `EDDCore`, `TraceKit`,
+> `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `JudgeKit`, `RunKit`, `ConfigYAML`, and the
+> `skillet` executable exist — the executable owns the full ArgumentParser command tree (no
+> `skilletCLI` library; `ProjectKit` is the discovery/config-IO home) — with 262 tests green
+> (`swift build && swift test`). Shipped commands: `init` · `doctor` · `lint` · `run` · `harness
+> list`/`info` — see *Commands* below. **Per-feature records live nearest the artifact**: each
+> feature's detailed capsule is its [`Specs/NNN` plan](Specs/README.md) status, with design-only
+> changes in [`skillet-design-changelog.md`](skillet-design-changelog.md); this banner stays a
+> current-state summary — one clause per feature, no history. Everything under *Planned* is still
+> agreed **intent, not shipped fact** — don't assume a command/module exists until its feature
+> lands. Update this file as each feature/phase completes.
 
 ## Source-of-truth documents (read these first)
 
 - **`skillet-design.md`** — the product spec. Authoritative for *what skillet does*: product
   principles P1–P10, settled decisions D1–D7, command surface (§6), file formats (§7), gates
   engine (§8), harness abstraction (§9), package architecture (§11), distribution (§12), v1 scope
-  (§13), open questions (§14).
+  (§13), open questions (§14). Its revision history lives in
+  [`skillet-design-changelog.md`](skillet-design-changelog.md).
 - **`ROADMAP.md`** (+ `Roadmap/phase-*.md`) — the phase plan. Authoritative for *sequence and
   priority*. Phase 1 is the walking skeleton; do the earliest incomplete phase unless told
-  otherwise.
+  otherwise. Its versioned history lives in [`ROADMAP-changelog.md`](ROADMAP-changelog.md).
 - **`.specify/memory/constitution.md`** — the development charter. **Authoritative for *how we
   build* skillet** (7 principles, MUST/SHOULD/MAY, governance). When in doubt about a development
   practice, the constitution governs — do not duplicate its principles here; read it.
@@ -39,10 +39,11 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 ## Commands (true now — Phase 1 / F1, F2, F4–F8)
 
 - `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`).
-- `swift test` — run the unit + integration suites (237 tests, all green). The integration suite drives
+- `swift test` — run the unit + integration suites (262 tests, all green). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
-  `skillet init --json`, `skillet lint [--json]`, `skillet harness list`, `skillet harness info [--json]`,
+  `skillet init --json`, `skillet doctor [<skill>...] [--json]` (free $0 preflight; exit 3 + remedy on failure),
+  `skillet lint [--json]`, `skillet harness list`, `skillet harness info [--json]`,
   `skillet run [<skill>] [--runs <k>] [--dry-run] [--yes] [--no-input] [--keep-workspace]` (paid: shells `claude` + the judge — gated by the spend estimate),
   `skillet --help`, `skillet --version`.
 - `swift package generate-manual` / `generate-docc-reference` — regenerate the command reference from the parser.
@@ -53,7 +54,7 @@ Contributing, security disclosure, and code of conduct are handled at the org le
   Historical note: the 2026-06 macOS-only CI failures were an upstream Swift C++-interop bug, fixed
   in swift-yaml (diagnosis + repro live in its `Projects/`); no Swift-version floor beyond Swift 6.
 
-`init`, `lint`, `run`, `harness list`/`info`, and the claude-code adapter (parse + resolution + probe + live `run`) are built; `doctor`/`capture`/`next`/… are not yet — see Planned.
+`init`, `doctor`, `lint`, `run`, `harness list`/`info`, and the claude-code adapter (parse + resolution + probe + live `run`) are built; `capture`/`next`/… are not yet — see Planned.
 
 ## Binding conventions
 
@@ -125,9 +126,10 @@ from the first commit.
 Treat everything in this section as a target to build toward, not as existing functionality —
 **except** what Phase 1 already shipped (now COMPLETE): the `EDDCore`, `TraceKit`, `HarnessKit`,
 `LintKit`, `JudgeKit`, `RunKit`, `ProjectKit`, `RenderKit`, and `ConfigYAML` kits + the `skillet`
-executable with `init`/`lint`/`run`/`harness` (see the status banner + Commands above). The kits and
-commands still *planned* are the Phase 2+ ones — `ScoreKit`/`CorpusKit`/`AnalysisKit`/`IterateKit`
-and `doctor`/`capture`/`friction`/`triage`/`next`/`suggest`/`iterate`/`baseline`/`report`/… .
+executable with `init`/`doctor`/`lint`/`run`/`harness` (see the status banner + Commands above; `doctor`
+is Phase 2's first shipped feature). The kits and commands still *planned* are the remaining Phase 2+
+ones — `ScoreKit`/`CorpusKit`/`AnalysisKit`/`IterateKit`
+and `capture`/`friction`/`triage`/`next`/`suggest`/`iterate`/`baseline`/`report`/… .
 
 ### Package architecture (design §11)
 
@@ -188,6 +190,15 @@ matrix) → 8 (beyond v1). See `ROADMAP.md` and `Roadmap/`.
   constitution remains authoritative for development principles, this file for operational
   onboarding.
 - Add real `Commands` (e.g. `swift build`, `swift test`) only once they actually work.
+- **Doc changelogs live beside their documents** (extracted 2026-07-04):
+  [`skillet-design-changelog.md`](skillet-design-changelog.md) (design doc keeps `Status: Draft v0.x`
+  + a one-line latest pointer) and [`ROADMAP-changelog.md`](ROADMAP-changelog.md) (ROADMAP keeps
+  semver header + latest summary). One linkable `## vX.Y — date` heading per version, latest first;
+  **historical entries are never rewritten**. Entry discipline — *detail lives nearest the artifact*:
+  a feature's detailed record is its `Specs/NNN` plan status; design-only/decision changes are
+  recorded in full in the design changelog; every other log (ROADMAP changelog, phase change logs)
+  writes a 2–4-line summary + link. The bare `CHANGELOG.md` name stays **reserved for the future
+  software changelog** ([Keep a Changelog](https://keepachangelog.com) format, design §12).
 - **Documentation is verified, not just written** (Principle VII). Each new/changed command updates
   `README.md` usage + the *Commands* list, and the free test suite checks three layers: (1) the
   documented command surface against `skillet --experimental-dump-help` (subcommand names today —

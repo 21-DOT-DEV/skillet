@@ -9,7 +9,7 @@ Run skillet's `init` → `lint` → `run` loop on a throwaway repo — through a
 
 ## Overview
 
-This guide takes you from a fresh checkout to a measured `pass^k` result, exercising each command in order. The free stages come first — `lint`, and a `--replay` run that calls no model — then the one paid stage: a live `run` that shells the [`claude` CLI](https://code.claude.com/docs/en/cli-reference), always estimated and confirmed before it spends.
+This guide takes you from a fresh checkout to a measured `pass^k` result, exercising each command in order. The free stages come first — `lint`, a `--replay` run that calls no model, and the `doctor` preflight — then the one paid stage: a live `run` that shells the [`claude` CLI](https://code.claude.com/docs/en/cli-reference), always estimated and confirmed before it spends.
 
 It stays on *running* the commands. It doesn't teach how to author an effective `SKILL.md` (your skill-authoring tool owns that) or explain the `pass^k` methodology itself (the reliability score and why it's read at the minimum trial count is a separate topic) — here, `pass^k` is just the number a run reports.
 
@@ -142,10 +142,10 @@ echo "$SKILLET_CLAUDE_CODE_BIN"
 
 ## 6. Run for real (paid)
 
-Sanity-check the probe, then run. Start with `--runs 1` to keep the first real run cheap — about two Claude calls per eval (one trial, one judge):
+Preflight everything for $0 first: `skillet doctor` checks the config, the harness (binary resolution, version/denylist, auth), the skill's visibility to the harness, and the lint gate in one command — `✓/!/✗` per check, a fix line under every failure, exit `3` if anything would break a paid run (a missing credential is only a warning: `run` itself refuses before spending). Then run, starting with `--runs 1` to keep the first real run cheap — about two Claude calls per eval (one trial, one judge):
 
 ```sh
-skillet harness info                 # claude-code → available (<version>), authenticated
+skillet doctor greeter               # free preflight: config · harness · skill visibility · lint
 skillet run greeter --dry-run        # confirm the plan/estimate
 skillet run greeter --runs 1 --yes   # PAID: shells `claude -p` per trial + the judge
 ```
@@ -178,6 +178,8 @@ For scripting and CI:
 | `4` | corrupt `evals.json`, or an out-of-skill / symlinked / private / zero-expectation eval |
 
 ## Troubleshooting
+
+Start with `skillet doctor` — it runs the whole preflight and prints a fix line under every failure; the entries below map to its rows.
 
 **`run` exits 3 with "could not find the claude-code binary."** `claude` isn't on `PATH` and no override is set. Install Claude Code, or follow step 5 to point `SKILLET_CLAUDE_CODE_BIN` at an editor-bundled binary.
 

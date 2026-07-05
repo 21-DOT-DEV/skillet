@@ -9,11 +9,10 @@ import HarnessKit
 /// are staged at the workspace root.
 public struct WorkspaceManager: Sendable {
     /// Top-level skill entry never staged into a run workspace: the eval suite itself (the answers the
-    /// model must never see). Hidden entries (`.skillet`/`.git`/`.env`/…) are excluded separately. A
-    /// *denylist* — not a fixed allowlist — because real skills carry varied bundle dirs beyond the
-    /// design's `references`/`scripts`/`assets` (e.g. `agents/`, `fixtures/`, `eval-viewer/`), and a
-    /// narrow allowlist would silently drop them and corrupt the run.
-    static let excludedFromSkill: Set<String> = ["evaluations"]
+    /// model must never see). Hidden entries (`.skillet`/`.git`/`.env`/…) are excluded separately. The
+    /// value — and the symlink/hidden predicates below — come from ``SkillBundleRules`` so the stager
+    /// and doctor's `SkillBundleAudit` can't drift (Specs/008 §3).
+    static let excludedFromSkill = SkillBundleRules.excludedFromSkill
 
     public init() {}
 
@@ -74,8 +73,9 @@ public struct WorkspaceManager: Sendable {
     }
 
     /// Whether `url` is itself a symbolic link (lstat semantics — does not follow the link).
+    /// Delegates to the shared ``SkillBundleRules`` (kept here so existing call sites don't churn).
     public static func isSymlink(_ url: URL) -> Bool {
-        (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+        SkillBundleRules.isSymlink(url)
     }
 
     /// The first symlink at or under `url` (recursively), or `nil` if the subtree is symlink-free.
@@ -107,7 +107,7 @@ public struct WorkspaceManager: Sendable {
     /// and RunCommand's pre-spend symlink check.
     public static func stagedEntries(skillDir: URL) -> [String] {
         ((try? FileManager.default.contentsOfDirectory(atPath: skillDir.path)) ?? [])
-            .filter { !excludedFromSkill.contains($0) && !$0.hasPrefix(".") }
+            .filter { !excludedFromSkill.contains($0) && !SkillBundleRules.isHidden($0) }
     }
 
     /// Recursively copy `src` → `dst`, **skipping any symlink and any hidden entry at any depth** — so
@@ -120,7 +120,7 @@ public struct WorkspaceManager: Sendable {
         fm.fileExists(atPath: src.path, isDirectory: &isDir)
         if isDir.boolValue {
             try fm.createDirectory(at: dst, withIntermediateDirectories: true)
-            for child in (try? fm.contentsOfDirectory(atPath: src.path)) ?? [] where !child.hasPrefix(".") {
+            for child in (try? fm.contentsOfDirectory(atPath: src.path)) ?? [] where !SkillBundleRules.isHidden(child) {
                 try copyFiltered(from: src.appendingPathComponent(child), to: dst.appendingPathComponent(child))
             }
         } else {

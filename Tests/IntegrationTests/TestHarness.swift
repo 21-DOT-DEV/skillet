@@ -34,10 +34,18 @@ struct SkilletHarness {
     }
 
     @discardableResult
-    func run(_ arguments: [String], workingDirectory: URL? = nil) async throws -> Output {
+    func run(_ arguments: [String], workingDirectory: URL? = nil, environment: [String: String]? = nil) async throws -> Output {
+        // `nil` inherits; an overlay layers on the parent env (PATH etc. survive) — the doctor tests
+        // use this to pin SKILLET_CLAUDE_CODE_BIN at a shim binary.
+        let env: Environment = environment.map { overlay in
+            .inherit.updating(Dictionary(uniqueKeysWithValues: overlay.map {
+                (Environment.Key(stringLiteral: $0.key), Optional($0.value))
+            }))
+        } ?? .inherit
         let result = try await Subprocess.run(
             .path(executable),
             arguments: .init(arguments),
+            environment: env,
             workingDirectory: workingDirectory.map { FilePath($0.path) },
             output: .string(limit: 1 << 20),
             error: .string(limit: 1 << 20)

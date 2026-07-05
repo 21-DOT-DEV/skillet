@@ -10,7 +10,8 @@ skillet drafts and proves — **a human lands every write**.
 > **Status — Phase 1 (walking skeleton) COMPLETE.** F1 (project discovery & output contract),
 > F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6 (claude-code adapter),
 > F8 (frozen boundary codecs — the skill-creator formats round-trip faithfully), and
-> F7 (`skillet run` — the neutral runner with `pass^k`) have landed; the rest
+> F7 (`skillet run` — the neutral runner with `pass^k`) have landed, and Phase 2 is underway:
+> F3 (`skillet doctor` — the free $0 preflight) shipped. The rest
 > of the loop lights up across later phases. See [ROADMAP.md](ROADMAP.md).
 
 ## How it works
@@ -37,7 +38,9 @@ You **adopt** skillet once (`init`), then loop: **measure** with `run` (each eva
 for a `pass^k` consistency score), **discover** real failures via `capture`/`friction`, **interpret**
 them with `triage` — `next` names the single highest-value action — then **fix and prove** the change
 with `suggest`/`iterate` in a throwaway worktree, and re-run. Free `lint` checks gate every paid
-`run`. Today `skillet init`, `skillet lint`, and `skillet run` ship (plus `skillet harness info` for setup); the rest lands across the
+`run`, and `skillet doctor` preflights the whole environment for $0 — config, harness, skill
+visibility — so a misconfig never costs money. Today `skillet init`, `skillet doctor`, `skillet lint`,
+and `skillet run` ship (plus `skillet harness info` for setup); the rest lands across the
 roadmap phases.
 
 ## Install
@@ -59,6 +62,8 @@ skillet --json              # machine-readable project context (schema: skillet.
 skillet -C path/to/repo     # operate as if started in another directory
 skillet init                # adopt skillet in the current repo (idempotent)
 skillet init --json         # report created/skipped paths (schema: skillet.init/1)
+skillet doctor [<skill>...] # free $0 preflight: config, harness, skill visibility, lint (exit 3 on failure)
+skillet doctor --json       # machine-readable check rows (schema: skillet.doctor/1)
 skillet lint                # free static analysis of SKILL.md (exit 1 on error-tier findings)
 skillet lint --json         # machine-readable findings (schema: skillet.lint/1)
 skillet run <skill>         # run the skill's evals k×, judge, report pass^k (paid; spend-gated)

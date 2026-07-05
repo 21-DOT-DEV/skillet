@@ -27,19 +27,40 @@ public enum InjectionStrategy: Sendable {
 }
 
 /// The result of `probe()`: presence, version, auth, and any non-fatal warnings (e.g. an
-/// auto-discovered binary on the denylist — surfaced loudly, but not refused; §9.1).
+/// auto-discovered binary on the denylist — surfaced loudly, but not refused; §9.1). The optional
+/// resolution fields (`binaryPath`, `source`, `bannedVersion`) are additive for `doctor` (F3):
+/// adapters that resolve a real binary fill them so the preflight can report the winning link and
+/// classify a banned auto-discovered version without string-sniffing `warnings`.
 public struct HarnessInfo: Sendable, Equatable {
     public var id: HarnessID
     public var version: String
     public var authenticated: Bool
     public var available: Bool
     public var warnings: [String]
-    public init(id: HarnessID, version: String, authenticated: Bool, available: Bool, warnings: [String] = []) {
+    /// The resolved binary path (when the adapter shells a real binary).
+    public var binaryPath: String?
+    /// The winning resolution link (`flag`/`env`/`config`/`path`, §9.1) that produced `binaryPath`.
+    public var source: String?
+    /// Set when the resolved version is denylisted but non-strict probing continued (auto-discovered).
+    public var bannedVersion: String?
+    public init(
+        id: HarnessID,
+        version: String,
+        authenticated: Bool,
+        available: Bool,
+        warnings: [String] = [],
+        binaryPath: String? = nil,
+        source: String? = nil,
+        bannedVersion: String? = nil
+    ) {
         self.id = id
         self.version = version
         self.authenticated = authenticated
         self.available = available
         self.warnings = warnings
+        self.binaryPath = binaryPath
+        self.source = source
+        self.bannedVersion = bannedVersion
     }
 }
 

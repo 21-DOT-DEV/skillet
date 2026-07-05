@@ -62,7 +62,7 @@ struct RunCommand: AsyncParsableCommand {
                 throw EDDError.projectNotFound(cwd: context.cwd)
             }
 
-            let config = try loadConfig(options: options)
+            let config = try loadConfig(options: options, context: context)
             let runsCfg = config?.runs ?? .init()
             let judgeCfg = config?.judge ?? .init()
             let skillsRoot = config?.project?.skillsRoot ?? "skills"

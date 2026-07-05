@@ -72,6 +72,18 @@ public struct Renderer: Sendable {
         }
     }
 
+    /// `skillet doctor`'s output: per-check `✓/!/✗` rows with a fix line under each failure (human),
+    /// or the `skillet.doctor/1` payload (json). Warnings render but never fail — the exit decision
+    /// is the report's (`DoctorReport.exitCode`), not the renderer's.
+    public func renderDoctor(_ report: DoctorReport, nextSteps: [String] = []) throws -> Rendering {
+        switch mode {
+        case .json:
+            return Rendering(stdout: try SkilletJSON.encode(report) + "\n")
+        case .human:
+            return Rendering(stdout: humanDoctor(report, nextSteps: nextSteps))
+        }
+    }
+
     /// A generic aligned table for plumbing/listing output (e.g. `harness info`). Column widths come
     /// from the widest cell; the last column is left unpadded to avoid trailing whitespace.
     public func renderTable(_ headers: [String], _ rows: [[String]]) -> Rendering {
@@ -159,6 +171,31 @@ public struct Renderer: Sendable {
         let errors = "\(report.errors) error\(report.errors == 1 ? "" : "s")"
         let warnings = "\(report.warnings) warning\(report.warnings == 1 ? "" : "s")"
         return "\(report.errors > 0 ? red(errors) : errors) · \(warnings)"
+    }
+
+    private func humanDoctor(_ report: DoctorReport, nextSteps: [String]) -> String {
+        let failures = report.rows.filter { $0.status == .failure }.count
+        let warnings = report.rows.filter { $0.status == .warning }.count
+        var out = report.healthy
+            ? bold("✓ doctor: ready" + (warnings > 0 ? " (\(warnings) warning\(warnings == 1 ? "" : "s"))" : "")) + "\n"
+            : red("✗ doctor: \(failures) failure\(failures == 1 ? "" : "s")") + "\n"
+        for row in report.rows {
+            let mark: String
+            switch row.status {
+            case .pass: mark = "✓"
+            case .warning: mark = "!"
+            case .failure: mark = red("✗")
+            }
+            let subject = row.subject.map { " \($0):" } ?? ""
+            out += "  \(mark) \(row.check)\(subject) \(row.message)\n"
+            if let remedy = row.remedy {
+                out += "      fix: \(remedy)\n"
+            }
+        }
+        if !nextSteps.isEmpty {
+            out += "\(bold("→ next:")) \(nextSteps.joined(separator: " · "))\n"
+        }
+        return out
     }
 
     private func humanRun(_ report: RunReport, nextSteps: [String]) -> String {

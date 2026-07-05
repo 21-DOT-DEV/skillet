@@ -14,7 +14,9 @@ a skill change ships only after a previously-failing eval proves it, with a huma
 
 The eval-driven loop is **adopt** (`init`) → **measure** (`run`, repeated *k*× for `pass^k`) →
 discover → interpret → fix-and-prove → re-measure, with the free static gate (`lint`) in front of every
-paid `run`. Phase 1 ships `init`, `lint`, `run`, and `harness`; the rest lights up across the roadmap.
+paid `run`. Phase 1 ships `init`, `lint`, `run`, and `harness`; Phase 2 has begun with `doctor` — the
+free $0 preflight (config, harness resolution, skill visibility, lint) — and the rest lights up across
+the roadmap.
 
 ## Topics
 

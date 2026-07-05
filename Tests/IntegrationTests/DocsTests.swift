@@ -17,6 +17,7 @@ struct DocsTests {
         .init(args: ["-C", "/no/such/x", "--json"], exit: 3, schema: "skillet.error/1"),
         .init(args: ["harness", "list"], exit: 0),
         .init(args: ["harness", "info", "--json"], exit: 0, schema: "skillet.harness-info/1"),
+        .init(args: ["doctor", "--help"], exit: 0),
         .init(args: ["lint", "--help"], exit: 0),
         .init(args: ["run", "--help"], exit: 0)
     ]
@@ -44,6 +45,7 @@ struct DocsTests {
         let dump = try JSONDecoder().decode(Dump.self, from: Data(out.stdout.utf8))
         let names = (dump.command.subcommands ?? []).compactMap(\.commandName)
         #expect(names.contains("init"))
+        #expect(names.contains("doctor"))
         #expect(names.contains("lint"))
         #expect(names.contains("run"))
     }

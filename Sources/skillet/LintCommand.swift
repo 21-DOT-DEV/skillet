@@ -34,12 +34,12 @@ struct LintCommand: AsyncParsableCommand {
                 throw EDDError.projectNotFound(cwd: context.cwd)
             }
 
-            let config = try loadConfig(options: options)
+            let config = try loadConfig(options: options, context: context)
             let skillsRoot = config?.project?.skillsRoot ?? "skills"
             let lintConfig = config?.lint ?? .init()
 
             let discovered = SkillScanner().scan(skillsRoot: root.appendingPathComponent(skillsRoot))
-            let selected = try select(discovered, requested: skills)
+            let selected = try selectSkillDirectories(discovered, requested: skills, command: "lint")
 
             let reader = SkillReader()
             var diagnostics: [Diagnostic] = []
@@ -59,32 +59,6 @@ struct LintCommand: AsyncParsableCommand {
             Console.emit(renderer.renderError(error))
             throw SilentExit(code: error.exitCode.rawValue)
         }
-    }
-
-    /// Resolve requested skill **names** to discovered directories, de-duplicated and sorted for
-    /// deterministic output. Skills are uniquely named under `skills_root`, so selection is by name —
-    /// not path — which is `-C`/cwd-independent; an unknown name is a usage error that lists what's
-    /// available. (Path-based selection can be added later if an out-of-tree use case appears.)
-    private func select(_ discovered: [URL], requested: [String]) throws -> [URL] {
-        guard !requested.isEmpty else { return discovered }
-        let byName = Dictionary(discovered.map { ($0.lastPathComponent, $0) }, uniquingKeysWith: { first, _ in first })
-        let matched = try requested.map { name -> URL in
-            guard let match = byName[name] else {
-                let available = discovered.map(\.lastPathComponent).sorted()
-                throw EDDError.usage(
-                    message: "unknown skill: \(name)",
-                    remedy: available.isEmpty
-                        ? "no skills found under skills_root; run `skillet lint` with no arguments"
-                        : "choose one of: \(available.joined(separator: ", ")), or run `skillet lint` with no arguments"
-                )
-            }
-            return match
-        }
-        // De-duplicate repeated names and sort, so output order never depends on how names were listed.
-        var seen = Set<String>()
-        return matched
-            .filter { seen.insert($0.standardizedFileURL.path).inserted }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 
     /// Onboarding: suggest the next loop step that exists today (`run`/`next` land in later phases).

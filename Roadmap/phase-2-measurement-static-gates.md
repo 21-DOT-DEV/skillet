@@ -1,8 +1,8 @@
 # Phase 2 — Trustworthy Measurement & Static Gates
 
-**Status:** PLANNED
-**Horizon:** Next
-**Last Updated:** 2026-06-26
+**Status:** IN PROGRESS (F3 shipped 2026-07-04)
+**Horizon:** Now
+**Last Updated:** 2026-07-04
 
 ## Goal
 
@@ -15,7 +15,7 @@ believable before the workflow layer starts acting on it.
 
 ## Key Features
 
-1. **[F3]** $0 preflight & skill-visibility check (CLI: `skillet doctor`) — PLANNED · Net-new
+1. **[F3]** $0 preflight & skill-visibility check (CLI: `skillet doctor`) — IMPLEMENTED (2026-07-04) · Net-new
    - Purpose & user value: A free, fast self-check that catches the silent killers
      before any paid run — config parses, each configured harness is found and the
      right binary/version resolves, and the skill is actually *visible* to the
@@ -27,6 +27,7 @@ believable before the workflow layer starts acting on it.
    - Dependencies: HarnessAdapter seam (F5), claude-code adapter (F6); also `swift-yaml` (config parsing) and error-tier `lint` (F4, surfaced here) — all Phase 1.
    - Confidence: Medium — design §6.1 `doctor`, §9.2.
    - Notes: Moved from Phase 1 — off the walking-skeleton critical path (`run`/F7 doesn't depend on it) and its companions live here. Live auth + the discovery-only visibility half are validated with the runner (F7); the `--paid` canary is F21; the frontmatter spec-conformance rules it surfaces come from the full lint catalog (F20).
+   - Shipped (2026-07-04, [Specs/008](../Specs/008-doctor-preflight/plan.md)): both success metrics, under the Option-2 contract — frozen `skillet.doctor/1` check rows (`--json`, golden-tested), warnings-never-fail exits (`0` healthy / `3` any failure + remedy), config file-origin, harness binary/version/denylist + winning resolution link, positive-load visibility via the staging-parity `SkillBundleAudit` (dropped symlinks fail loudly, by path), all error-tier lint findings failing at exit 3; auth = warning row (`run`'s strict preflight owns the refusal). 262 tests green (two post-review hardening rounds — see the [Specs/008](../Specs/008-doctor-preflight/plan.md) status row).
 
 2. **[F14]** Trigger axis (CLI: `skillet run --axis trigger`) — PLANNED · Net-new
    - Purpose & user value: Test whether a skill's *description* actually fires it
@@ -184,6 +185,14 @@ believable before the workflow layer starts acting on it.
 
 ## Phase Change Log
 
+- 2026-07-04: **F3 IMPLEMENTED — phase → IN PROGRESS.** `skillet doctor` ships the Option-2
+  contract ([Specs/008](../Specs/008-doctor-preflight/plan.md)): frozen `skillet.doctor/1`
+  check-registry rows; exit `0`-with-warnings / `3`-on-failure (+ shared `2`/`4` classes); config
+  origin, harness binary/version/denylist + winning link, positive-load staging-parity visibility,
+  error-tier lint surfacing; auth reported as a warning (`run` owns the refusal, per the F3 Notes).
+  Deferred rows land with their owners (F20 frontmatter, F21 `--paid`, F24 origins; artifact sweep /
+  `git` / betterleaks / discovery-only half with their features) — additive rows, never a schema
+  bump. No scope change to the remaining features.
 - 2026-06-17: Phase created. Holds the runner-hardening + full static-gate work
   split out of the thin "Now" walking skeleton.
 - 2026-06-26: MINOR — **`doctor` (F3) moved in from Phase 1** as the phase's first

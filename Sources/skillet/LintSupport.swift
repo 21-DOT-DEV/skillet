@@ -25,8 +25,36 @@ func assembleSkillSource(_ raw: RawSkill) -> SkillSource {
 }
 
 /// Read + assemble + lint one skill directory (the free error-tier catalog, honoring `lint.disable`).
-/// `run` uses this as its pre-spend gate; `lint` uses it per selected skill.
+/// `run` uses this as its pre-spend gate; `lint` and `doctor` use it per selected skill.
 func lintSkillDirectory(_ dir: URL, config: SkilletConfig.Lint) throws -> LintReport {
     let raw = try SkillReader().read(skillDirectory: dir)
     return LintReport(diagnostics: Linter().lint(assembleSkillSource(raw), config: config))
+}
+
+/// Resolve requested skill **names** to discovered directories, de-duplicated and sorted for
+/// deterministic output — shared by `lint` and `doctor` so selection semantics can't drift. Skills
+/// are uniquely named under `skills_root`, so selection is by name — not path — which is `-C`/cwd-
+/// independent; an unknown name is a usage error that lists what's available. With no request, the
+/// discovered set passes through in scan order — already sorted (`SkillScanner.scan` sorts for
+/// deterministic output), so callers need no re-sort.
+func selectSkillDirectories(_ discovered: [URL], requested: [String], command: String) throws -> [URL] {
+    guard !requested.isEmpty else { return discovered }
+    let byName = Dictionary(discovered.map { ($0.lastPathComponent, $0) }, uniquingKeysWith: { first, _ in first })
+    let matched = try requested.map { name -> URL in
+        guard let match = byName[name] else {
+            let available = discovered.map(\.lastPathComponent).sorted()
+            throw EDDError.usage(
+                message: "unknown skill: \(name)",
+                remedy: available.isEmpty
+                    ? "no skills found under skills_root; run `skillet \(command)` with no arguments"
+                    : "choose one of: \(available.joined(separator: ", ")), or run `skillet \(command)` with no arguments"
+            )
+        }
+        return match
+    }
+    // De-duplicate repeated names and sort, so output order never depends on how names were listed.
+    var seen = Set<String>()
+    return matched
+        .filter { seen.insert($0.standardizedFileURL.path).inserted }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
 }

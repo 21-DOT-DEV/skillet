@@ -28,6 +28,25 @@ struct InitPlannerTests {
         #expect(plan.skills == ["docc"])
     }
 
+    @Test("A JSON-special skill name still scaffolds VALID evals.json (round 6 — no injection)")
+    func jsonSpecialSkillName() throws {
+        let weird = #"we"ird\name"#
+        let plan = InitPlanner(probe: InMemoryProbe()).plan(
+            root: url("/repo"), skillsRoot: "skills", skills: [url("/repo/skills/\(weird)")]
+        )
+        let action = plan.actions.first {
+            if case let .writeFile(target, _) = $0 { return target.lastPathComponent == "evals.json" }
+            return false
+        }
+        guard case let .writeFile(_, contents) = action else {
+            Issue.record("no evals.json skeleton planned")
+            return
+        }
+        let object = try JSONSerialization.jsonObject(with: Data(contents.utf8)) as? [String: Any]
+        #expect(object?["skill_name"] as? String == weird)   // escaped on write, intact on read
+        #expect((object?["evals"] as? [Any])?.isEmpty == true)
+    }
+
     @Test("Existing skillet.yaml is skipped, not recreated (idempotency)")
     func skipsExistingConfig() {
         var probe = InMemoryProbe()

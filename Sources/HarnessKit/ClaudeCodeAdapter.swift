@@ -115,9 +115,9 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
     public func verifySkillVisibility(_ skill: SkillRef, strategy: InjectionStrategy) throws {
         // Static $0 positive-load check (§9.2): the *whole* model-visible bundle — SKILL.md,
         // references/, and every other staged entry — must survive the staging filter, or the harness
-        // runs with a silently incomplete skill (the --skill-path false-negative class, P6). The
-        // discovery-only (siblings-listable-not-injected) half stays deferred until the `visible:`
-        // set is exercised live (F3 phase notes).
+        // runs with a silently incomplete skill (the --skill-path false-negative class, P6). Doctor's
+        // discovery-only (siblings-listable-not-injected) half is unblocked — F14 stages the `visible:`
+        // tier live (frontmatter stubs) — and remains deferred, tracked for a later slice (D-4).
         let result = SkillBundleAudit.audit(skillDirectory: URL(fileURLWithPath: skill.path, isDirectory: true))
         if let issue = result.skillMDIssue {
             throw EDDError.skillNotVisible(skill: skill.name, reason: issue)
@@ -145,11 +145,19 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         // actually staged, so a staging failure is caught here rather than silently running skill-less.
         // (Global `~/.claude/skills` can still be discovered — claude-code has no project-only-skills
         // switch today; documented limitation, tracked for the isolation hardening in a later phase.)
-        if case let .only(load, _) = skills {
+        if case let .only(load, visible) = skills {
             for ref in load {
                 let staged = workspace.root.appendingPathComponent(".claude/skills/\(ref.name)/SKILL.md")
                 guard FileManager.default.fileExists(atPath: staged.path) else {
                     throw EDDError.skillNotVisible(skill: ref.name, reason: "not staged under the run workspace")
+                }
+            }
+            // The visible tier (F14, §9.2): discoverable-but-stubbed. Enforce the stub is present so a
+            // trigger trial can't silently run with an empty selection menu.
+            for ref in visible {
+                let staged = workspace.root.appendingPathComponent(".claude/skills/\(ref.name)/SKILL.md")
+                guard FileManager.default.fileExists(atPath: staged.path) else {
+                    throw EDDError.skillNotVisible(skill: ref.name, reason: "stub not staged under the run workspace (visible tier)")
                 }
             }
         }

@@ -5,11 +5,13 @@ CLI for eval-driven development (EDD) of agent skills: capture real runs, turn h
 structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
 
 > **Status: Phase 1 COMPLETE — F1, F2, F4–F8 landed** ([completed-items audit](Roadmap/phase-1-review.md));
-> **Phase 2 IN PROGRESS — F3 (`skillet doctor`, the $0 preflight) shipped 2026-07-04**
-> ([Specs/008](Specs/008-doctor-preflight/plan.md)). `Package.swift` plus `EDDCore`, `TraceKit`,
+> **Phase 2 IN PROGRESS — F3 (`skillet doctor`, the $0 preflight) and F14 (`skillet run --axis
+> trigger`, the deterministic description axis) shipped 2026-07-04**
+> ([Specs/008](Specs/008-doctor-preflight/plan.md), [Specs/009](Specs/009-trigger-axis/plan.md)).
+> `Package.swift` plus `EDDCore`, `TraceKit`,
 > `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `JudgeKit`, `RunKit`, `ConfigYAML`, and the
 > `skillet` executable exist — the executable owns the full ArgumentParser command tree (no
-> `skilletCLI` library; `ProjectKit` is the discovery/config-IO home) — with 262 tests green
+> `skilletCLI` library; `ProjectKit` is the discovery/config-IO home) — with 292 tests green
 > (`swift build && swift test`). Shipped commands: `init` · `doctor` · `lint` · `run` · `harness
 > list`/`info` — see *Commands* below. **Per-feature records live nearest the artifact**: each
 > feature's detailed capsule is its [`Specs/NNN` plan](Specs/README.md) status, with design-only
@@ -39,12 +41,12 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 ## Commands (true now — Phase 1 / F1, F2, F4–F8)
 
 - `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`).
-- `swift test` — run the unit + integration suites (262 tests, all green). The integration suite drives
+- `swift test` — run the unit + integration suites (292 tests, all green). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
   `skillet init --json`, `skillet doctor [<skill>...] [--json]` (free $0 preflight; exit 3 + remedy on failure),
   `skillet lint [--json]`, `skillet harness list`, `skillet harness info [--json]`,
-  `skillet run [<skill>] [--runs <k>] [--dry-run] [--yes] [--no-input] [--keep-workspace]` (paid: shells `claude` + the judge — gated by the spend estimate),
+  `skillet run [<skill>] [--axis behavior|trigger|all] [--runs <k>] [--dry-run] [--yes] [--no-input] [--keep-workspace]` (paid: shells `claude` — behavioral trials add the judge; trigger trials are judge-free single calls — gated by the combined spend estimate),
   `skillet --help`, `skillet --version`.
 - `swift package generate-manual` / `generate-docc-reference` — regenerate the command reference from the parser.
 - `SKILLET_TEST_BINARY=<path> swift test` — point the integration harness at a specific binary.

@@ -1,6 +1,6 @@
 # Product Roadmap — skillet
 
-**Version:** v1.11.1
+**Version:** v1.12.0
 **Last Updated:** 2026-07-04
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
@@ -132,7 +132,7 @@ Phase 1's `F1–F8` and Phase 8's `F10–F13` were already global and were prese
   & output contract), F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6
   (claude-code adapter), F8 (frozen boundary codecs), and now F7 (`skillet run` — the neutral runner,
   `pass^k`, `RunKit`+`JudgeKit`) — `Specs/001`–`007`, 235 tests green. **Phase 2 is IN PROGRESS —
-  F3 (`skillet doctor`) shipped 2026-07-04 (`Specs/008`, 262 tests green)**; the remaining Phase 2–8
+  F3 (`skillet doctor`) + F14 (the trigger axis) shipped 2026-07-04 (`Specs/008`–`009`, 292 tests green)**; the remaining Phase 2–8
   features are PLANNED/FUTURE: those statuses reflect design intent verified against the design doc
   (Medium confidence), not running code.
 - **"Ported" assumption.** The design doc says much of v1 is faithfully
@@ -185,9 +185,10 @@ phases and the v1 scope line are unchanged.
 
 ## Change Log
 
-Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.11.1, latest first, one
+Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.12.0, latest first, one
 linkable heading per version (extracted 2026-07-04; historical entries are never rewritten).
 
-- **Latest — v1.11.1 (2026-07-04): PATCH** — Change Log extracted to `ROADMAP-changelog.md`; entry
-  discipline: detail nearest the artifact, summaries + links elsewhere. (Prior: v1.11.0 — **F3
-  `skillet doctor` SHIPPED**, Phase 2 → IN PROGRESS.)
+- **Latest — v1.12.0 (2026-07-04): MINOR** — **F14 `skillet run --axis trigger` SHIPPED**: the
+  deterministic description axis over whole-corpus frontmatter stubs; per-axis `benchmark.json`
+  merge; additive `skillet.run/1` `trigger` block. (Prior: v1.11.1 — changelog extraction;
+  v1.11.0 — F3 `skillet doctor` shipped, Phase 2 → IN PROGRESS.)

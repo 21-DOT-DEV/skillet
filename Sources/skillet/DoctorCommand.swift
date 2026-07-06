@@ -65,6 +65,7 @@ struct DoctorCommand: AsyncParsableCommand {
                 for adapter in adapters {
                     rows += Self.visibilityRows(skill: name, audit: audit, adapter: adapter)
                 }
+                rows.append(Self.triggerEvalsRow(skill: name, directory: skillDir))
                 rows += try Self.lintRows(skill: name, directory: skillDir, config: config?.lint ?? .init())
             }
 
@@ -187,6 +188,29 @@ struct DoctorCommand: AsyncParsableCommand {
         return rows
     }
 
+    /// The trigger-test file's own health row (review round 4: with valid behavioral evals there is
+    /// no L009 finding to hang trigger-file problems on, so a rotten file was invisible here while
+    /// default `run` refused it). Presence-guaranteed like every check; severities mirror exactly
+    /// what the runner does — via the same SHARED checker it uses.
+    static func triggerEvalsRow(skill: String, directory: URL) -> DoctorReport.Row {
+        switch loadTriggerEvals(skillDir: directory) {
+        case .absent:
+            return .pass(check: DoctorReport.Check.skillTriggerEvals, subject: skill,
+                         message: "no trigger-eval.json (trigger axis not configured)")
+        case .usable(let cases):
+            return .pass(check: DoctorReport.Check.skillTriggerEvals, subject: skill,
+                         message: "\(cases.count) case(s)")
+        case .empty:
+            return .warning(check: DoctorReport.Check.skillTriggerEvals, subject: skill,
+                            message: "trigger-eval.json has no cases — the trigger axis will be skipped",
+                            remedy: "add {query, should_trigger} cases to evaluations/trigger-eval.json")
+        case .invalid(let reason):
+            return .failure(check: DoctorReport.Check.skillTriggerEvals, subject: skill,
+                            message: "trigger-eval.json: \(reason) — `skillet run` will refuse it",
+                            remedy: "fix evaluations/trigger-eval.json (a JSON array of {query, should_trigger} objects)")
+        }
+    }
+
     /// The free lint gate as doctor rows: error tier fails (exit 3 here — command-contextual, like
     /// `run`'s exit-2 recolor), warn tier shows without failing.
     static func lintRows(skill: String, directory: URL, config: SkilletConfig.Lint) throws -> [DoctorReport.Row] {
@@ -196,19 +220,42 @@ struct DoctorCommand: AsyncParsableCommand {
         guard !report.diagnostics.isEmpty else {
             return [.pass(check: DoctorReport.Check.skillLint, subject: skill, message: "no findings (shipped catalog)")]
         }
+        // Doctor predicts the runner (P6). Since F14, `run` accepts a trigger-only skill — so the
+        // has-evals error softens to a warning ONLY when BOTH hold (review round 3): the trigger
+        // file is usable per the SHARED checker (the very judgment `run` uses — symlink-guarded, so
+        // the two commands cannot drift), and evals.json is genuinely ABSENT. If evals.json exists
+        // in any state, `run --axis all` will try to load it and refuse a corrupt one (exit 4), so
+        // the failure must stand — the lint message already says "exists but is not valid JSON".
+        let triggerEvals = loadTriggerEvals(skillDir: directory)
+        let triggerUsable = { if case .usable = triggerEvals { return true } else { return false } }()
+        let triggerPresentUnusable = {
+            switch triggerEvals {
+            case .empty, .invalid: return true
+            case .absent, .usable: return false
+            }
+        }()
+        // "Absent" means NO ENTRY AT ALL: a dangling symlink answers false to the follow-the-link
+        // exists check, but the entry is there and `run` refuses it before any axis (round 6 —
+        // symlink check before exists check, always).
+        let evalsURL = directory.appendingPathComponent("evaluations/evals.json")
+        let evalsAbsent = !SkillBundleRules.isSymlink(evalsURL)
+            && !FileManager.default.fileExists(atPath: evalsURL.path)
         return report.diagnostics.map { diagnostic in
-            diagnostic.tier == .error
-                ? .failure(
-                    check: DoctorReport.Check.skillLint,
-                    subject: skill,
-                    message: "\(diagnostic.id): \(diagnostic.message)",
-                    remedy: diagnostic.fixHint
-                )
-                : .warning(
-                    check: DoctorReport.Check.skillLint,
-                    subject: skill,
-                    message: "\(diagnostic.id): \(diagnostic.message)"
-                )
+            if diagnostic.tier == .error && !(triggerUsable && evalsAbsent && diagnostic.id == "SKILL-L009") {
+                var message = "\(diagnostic.id): \(diagnostic.message)"
+                var remedy = diagnostic.fixHint
+                if diagnostic.id == "SKILL-L009" && triggerPresentUnusable {
+                    message += " — trigger-eval.json is present but invalid, empty, or symlinked"
+                    remedy += "; or fix evaluations/trigger-eval.json so the trigger axis can run"
+                }
+                return .failure(check: DoctorReport.Check.skillLint, subject: skill, message: message, remedy: remedy)
+            }
+            return .warning(
+                check: DoctorReport.Check.skillLint,
+                subject: skill,
+                message: "\(diagnostic.id): \(diagnostic.message)",
+                remedy: diagnostic.tier == .error ? diagnostic.fixHint : nil
+            )
         }
     }
 

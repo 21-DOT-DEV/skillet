@@ -21,3 +21,4 @@ roadmap re-phasing.
 | 006 | Frozen boundary-format codecs + golden tests | 1 · F8 | Implemented | [plan.md](006-frozen-boundary-codecs/plan.md) |
 | 007 | The neutral runner — behavioral axis + `pass^k` (`skillet run`) | 1 · F7 | Implemented | [plan.md](007-neutral-runner/plan.md) |
 | 008 | $0 preflight & skill-visibility check (`skillet doctor`) | 2 · F3 | Implemented | [plan.md](008-doctor-preflight/plan.md) |
+| 009 | The trigger axis — description-fires-skill measurement (`skillet run --axis trigger`) | 2 · F14 | Implemented | [plan.md](009-trigger-axis/plan.md) |

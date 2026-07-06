@@ -199,16 +199,31 @@ public struct Renderer: Sendable {
     }
 
     private func humanRun(_ report: RunReport, nextSteps: [String]) -> String {
-        let allPass = !report.evals.isEmpty && report.passed == report.evals.count
-        // pass^k is only a number at observed k ≥ 2; below that, consistency is unmeasurable (§4 vocab).
-        // pass^1 (the mean trial pass rate, §14-11) is well-defined at any k, so it always shows.
-        let headline = report.measurable
-            ? String(format: "pass^k %.2f (k=%d) · pass^1 %.2f", report.passK, report.observedK, report.passOne)
-            : String(format: "consistency unmeasurable (k=%d) · pass^1 %.2f", report.observedK, report.passOne)
-        var out = (allPass ? bold("✓ run: \(report.skill) — \(headline)") : red("✗ run: \(report.skill) — \(headline)")) + "\n"
-        let rows = report.evals.map { [$0.id, $0.status.rawValue, "\($0.passes)/\($0.recorded)"] }
-        out += renderTable(["EVAL", "STATUS", "PASSES"], rows).stdout
-        out += "\n\(report.passed) passed · \(report.flaky) flaky · \(report.failed) failed · observed k=\(report.observedK)\n"
+        var out = ""
+        // Behavioral section — skipped entirely on a trigger-only run (§6.1: axes report separately).
+        if !(report.evals.isEmpty && report.trigger != nil) {
+            let allPass = !report.evals.isEmpty && report.passed == report.evals.count
+            // pass^k is only a number at observed k ≥ 2; below that, consistency is unmeasurable (§4
+            // vocab). pass^1 (the mean trial pass rate, §14-11) is well-defined at any k, so it shows.
+            let headline = report.measurable
+                ? String(format: "pass^k %.2f (k=%d) · pass^1 %.2f", report.passK, report.observedK, report.passOne)
+                : String(format: "consistency unmeasurable (k=%d) · pass^1 %.2f", report.observedK, report.passOne)
+            out += (allPass ? bold("✓ run: \(report.skill) — behavior — \(headline)") : red("✗ run: \(report.skill) — behavior — \(headline)")) + "\n"
+            let rows = report.evals.map { [$0.id, $0.status.rawValue, "\($0.passes)/\($0.recorded)"] }
+            out += renderTable(["EVAL", "STATUS", "PASSES"], rows).stdout
+            out += "\n\(report.passed) passed · \(report.flaky) flaky · \(report.failed) failed · observed k=\(report.observedK)\n"
+        }
+        // Trigger section (F14) — the description axis, reported separately (§6.1).
+        if let trigger = report.trigger {
+            let allPass = !trigger.evals.isEmpty && trigger.passed == trigger.evals.count
+            let headline = trigger.measurable
+                ? String(format: "pass^k %.2f (k=%d) · pass^1 %.2f", trigger.passK, trigger.observedK, trigger.passOne)
+                : String(format: "consistency unmeasurable (k=%d) · pass^1 %.2f", trigger.observedK, trigger.passOne)
+            out += (allPass ? bold("✓ run: \(report.skill) — trigger — \(headline)") : red("✗ run: \(report.skill) — trigger — \(headline)")) + "\n"
+            let rows = trigger.evals.map { [$0.id, $0.status.rawValue, "\($0.passes)/\($0.recorded)"] }
+            out += renderTable(["CASE", "STATUS", "PASSES"], rows).stdout
+            out += "\n\(trigger.passed) passed · \(trigger.flaky) flaky · \(trigger.failed) failed · observed k=\(trigger.observedK)\n"
+        }
         if !nextSteps.isEmpty {
             out += "\(bold("→ next:")) \(nextSteps.joined(separator: " · "))\n"
         }

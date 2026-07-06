@@ -103,10 +103,45 @@ public struct RunReport: SchemaIdentified, Sendable, Equatable {
     public let passed: Int
     public let flaky: Int
     public let failed: Int
+    /// The trigger axis (F14), when it ran — additive within `skillet.run/1`; `nil` (key absent)
+    /// means the axis did not run this invocation. The behavioral fields above keep their exact
+    /// pre-F14 meaning.
+    public let trigger: Axis?
 
     enum CodingKeys: String, CodingKey {
-        case skill, observedK, passK, measurable, evals, passed, flaky, failed
+        case skill, observedK, passK, measurable, evals, passed, flaky, failed, trigger
         case passOne = "pass_1"   // exact frozen spelling; the snake-case strategy leaves it unchanged
+    }
+
+    /// One axis's aggregate — the same math as the behavioral top level (observed k, strict
+    /// `pass^k`, additive `pass_1`, FLAKY trichotomy), reused by the `trigger` block.
+    public struct Axis: Codable, Sendable, Equatable {
+        public let observedK: Int
+        public let passK: Double
+        public let passOne: Double
+        public let measurable: Bool
+        public let evals: [Row]
+        public let passed: Int
+        public let flaky: Int
+        public let failed: Int
+
+        enum CodingKeys: String, CodingKey {
+            case observedK, passK, measurable, evals, passed, flaky, failed
+            case passOne = "pass_1"
+        }
+
+        public init(counts: [(id: String, passes: Int, recorded: Int)]) {
+            self.evals = counts.map { Row(id: $0.id, status: PassK.status(passes: $0.passes, recorded: $0.recorded), passes: $0.passes, recorded: $0.recorded) }
+            self.observedK = counts.map(\.recorded).min() ?? 0
+            self.passed = evals.filter { $0.status == .pass }.count
+            self.flaky = evals.filter { $0.status == .flaky }.count
+            self.failed = evals.filter { $0.status == .fail }.count
+            self.passK = evals.isEmpty ? 0 : Double(passed) / Double(evals.count)
+            self.passOne = evals.isEmpty ? 0 : evals
+                .map { $0.recorded == 0 ? 0 : Double($0.passes) / Double($0.recorded) }
+                .reduce(0, +) / Double(evals.count)
+            self.measurable = observedK >= 2
+        }
     }
 
     public struct Row: Codable, Sendable, Equatable {
@@ -122,14 +157,19 @@ public struct RunReport: SchemaIdentified, Sendable, Equatable {
         }
     }
 
-    /// Build from a live run's full results.
-    public init(skill: String, results: [EvalResult]) {
-        self.init(skill: skill, counts: results.map { (id: $0.evalId, passes: $0.passes, recorded: $0.recorded) })
+    /// Build from a live run's full results (behavioral axis, plus the trigger axis when it ran).
+    public init(skill: String, results: [EvalResult], trigger: [TriggerEvalResult]? = nil) {
+        self.init(
+            skill: skill,
+            counts: results.map { (id: $0.evalId, passes: $0.passes, recorded: $0.recorded) },
+            trigger: trigger.map { Axis(counts: $0.map { (id: $0.evalId, passes: $0.passes, recorded: $0.recorded) }) }
+        )
     }
 
     /// Build from per-eval `(passes, recorded)` — the offline recompute path (e.g. from `benchmark.json`).
-    public init(skill: String, counts: [(id: String, passes: Int, recorded: Int)]) {
+    public init(skill: String, counts: [(id: String, passes: Int, recorded: Int)], trigger: Axis? = nil) {
         self.skill = skill
+        self.trigger = trigger
         self.evals = counts.map { Row(id: $0.id, status: PassK.status(passes: $0.passes, recorded: $0.recorded), passes: $0.passes, recorded: $0.recorded) }
         self.observedK = counts.map(\.recorded).min() ?? 0
         self.passed = evals.filter { $0.status == .pass }.count

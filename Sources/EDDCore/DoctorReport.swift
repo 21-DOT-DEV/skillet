@@ -18,6 +18,9 @@ public struct DoctorReport: SchemaIdentified, Sendable, Equatable {
         public static let harnessAuth = "harness.auth"
         public static let skillVisibility = "skill.visibility"
         public static let skillLint = "skill.lint"
+        /// The trigger-test file's health (added F14 review round 4 — additive): absent/usable pass,
+        /// empty warns (the runner skips it), invalid/symlinked fails (the runner refuses it).
+        public static let skillTriggerEvals = "skill.trigger-evals"
     }
 
     /// One check result. `subject` names what was examined (a skill, a harness, a skill×harness

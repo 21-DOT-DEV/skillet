@@ -1,6 +1,6 @@
 # Phase 2 — Trustworthy Measurement & Static Gates
 
-**Status:** IN PROGRESS (F3 shipped 2026-07-04)
+**Status:** IN PROGRESS (F3 + F14 shipped 2026-07-04)
 **Horizon:** Now
 **Last Updated:** 2026-07-04
 
@@ -27,9 +27,9 @@ believable before the workflow layer starts acting on it.
    - Dependencies: HarnessAdapter seam (F5), claude-code adapter (F6); also `swift-yaml` (config parsing) and error-tier `lint` (F4, surfaced here) — all Phase 1.
    - Confidence: Medium — design §6.1 `doctor`, §9.2.
    - Notes: Moved from Phase 1 — off the walking-skeleton critical path (`run`/F7 doesn't depend on it) and its companions live here. Live auth + the discovery-only visibility half are validated with the runner (F7); the `--paid` canary is F21; the frontmatter spec-conformance rules it surfaces come from the full lint catalog (F20).
-   - Shipped (2026-07-04, [Specs/008](../Specs/008-doctor-preflight/plan.md)): both success metrics, under the Option-2 contract — frozen `skillet.doctor/1` check rows (`--json`, golden-tested), warnings-never-fail exits (`0` healthy / `3` any failure + remedy), config file-origin, harness binary/version/denylist + winning resolution link, positive-load visibility via the staging-parity `SkillBundleAudit` (dropped symlinks fail loudly, by path), all error-tier lint findings failing at exit 3; auth = warning row (`run`'s strict preflight owns the refusal). 262 tests green (two post-review hardening rounds — see the [Specs/008](../Specs/008-doctor-preflight/plan.md) status row).
+   - Shipped (2026-07-04, [Specs/008](../Specs/008-doctor-preflight/plan.md)): both success metrics, under the Option-2 contract — frozen `skillet.doctor/1` check rows (`--json`, golden-tested), warnings-never-fail exits (`0` healthy / `3` any failure + remedy), config file-origin, harness binary/version/denylist + winning resolution link, positive-load visibility via the staging-parity `SkillBundleAudit` (dropped symlinks fail loudly, by path), all error-tier lint findings failing at exit 3; auth = warning row (`run`'s strict preflight owns the refusal). Suite green — two post-review hardening rounds; see the [Specs/008](../Specs/008-doctor-preflight/plan.md) status row.
 
-2. **[F14]** Trigger axis (CLI: `skillet run --axis trigger`) — PLANNED · Net-new
+2. **[F14]** Trigger axis (CLI: `skillet run --axis trigger`) — IMPLEMENTED (2026-07-04) · Net-new
    - Purpose & user value: Test whether a skill's *description* actually fires it
      — the question behavioral evals can't answer — retiring the separate Python
      trigger harness into one binary, two axes.
@@ -39,6 +39,12 @@ believable before the workflow layer starts acting on it.
      - Reported separately from the behavioral axis in the run table.
    - Dependencies: Trace seam, runner (Phase 1).
    - Confidence: Medium — design §6.1 `run`, §9.3.
+   - Shipped (2026-07-04, [Specs/009](../Specs/009-trigger-axis/plan.md)): both success metrics, via
+     `--axis behavior|trigger|all` (default: each axis where its file exists) — deterministic
+     fired/not-fired from `skillInvocations` over whole-corpus frontmatter stubs (the §9.2 `visible:`
+     tier, now live), near-misses verified with routing forensics, separate axis reporting, and
+     per-axis `benchmark.json` merge (`configuration:"trigger"` + axis-marked consistency; offline
+     recompute covers both axes). Suite green — see the Specs/009 status row.
 
 3. **[F15]** A/B baseline arm (CLI: `skillet run --ab`) — PLANNED · Ported
    - Purpose & user value: Run with-skill and without-skill arms and report Δ —
@@ -185,6 +191,11 @@ believable before the workflow layer starts acting on it.
 
 ## Phase Change Log
 
+- 2026-07-04: **F14 IMPLEMENTED** — the trigger axis ([Specs/009](../Specs/009-trigger-axis/plan.md)):
+  `run --axis behavior|trigger|all`, deterministic `skillInvocations` grading over whole-corpus
+  frontmatter stubs (§9.2 `visible:` tier live), per-axis `benchmark.json` merge, additive
+  `skillet.run/1` `trigger` block. Doctor's discovery-only half: unblocked, still deferred (D-4).
+  Second Phase-2 feature; no scope change to the rest.
 - 2026-07-04: **F3 IMPLEMENTED — phase → IN PROGRESS.** `skillet doctor` ships the Option-2
   contract ([Specs/008](../Specs/008-doctor-preflight/plan.md)): frozen `skillet.doctor/1`
   check-registry rows; exit `0`-with-warnings / `3`-on-failure (+ shared `2`/`4` classes); config

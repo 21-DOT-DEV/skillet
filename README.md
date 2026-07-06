@@ -11,7 +11,8 @@ skillet drafts and proves — **a human lands every write**.
 > F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6 (claude-code adapter),
 > F8 (frozen boundary codecs — the skill-creator formats round-trip faithfully), and
 > F7 (`skillet run` — the neutral runner with `pass^k`) have landed, and Phase 2 is underway:
-> F3 (`skillet doctor` — the free $0 preflight) shipped. The rest
+> F3 (`skillet doctor` — the free $0 preflight) and F14 (`skillet run --axis trigger` — the
+> description axis: does the skill *fire*?) shipped. The rest
 > of the loop lights up across later phases. See [ROADMAP.md](ROADMAP.md).
 
 ## How it works
@@ -68,6 +69,7 @@ skillet lint                # free static analysis of SKILL.md (exit 1 on error-
 skillet lint --json         # machine-readable findings (schema: skillet.lint/1)
 skillet run <skill>         # run the skill's evals k×, judge, report pass^k (paid; spend-gated)
 skillet run <skill> -n      # dry-run: preview the trial-count estimate, spend nothing
+skillet run <skill> --axis trigger  # description axis: did it fire? (deterministic, judge-free)
 skillet run --json          # machine-readable result (schema: skillet.run/1)
 skillet run --json -n        # spend-free plan preview (schema: skillet.run-plan/1)
 skillet harness info        # harness adapters, capabilities, probe status

@@ -4,6 +4,19 @@ The roadmap's versioned change log, extracted from `ROADMAP.md` on 2026-07-04 (v
 stays lean. Latest first; every version is a linkable heading; historical entries are never rewritten.
 Companion: [`skillet-design-changelog.md`](skillet-design-changelog.md).
 
+## v1.12.0 — 2026-07-04
+
+MINOR — **F14 SHIPPED: the trigger axis** ([Specs/009](Specs/009-trigger-axis/plan.md); design → v0.30).
+`skillet run --axis behavior|trigger|all` (default: each axis where its file exists; the spend gate covers
+the combined estimate — trigger trials are judge-free single calls). Fired/not-fired judged
+**deterministically** from `skillInvocations` over **whole-corpus frontmatter stubs** (§9.2's `visible:`
+tier, now live); `should_trigger:false` near-misses verify correct non-firing with routing forensics.
+`benchmark.json` carries both axes — `configuration:"trigger"` rows + axis-marked `consistency` entries,
+**latest-run-per-axis merge** so no axis can blank the other; both recompute offline (P2/D3);
+`skillet.run/1` gains the additive `trigger` block. Both roadmap F14 metrics verified by replay-seam
+integration tests. Doctor's discovery-only visibility check: **unblocked by F14, deferred** (D-4 —
+tracking texts updated). +17 tests (279 green). No other scope or priority change.
+
 ## v1.11.1 — 2026-07-04
 
 PATCH — **Change Log extracted to this file** (it had grown to 56% of ROADMAP.md). One linkable heading per

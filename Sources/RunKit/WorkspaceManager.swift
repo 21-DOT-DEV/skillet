@@ -174,6 +174,67 @@ public struct WorkspaceManager: Sendable {
         }.sorted()
     }
 
+    // MARK: - Trigger-axis staging (F14)
+
+    /// A prepared trigger sandbox: the workspace plus which corpus skills staged as stubs and which
+    /// were skipped (missing/symlinked/fence-less `SKILL.md`) — skipped siblings are forensics, not
+    /// failures; a skipped *target* is the caller's error to surface.
+    public struct TriggerStaging: Sendable {
+        public let workspace: Workspace
+        public let staged: [String]
+        public let skipped: [String]
+    }
+
+    /// The frontmatter-only stub for a visible-but-not-loaded skill (design §9.2 "bodies withheld";
+    /// F14 D-2): the `---` fence **verbatim** (real name + description — the selection signal) with
+    /// the body replaced by a marker. Textual extraction, deliberately not a YAML parse: RunKit must
+    /// stay free of the `.Cxx` `ConfigYAML` target (interop containment, design §11).
+    public static func frontmatterStub(markdown: String) -> String? {
+        // Normalize CRLF first: in Swift, "\r\n" is ONE grapheme cluster, so splitting on "\n" never
+        // fires on CRLF text at all — the YAML-level frontmatter parser tolerates CRLF, so this must
+        // too, or a lint-clean skill silently fails to stage (review round 1, finding 3). The staged
+        // stub is skillet-authored, so emitting it LF-normalized is fine.
+        let normalized = markdown.replacingOccurrences(of: "\r\n", with: "\n")
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false)
+        guard lines.first?.trimmingCharacters(in: .whitespacesAndNewlines) == "---" else { return nil }
+        guard let close = lines.dropFirst().firstIndex(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == "---" }) else { return nil }
+        let fence = lines[...close].joined(separator: "\n")
+        return fence + "\n\n(stub — body withheld: skillet trigger-axis trial)\n"
+    }
+
+    /// Create a trigger-trial sandbox: every corpus skill staged as a **frontmatter stub** under the
+    /// discovery path (`.only(load: [], visible: corpus)` — §9.3's whole-corpus selection menu, D-3).
+    /// No eval fixtures: a trigger case is a bare query. Unstageable siblings are skipped and named.
+    public func prepareTrigger(corpus: [SkillRef], base: URL, label: String) throws -> TriggerStaging {
+        let fm = FileManager.default
+        let root = base.appendingPathComponent(label, isDirectory: true)
+        if fm.fileExists(atPath: root.path) { try fm.removeItem(at: root) }   // no leaked state
+        try fm.createDirectory(at: root, withIntermediateDirectories: true)
+
+        var staged: [String] = []
+        var skipped: [String] = []
+        for skill in corpus {
+            let skillDir = URL(fileURLWithPath: skill.path, isDirectory: true)
+            let source = skillDir.appendingPathComponent("SKILL.md")
+            // A symlinked skill FOLDER is refused like a symlinked file (review round 4, finding 3):
+            // discovery doesn't filter symlinked directories, and following one would stage
+            // out-of-repo content as a visible stub — the confinement rule is "never follow
+            // symlinks when staging", at every level.
+            guard !SkillBundleRules.isSymlink(skillDir),
+                  !SkillBundleRules.isSymlink(source),
+                  let markdown = try? String(contentsOf: source, encoding: .utf8),
+                  let stub = Self.frontmatterStub(markdown: markdown) else {
+                skipped.append(skill.name)
+                continue
+            }
+            let dest = root.appendingPathComponent(".claude/skills/\(skill.name)", isDirectory: true)
+            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+            try stub.write(to: dest.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+            staged.append(skill.name)
+        }
+        return TriggerStaging(workspace: Workspace(root: root), staged: staged.sorted(), skipped: skipped.sorted())
+    }
+
     /// Remove the sandbox (the `.skillet/runs` cache is deletable; nothing here is authoritative, P2).
     public func destroy(_ workspace: Workspace) throws {
         let fm = FileManager.default

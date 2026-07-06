@@ -97,13 +97,16 @@ skillet run greeter --replay
 ```
 
 ```
-✓ run: greeter — pass^k 1.00 (k=3) · pass^1 1.00
+✓ run: greeter — behavior — pass^k 1.00 (k=3) · pass^1 1.00
 EVAL  STATUS  PASSES
 0     pass    3/3
 1     pass    3/3
 2     pass    3/3
 3 passed · 0 flaky · 0 failed · observed k=3
 ```
+
+Since the trigger axis shipped, the headline carries the axis label (`— behavior —` /
+`— trigger —`); with only an `evals.json` present, just the behavioral section runs.
 
 This writes `skills/greeter/evaluations/benchmark.json` and `grading.json`.
 

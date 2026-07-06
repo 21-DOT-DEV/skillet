@@ -4,7 +4,7 @@
 |---|---|
 | **Feature** | 002 — Adopt skillet in a repo (`skillet init`) |
 | **Phase** | 1 — Walking Skeleton ([Roadmap/phase-1-walking-skeleton.md](../../Roadmap/phase-1-walking-skeleton.md), F2) |
-| **Status** | IMPLEMENTED (2026-06-20) — 45 tests green; docs verified |
+| **Status** | IMPLEMENTED (2026-06-20) — 45 tests green; docs verified. **Addendum (2026-07-05, F14 review round 5):** `init` now writes the two per-skill skeletons design §6.1 always promised — `evals.json` (`{"skill_name":"<name>","evals":[]}`) and `trigger-eval.json` (`[]`) — idempotently (existing files never touched, proven by test). Skeletons are deliberately empty: an empty axis file *skips* its axis with a note (`run` round-5 symmetry fix) and shows as a "no cases yet" doctor warning, so scaffolding can never block or spend. **Round 6:** the skeleton's `skill_name` is JSON-encoded, not interpolated — a folder legally named `we"ird\name` previously scaffolded *corrupt* JSON (an injection into a frozen artifact); planner test proves the weird name round-trips intact. |
 | **Post-audit (2026-07-01)** | Verified by the [Phase-1 audit](../../Roadmap/phase-1-review.md). As-built deltas: the next-step line prints the honest **registered** subset (`lint · run` today; `doctor`/`next` join when they exist); dump-help is decoded with a local minimal type (no `ArgumentParserToolInfo` dependency); the 2026-06-23 `InitReport` fix lists the auto-created `evaluations/` parent; the template later gained the F7 knobs (`runs.max_output_bytes`, `judge.*` — F7 rounds 8–9). |
 | **Last updated** | 2026-06-20 |
 | **Builds on** | F1 (project discovery, output contract, `RenderKit`) — [spec 001](../001-project-discovery-output-contract/plan.md) |

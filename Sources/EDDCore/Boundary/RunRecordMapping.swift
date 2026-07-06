@@ -36,75 +36,204 @@ public extension BenchmarkFile {
     /// artifacts established) and re-derives offline from `consistency.per_eval` — never from the gitignored
     /// cache (P2/D3), and never by overloading the viewer's per-run `result` semantics.
     init(report: RunReport, evals: [EvalResult], harness: String, k: Int, provenance: RunProvenance) {
-        // One viewer-faithful row per trial; `result` counts are EXPECTATIONS graded in that trial.
-        var runRows: [JSONValue] = []
-        var allTrialRates: [Double] = []
-        for eval in evals {
-            for (index, trial) in eval.trials.enumerated() {
-                let total = trial.verdicts.count
-                let passed = trial.verdicts.filter(\.passed).count
-                let rate = total == 0 ? 0 : Double(passed) / Double(total)
-                allTrialRates.append(rate)
-                runRows.append(.object([
-                    "configuration": .string("default"),
-                    "eval_id": .string(eval.evalId),
-                    "run_number": .number(Double(index + 1)),
-                    "expectations": .array(trial.verdicts.map { v in
-                        .object(["text": .string(v.criterion), "passed": .bool(v.passed), "evidence": .string(v.rationale)])
-                    }),
-                    "result": .object([
-                        "passed": .number(Double(passed)),
-                        "failed": .number(Double(total - passed)),
-                        "total": .number(Double(total)),
-                        "pass_rate": .number(rate)
-                    ])
-                ]))
-            }
-        }
+        self.init(skill: report.skill, behavioral: (report: report, evals: evals), trigger: nil,
+                  harness: harness, k: k, provenance: provenance, preserving: nil)
+    }
 
-        // Skillet-owned pass^k, re-derivable offline. `mean_pass_rate` averages the expectation pass-rate
-        // across the eval's trials; `pass_power_k` is the eval's binary pass^k (all recorded trials passed).
-        let perEval: [JSONValue] = zip(report.evals, evals).map { row, eval in
-            let rates = eval.trials.map { trial -> Double in
-                let total = trial.verdicts.count
-                return total == 0 ? 0 : Double(trial.verdicts.filter(\.passed).count) / Double(total)
-            }
-            let meanRate = rates.isEmpty ? 0 : rates.reduce(0, +) / Double(rates.count)
-            return .object([
-                "eval_id": .string(row.id),
-                "runs": .number(Double(row.recorded)),
-                "perfect_passes": .number(Double(row.passes)),
-                "pass_power_k": .number(row.status == .pass ? 1 : 0),
-                "flaky": .bool(row.status == .flaky),
-                "mean_pass_rate": .number(meanRate)
-            ])
-        }
+    /// The F14 master producer: either axis may run alone; the axis that did **not** run this
+    /// invocation is carried over verbatim from `preserving` (the previously committed file), so a
+    /// `--axis trigger` run can never destroy the behavioral record or vice versa — `benchmark.json`
+    /// stays latest-run-per-axis. Trigger trials are viewer-faithful rows under
+    /// `configuration: "trigger"` (the format's native discriminator; the viewer groups by it), and
+    /// trigger `consistency.per_eval` entries carry an additive `"axis": "trigger"` marker so the
+    /// behavioral recompute (``evalCounts``) never mixes axes.
+    init(
+        skill: String,
+        behavioral: (report: RunReport, evals: [EvalResult])?,
+        trigger: [TriggerEvalResult]?,
+        harness: String,
+        k: Int,
+        provenance: RunProvenance,
+        preserving prior: BenchmarkFile?
+    ) {
+        let priorConsistency = prior?.fields["consistency"]?.objectValue
+        let priorPerEval = priorConsistency?["per_eval"]?.arrayValue ?? []
+        let priorSummary = prior?.fields["run_summary"]?.objectValue
 
-        self.init(fields: [
-            "metadata": .object([
-                "skill_name": .string(report.skill),
-                "harness": .string(harness),
+        // --- Behavioral axis: fresh rows when it ran, else carried from the prior record. ---
+        var behavioralRows: [JSONValue] = []
+        var behavioralPerEval: [JSONValue] = []
+        var behavioralConsistency: [String: JSONValue] = [:]
+        var behavioralSummary: JSONValue?
+        if let behavioral {
+            var allTrialRates: [Double] = []
+            for eval in behavioral.evals {
+                for (index, trial) in eval.trials.enumerated() {
+                    let total = trial.verdicts.count
+                    let passed = trial.verdicts.filter(\.passed).count
+                    let rate = total == 0 ? 0 : Double(passed) / Double(total)
+                    allTrialRates.append(rate)
+                    behavioralRows.append(.object([
+                        "configuration": .string("default"),
+                        "eval_id": .string(eval.evalId),
+                        "run_number": .number(Double(index + 1)),
+                        "expectations": .array(trial.verdicts.map { v in
+                            .object(["text": .string(v.criterion), "passed": .bool(v.passed), "evidence": .string(v.rationale)])
+                        }),
+                        "result": .object([
+                            "passed": .number(Double(passed)),
+                            "failed": .number(Double(total - passed)),
+                            "total": .number(Double(total)),
+                            "pass_rate": .number(rate)
+                        ])
+                    ]))
+                }
+            }
+            // `mean_pass_rate` averages the expectation pass-rate across the eval's trials;
+            // `pass_power_k` is the eval's binary pass^k (all recorded trials passed).
+            behavioralPerEval = zip(behavioral.report.evals, behavioral.evals).map { row, eval in
+                let rates = eval.trials.map { trial -> Double in
+                    let total = trial.verdicts.count
+                    return total == 0 ? 0 : Double(trial.verdicts.filter(\.passed).count) / Double(total)
+                }
+                let meanRate = rates.isEmpty ? 0 : rates.reduce(0, +) / Double(rates.count)
+                return .object([
+                    "eval_id": .string(row.id),
+                    "runs": .number(Double(row.recorded)),
+                    "perfect_passes": .number(Double(row.passes)),
+                    "pass_power_k": .number(row.status == .pass ? 1 : 0),
+                    "flaky": .bool(row.status == .flaky),
+                    "mean_pass_rate": .number(meanRate)
+                ])
+            }
+            behavioralConsistency = [
                 "k": .number(Double(k)),
-                "runs_per_configuration": .number(Double(k)),
-                "evals_run": .array(report.evals.map { .string($0.id) }),
-                // Additive provenance (M3; §7.2): the exact judge + executor version behind these numbers.
-                "executor_binary_version": .string(provenance.executorBinaryVersion),
-                "judge": .object([
+                "meaningful": .bool(behavioral.report.measurable),
+                "suite_pass_power_k": .number(behavioral.report.passK),
+                "suite_pass_1": .number(behavioral.report.passOne),   // additive (§14-11)
+                "flaky_eval_ids": .array(behavioral.report.evals.filter { $0.status == .flaky }.map { .string($0.id) })
+            ]
+            behavioralSummary = .object(["pass_rate": Self.stats(allTrialRates)])
+        } else {
+            behavioralRows = prior?.runs.filter { $0.objectValue?["configuration"]?.stringValue != "trigger" } ?? []
+            behavioralPerEval = priorPerEval.filter { $0.objectValue?["axis"]?.stringValue != "trigger" }
+            for key in ["k", "meaningful", "suite_pass_power_k", "suite_pass_1", "flaky_eval_ids"] {
+                if let value = priorConsistency?[key] { behavioralConsistency[key] = value }
+            }
+            behavioralSummary = priorSummary?["default"]
+        }
+
+        // --- Trigger axis (F14): deterministic single-expectation rows, `configuration: "trigger"`. ---
+        var triggerRows: [JSONValue] = []
+        var triggerPerEval: [JSONValue] = []
+        var triggerConsistency: [String: JSONValue] = [:]
+        var triggerSummary: JSONValue?
+        if let trigger {
+            var triggerTrialRates: [Double] = []
+            for result in trigger {
+                let criterion = result.shouldTrigger ? "skill triggers" : "skill does not trigger"
+                for (index, trial) in result.trials.enumerated() {
+                    let passed = trial.exit == .passed && trial.firedTarget == result.shouldTrigger
+                    triggerTrialRates.append(passed ? 1 : 0)
+                    let evidence: String
+                    if trial.exit != .passed {
+                        evidence = "trial \(trial.exit.rawValue) (not measured)"
+                    } else if trial.firedTarget {
+                        evidence = "fired the target skill"
+                    } else if trial.firedOther.isEmpty {
+                        evidence = "did not fire"
+                    } else {
+                        evidence = "routed to: \(trial.firedOther.joined(separator: ", "))"
+                    }
+                    triggerRows.append(.object([
+                        "configuration": .string("trigger"),
+                        "eval_id": .string(result.evalId),
+                        "run_number": .number(Double(index + 1)),
+                        "expectations": .array([
+                            .object(["text": .string(criterion), "passed": .bool(passed), "evidence": .string(evidence)])
+                        ]),
+                        "result": .object([
+                            "passed": .number(passed ? 1 : 0),
+                            "failed": .number(passed ? 0 : 1),
+                            "total": .number(1),
+                            "pass_rate": .number(passed ? 1 : 0)
+                        ])
+                    ]))
+                }
+            }
+            let axis = RunReport.Axis(counts: trigger.map { (id: $0.evalId, passes: $0.passes, recorded: $0.recorded) })
+            triggerPerEval = zip(axis.evals, trigger).map { row, result in
+                .object([
+                    "axis": .string("trigger"),
+                    "eval_id": .string(row.id),
+                    "runs": .number(Double(row.recorded)),
+                    "perfect_passes": .number(Double(row.passes)),
+                    "pass_power_k": .number(row.status == .pass ? 1 : 0),
+                    "flaky": .bool(row.status == .flaky),
+                    "mean_pass_rate": .number(row.recorded == 0 ? 0 : Double(row.passes) / Double(row.recorded)),
+                    "query": .string(result.query)
+                ])
+            }
+            triggerConsistency = [
+                "trigger_k": .number(Double(k)),
+                "trigger_meaningful": .bool(axis.measurable),
+                "trigger_suite_pass_power_k": .number(axis.passK),
+                "trigger_suite_pass_1": .number(axis.passOne),
+                "trigger_flaky_eval_ids": .array(axis.evals.filter { $0.status == .flaky }.map { .string($0.id) })
+            ]
+            triggerSummary = .object(["pass_rate": Self.stats(triggerTrialRates)])
+        } else {
+            triggerRows = prior?.runs.filter { $0.objectValue?["configuration"]?.stringValue == "trigger" } ?? []
+            triggerPerEval = priorPerEval.filter { $0.objectValue?["axis"]?.stringValue == "trigger" }
+            for key in ["trigger_k", "trigger_meaningful", "trigger_suite_pass_power_k", "trigger_suite_pass_1", "trigger_flaky_eval_ids"] {
+                if let value = priorConsistency?[key] { triggerConsistency[key] = value }
+            }
+            triggerSummary = priorSummary?["trigger"]
+        }
+
+        var metadata: [String: JSONValue] = [
+            // Always the caller's explicit name — a trigger-only first run must never commit
+            // "unknown" and poison the offline recompute (review round 1, finding 2).
+            "skill_name": .string(skill),
+            // `harness`/`k`/`runs_per_configuration` describe the behavioral arm (the pre-trigger
+            // viewer reads them), so they follow the behavioral carry rule like `evals_run` and the
+            // judge block: fresh when that axis ran, carried when it didn't (round 2, finding 3).
+            // The trigger axis's own k lives in `consistency.trigger_k`.
+            "harness": behavioral != nil ? .string(harness) : (prior?.metadata?["harness"] ?? .string(harness)),
+            "k": behavioral != nil ? .number(Double(k)) : (prior?.metadata?["k"] ?? .number(Double(k))),
+            "runs_per_configuration": behavioral != nil ? .number(Double(k)) : (prior?.metadata?["runs_per_configuration"] ?? .number(Double(k))),
+            // Carried from the prior record on a trigger-only run, like the behavioral rows themselves.
+            "evals_run": behavioral.map { .array($0.report.evals.map { .string($0.id) }) }
+                ?? prior?.metadata?["evals_run"] ?? .array([]),
+            // Additive provenance (M3; §7.2): the executor stamps the latest write; the judge block
+            // describes the *behavioral* verdicts, so a judge-free trigger-only run carries the prior
+            // record's judge rather than overwriting it with the "none" sentinel.
+            "executor_binary_version": .string(provenance.executorBinaryVersion),
+            "judge": behavioral != nil || prior?.metadata?["judge"] == nil
+                ? .object([
                     "provider": .string(provenance.judgeProvider),
                     "model": .string(provenance.judgeModel),
                     "prompt_version": .string(provenance.judgePromptVersion)
                 ])
-            ]),
-            "runs": .array(runRows),
-            "consistency": .object([
-                "k": .number(Double(k)),
-                "meaningful": .bool(report.measurable),
-                "suite_pass_power_k": .number(report.passK),
-                "suite_pass_1": .number(report.passOne),   // additive (§14-11): τ-bench's headline metric
-                "flaky_eval_ids": .array(report.evals.filter { $0.status == .flaky }.map { .string($0.id) }),
-                "per_eval": .array(perEval)
-            ]),
-            "run_summary": .object(["default": .object(["pass_rate": Self.stats(allTrialRates)])])
+                : prior!.metadata!["judge"]!
+        ]
+        if let trigger {
+            metadata["trigger_cases_run"] = .array(trigger.map { .string($0.evalId) })   // additive (F14)
+        } else if let priorCases = prior?.metadata?["trigger_cases_run"] {
+            metadata["trigger_cases_run"] = priorCases
+        }
+
+        var consistency = behavioralConsistency.merging(triggerConsistency) { current, _ in current }
+        consistency["per_eval"] = .array(behavioralPerEval + triggerPerEval)
+        var summary: [String: JSONValue] = [:]
+        if let behavioralSummary { summary["default"] = behavioralSummary }
+        if let triggerSummary { summary["trigger"] = triggerSummary }
+
+        self.init(fields: [
+            "metadata": .object(metadata),
+            "runs": .array(behavioralRows + triggerRows),
+            "consistency": .object(consistency),
+            "run_summary": .object(summary)
         ])
     }
 
@@ -121,9 +250,18 @@ public extension BenchmarkFile {
     /// `runs`), not the viewer's per-run `result` (whose counts are *expectations*, a different unit).
     /// `eval_id` is coerced string-or-number so real numeric-id records aren't silently dropped.
     var evalCounts: [(id: String, passes: Int, recorded: Int)] {
+        counts { $0["axis"]?.stringValue != "trigger" }   // behavioral = no marker (legacy) or non-trigger
+    }
+
+    /// The trigger axis's per-case `(passes, recorded)` — entries marked `"axis": "trigger"` (F14).
+    var triggerCounts: [(id: String, passes: Int, recorded: Int)] {
+        counts { $0["axis"]?.stringValue == "trigger" }
+    }
+
+    private func counts(where include: ([String: JSONValue]) -> Bool) -> [(id: String, passes: Int, recorded: Int)] {
         guard let perEval = fields["consistency"]?.objectValue?["per_eval"]?.arrayValue else { return [] }
         return perEval.compactMap { entry in
-            guard let o = entry.objectValue,
+            guard let o = entry.objectValue, include(o),
                   let id = o["eval_id"].flatMap(Self.coercedId),
                   let passes = o["perfect_passes"]?.numberValue.flatMap({ Int(exactly: $0) }),
                   let recorded = o["runs"]?.numberValue.flatMap({ Int(exactly: $0) })
@@ -142,9 +280,15 @@ public extension BenchmarkFile {
 
 public extension RunReport {
     /// Re-derive the report offline from a committed `benchmark.json` — the basis for a `pass^k` that
-    /// survives `rm -rf .skillet` (P2). The skill name comes from the record's metadata.
+    /// survives `rm -rf .skillet` (P2). The skill name comes from the record's metadata; the trigger
+    /// axis re-derives from its own marked `per_eval` entries when present (F14).
     init(benchmark: BenchmarkFile) {
-        self.init(skill: benchmark.skillName ?? "unknown", counts: benchmark.evalCounts)
+        let triggerCounts = benchmark.triggerCounts
+        self.init(
+            skill: benchmark.skillName ?? "unknown",
+            counts: benchmark.evalCounts,
+            trigger: triggerCounts.isEmpty ? nil : Axis(counts: triggerCounts)
+        )
     }
 }
 

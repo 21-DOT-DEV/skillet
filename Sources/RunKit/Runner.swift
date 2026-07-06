@@ -97,6 +97,121 @@ public struct Runner {
         }
     }
 
+    // MARK: - Trigger axis (F14)
+
+    /// Run every trigger case `k` times: bare query, whole-corpus frontmatter stubs (§9.3,
+    /// `.only(load: [], visible: corpus)`), fired/not-fired judged **deterministically** from
+    /// `Trace.skillInvocations` — no judge, one paid call per trial. Attribution (D-3): only the
+    /// *target* firing counts for `should_trigger: true`; a sibling fire on a near-miss is correct
+    /// routing (recorded in `firedOther` forensics either way).
+    public func runTrigger(
+        target: SkillRef, corpus: [SkillRef],
+        cases: [(id: String, query: String, shouldTrigger: Bool)],
+        k: Int, base: URL, keepWorkspace: Bool = false
+    ) async -> [TriggerEvalResult] {
+        var results: [TriggerEvalResult] = []
+        for (index, triggerCase) in cases.enumerated() {
+            var trials: [TriggerTrialResult] = []
+            for trial in 0..<max(k, 0) {
+                // Index-based cache path (hostile-id defense, same rule as the behavioral loop).
+                let trialDir = base.appendingPathComponent("trigger-\(index)/trial-\(trial)", isDirectory: true)
+                trials.append(await runTriggerTrial(
+                    target: target, corpus: corpus, triggerCase: triggerCase,
+                    trialDir: trialDir, keepWorkspace: keepWorkspace
+                ))
+            }
+            results.append(TriggerEvalResult(
+                evalId: triggerCase.id, query: triggerCase.query,
+                shouldTrigger: triggerCase.shouldTrigger, trials: trials
+            ))
+        }
+        return results
+    }
+
+    private func runTriggerTrial(
+        target: SkillRef, corpus: [SkillRef],
+        triggerCase: (id: String, query: String, shouldTrigger: Bool),
+        trialDir: URL, keepWorkspace: Bool
+    ) async -> TriggerTrialResult {
+        let staging: WorkspaceManager.TriggerStaging
+        do {
+            staging = try workspaces.prepareTrigger(corpus: corpus, base: trialDir, label: "workspace")
+        } catch {
+            writeTriggerForensics(trialDir: trialDir, triggerCase: triggerCase, raw: nil, trace: nil,
+                                  result: TriggerTrialResult(exit: .failed, firedTarget: false), skipped: [])
+            return TriggerTrialResult(exit: .failed, firedTarget: false)
+        }
+        defer { if !keepWorkspace { try? workspaces.destroy(staging.workspace) } }
+
+        // If the TARGET didn't stage, the selection menu can't contain it — running anyway would mint
+        // a false "not fired" (and a false PASS for every should_trigger:false near-miss). Record an
+        // infrastructure failure instead: unmeasured never counts as a pass (review round 1, finding 3).
+        guard staging.staged.contains(target.name) else {
+            let result = TriggerTrialResult(exit: .failed, firedTarget: false)
+            writeTriggerForensics(trialDir: trialDir, triggerCase: triggerCase, raw: nil, trace: nil,
+                                  result: result, skipped: staging.skipped)
+            return result
+        }
+
+        var raw: RawTrace?
+        do {
+            let visible = corpus.filter { staging.staged.contains($0.name) }
+            let produced = try await adapter.run(
+                TaskSpec(query: triggerCase.query),
+                in: staging.workspace,
+                skills: .only(load: [], visible: visible)
+            )
+            raw = produced
+            let trace = try adapter.parseTrace(produced)
+            let fired = Set(trace.skillInvocations.map(\.skill))
+            let result = TriggerTrialResult(
+                exit: .passed,
+                firedTarget: fired.contains(target.name),
+                firedOther: fired.subtracting([target.name]).sorted()
+            )
+            writeTriggerForensics(trialDir: trialDir, triggerCase: triggerCase, raw: produced.raw,
+                                  trace: trace, result: result, skipped: staging.skipped)
+            return result
+        } catch let error as ProcessError {
+            let exit: TrialExit = { if case .timedOut = error { return .timeout } else { return .failed } }()
+            let result = TriggerTrialResult(exit: exit, firedTarget: false)
+            writeTriggerForensics(trialDir: trialDir, triggerCase: triggerCase, raw: raw?.raw,
+                                  trace: nil, result: result, skipped: staging.skipped)
+            return result
+        } catch {
+            let result = TriggerTrialResult(exit: .failed, firedTarget: false)
+            writeTriggerForensics(trialDir: trialDir, triggerCase: triggerCase, raw: raw?.raw,
+                                  trace: nil, result: result, skipped: staging.skipped)
+            return result
+        }
+    }
+
+    private func writeTriggerForensics(
+        trialDir: URL, triggerCase: (id: String, query: String, shouldTrigger: Bool),
+        raw: String?, trace: Trace?, result: TriggerTrialResult, skipped: [String]
+    ) {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: trialDir, withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+        if let raw { try? Data(raw.utf8).write(to: trialDir.appendingPathComponent("raw.jsonl")) }
+        if let trace, let json = try? SkilletJSON.encode(trace) {
+            try? Data(json.utf8).write(to: trialDir.appendingPathComponent("trace.json"))
+        }
+        if let data = try? encoder.encode(TriggerMeta(
+            evalId: triggerCase.id, query: triggerCase.query, shouldTrigger: triggerCase.shouldTrigger,
+            exit: result.exit, firedTarget: result.firedTarget, firedOther: result.firedOther,
+            skippedStubs: skipped
+        )) {
+            try? data.write(to: trialDir.appendingPathComponent("trigger.json"))
+        }
+    }
+
+    private struct TriggerMeta: Codable {
+        let evalId: String; let query: String; let shouldTrigger: Bool
+        let exit: TrialExit; let firedTarget: Bool; let firedOther: [String]; let skippedStubs: [String]
+    }
+
     /// The per-trial forensics record under `.skillet/runs` (deletable cache; best-effort I/O).
     private func writeForensics(trialDir: URL, evalId: String, raw: String?, trace: Trace?, verdicts: [Verdict], exit: TrialExit) {
         let fm = FileManager.default

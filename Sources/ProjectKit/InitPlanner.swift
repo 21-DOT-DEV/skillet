@@ -60,6 +60,13 @@ public struct InitPlanner: Sendable {
             for skill in skills {
                 let evaluations = skill.appendingPathComponent("evaluations")
                 directory(evaluations)
+                // The design-promised skeletons (§6.1 `init` — "evals.json and trigger-eval.json
+                // skeletons if absent"; closed in F14 review round 5: `run`'s remedies point users
+                // here). Deliberately EMPTY: an empty axis file skips its axis with a note and shows
+                // as a "no cases yet" doctor warning — an onboarding nudge that can never spend.
+                file(evaluations.appendingPathComponent("evals.json"),
+                     "{\"skill_name\":\(Self.jsonEscaped(skill.lastPathComponent)),\"evals\":[]}\n")
+                file(evaluations.appendingPathComponent("trigger-eval.json"), "[]\n")
                 for sub in ["friction", "findings", "sessions"] {
                     let dir = evaluations.appendingPathComponent(sub)
                     directory(dir)
@@ -72,5 +79,12 @@ public struct InitPlanner: Sendable {
         }
 
         return InitPlan(actions: actions, skipped: skipped, skills: skills.map(\.lastPathComponent).sorted())
+    }
+
+    /// JSON-encode a string value (quotes, backslashes, control characters escaped): a skill folder
+    /// legally named `we"ird` must scaffold VALID JSON, never a corrupt frozen artifact (review
+    /// round 6). Plain interpolation was an injection.
+    static func jsonEscaped(_ value: String) -> String {
+        (try? JSONEncoder().encode(value)).flatMap { String(data: $0, encoding: .utf8) } ?? "\"skill\""
     }
 }

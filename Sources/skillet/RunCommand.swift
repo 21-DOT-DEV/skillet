@@ -19,11 +19,15 @@ struct RunCommand: AsyncParsableCommand {
         commandName: "run",
         abstract: "Run a skill's evals and report pass^k.",
         discussion: """
-        Runs each eval in evaluations/evals.json k times in a fresh sandbox, judges every expectation \
-        against the run's response + post-run files, and prints a PASS/FAIL/FLAKY table with aggregate \
-        pass^k (at observed k = the min recorded trials across evals). Estimates the trial count first \
-        and won't spend above runs.confirm_above_trials without --yes; --dry-run previews the plan. \
-        Writes evaluations/benchmark.json + grading.json (commit these); pass^k re-derives from them.
+        Two axes, each run where its file exists (or pick one with --axis). BEHAVIOR: each eval in \
+        evaluations/evals.json runs k times in a fresh sandbox and a judge grades every expectation \
+        against the run's response + post-run files. TRIGGER: each evaluations/trigger-eval.json \
+        query runs k times against frontmatter-only stubs of every repo skill, judged fired/not-fired \
+        deterministically from the trace — no judge call. Both print PASS/FAIL/FLAKY tables with \
+        aggregate pass^k, reported separately. Estimates trials and model calls first; won't spend \
+        above runs.confirm_above_trials without --yes; --dry-run previews the plan. Writes \
+        evaluations/benchmark.json (both axes, merged per axis) and grading.json (behavioral runs \
+        only — trigger trials produce no judge verdicts). Commit these; pass^k re-derives from them.
         """
     )
 
@@ -31,6 +35,14 @@ struct RunCommand: AsyncParsableCommand {
 
     @Argument(help: "The skill to run; defaults to the only skill when exactly one is discovered.")
     var skill: String?
+
+    /// The measurement axes (design §6.1): behavioral evals, trigger cases, or both.
+    enum RunAxis: String, ExpressibleByArgument {
+        case behavior, trigger, all
+    }
+
+    @Option(name: .long, help: "Axis to run: behavior, trigger, or all (default: all — each where its file exists).")
+    var axis: RunAxis = .all
 
     @Option(name: .long, help: "Trials per eval; overrides runs.k from skillet.yaml.")
     var runs: Int?
@@ -81,33 +93,88 @@ struct RunCommand: AsyncParsableCommand {
             // symlinked component can't redirect reads/writes outside the repo (P1).
             try assertNoSymlinkEscape(skillDir: skillDir, projectRoot: root, skillName: skillName)
 
-            // Decode the evals: absent/empty → usage (2); present-but-corrupt → artifact (4).
-            let cases = try loadEvals(skillDir: skillDir, skillName: skillName)
-            // Fail loud on a missing/out-of-skill/symlinked fixture or bundle symlink before spending.
-            try preflight(cases, skillDir: skillDir, skillName: skillName)
+            // Decode each axis's cases (F14 — §6.1 default: every axis whose file exists). Explicitly
+            // requesting an axis makes its file required; `all` skips an absent one with a note.
+            // Behavioral: absent/empty → usage (2) when required; present-but-corrupt → artifact (4).
+            let cases = axis == .trigger
+                ? nil
+                : try loadEvals(skillDir: skillDir, skillName: skillName, required: axis == .behavior)
+            let triggerCases = axis == .behavior
+                ? nil
+                : try loadTriggerCases(skillDir: skillDir, skillName: skillName, required: axis == .trigger)
+            guard cases != nil || triggerCases != nil else {
+                throw EDDError.usage(
+                    message: "nothing to run for \(skillName): no usable evals.json or trigger-eval.json (absent or empty)",
+                    remedy: "add cases to evaluations/evals.json and/or evaluations/trigger-eval.json (`skillet init` scaffolds both)"
+                )
+            }
+            if let cases {
+                // Fail loud on a missing/out-of-skill/symlinked fixture or bundle symlink before spending.
+                try preflight(cases, skillDir: skillDir, skillName: skillName)
+            }
+            if triggerCases != nil {
+                // The trigger axis stages a frontmatter-only stub of the target — verify the fence
+                // extracts BEFORE any spend, or every trial would be an unmeasured staging failure.
+                let markdown = (try? String(contentsOf: skillDir.appendingPathComponent("SKILL.md"), encoding: .utf8)) ?? ""
+                guard WorkspaceManager.frontmatterStub(markdown: markdown) != nil else {
+                    throw EDDError.invalidArtifact(
+                        path: "\(skillName)/SKILL.md",
+                        reason: "no frontmatter fence — the trigger axis stages a frontmatter-only stub, so SKILL.md must open with a `---` block"
+                    )
+                }
+            }
             // Free-before-paid (constitution V): refuse a lint-error skill before any dry-run/spend/probe.
-            try runLintPreflight(skillDir: skillDir, lintConfig: config?.lint ?? .init(), renderer: renderer)
+            // Axis-aware: the has-evals rule only gates runs that execute behavioral evals (F14 review).
+            try runLintPreflight(skillDir: skillDir, lintConfig: config?.lint ?? .init(), renderer: renderer,
+                                 behavioralAxisRuns: cases != nil)
 
-            // Spend estimate + gate (design P9). --dry-run previews and spends nothing.
-            let trials = cases.count * k
+            // Skipped-axis notes (Specs/009 A4): the default mode says which axis it skipped and why,
+            // on stderr so machine-readable stdout stays untouched (P7).
+            if axis == .all {
+                if cases == nil {
+                    Console.emit(Rendering(stderr: "note: no usable evals.json (absent or empty) — behavioral axis skipped (add eval cases to run it)\n"))
+                }
+                if triggerCases == nil {
+                    Console.emit(Rendering(stderr: "note: no usable trigger-eval.json — trigger axis skipped (add {query, should_trigger} cases to run it)\n"))
+                }
+            }
+
+            // Spend gate (design P9): the gate is TRIAL-denominated — `confirm_above_trials` has
+            // meant trials since it shipped, so its unit never silently changes (decided in-session,
+            // F14 review round 2). The CALL estimate (behavioral × 2: task + judge; trigger × 1: no
+            // judge) is shown in previews and the prompt so the cost is visible before consent.
+            let behavioralTrials = (cases?.count ?? 0) * k
+            let triggerTrials = (triggerCases?.count ?? 0) * k
+            let trials = behavioralTrials + triggerTrials
+            let estimatedCalls = behavioralTrials * 2 + triggerTrials
             if dryRun {
                 let plan = RunPlan(
-                    skill: skillName, evals: cases.count, k: k, trials: trials,
+                    skill: skillName, evals: cases?.count ?? 0, k: k, trials: trials,
                     confirmAboveTrials: runsCfg.confirmAboveTrials,
-                    requiresConfirmation: trials > runsCfg.confirmAboveTrials, willSpend: !replay
+                    requiresConfirmation: trials > runsCfg.confirmAboveTrials, willSpend: !replay,
+                    triggerCases: triggerCases?.count, triggerTrials: triggerCases.map { _ in triggerTrials },
+                    estimatedCalls: estimatedCalls
                 )
                 if options.json {
                     Console.emit(Rendering(stdout: try SkilletJSON.encode(plan) + "\n"))
                 } else {
-                    Console.emit(Rendering(stdout: "plan: \(cases.count) eval(s) × k=\(k) = \(trials) trial(s) for \(skillName) (nothing spent)\n"))
+                    var parts: [String] = []
+                    if let cases { parts.append("\(cases.count) eval(s) × k=\(k)") }
+                    if let triggerCases { parts.append("\(triggerCases.count) trigger case(s) × k=\(k)") }
+                    Console.emit(Rendering(stdout: "plan: \(parts.joined(separator: " + ")) = \(trials) trial(s) ≈ \(estimatedCalls) model call(s) for \(skillName) (nothing spent)\n"))
                 }
                 return
             }
-            try confirmSpend(trials: trials, limit: runsCfg.confirmAboveTrials, skill: skillName)
+            try confirmSpend(trials: trials, estimatedCalls: estimatedCalls, limit: runsCfg.confirmAboveTrials, skill: skillName)
 
             // Assemble the harness + judge; probe before spending so a missing/banned binary fails fast (3).
             let timeout = DurationString.parse(runsCfg.timeout) ?? .seconds(600)
-            let backend = try buildAdapterAndJudge(config: config, judge: judgeCfg, timeout: timeout, outputLimitBytes: runsCfg.maxOutputBytes)
+            // Trigger-only runs are judge-free (deterministic grading): no judge is built and
+            // `judge.model`'s required-explicit rule (§14-4) doesn't apply — nothing gets judged.
+            let backend = try buildAdapterAndJudge(
+                config: config, judge: judgeCfg, timeout: timeout,
+                outputLimitBytes: runsCfg.maxOutputBytes, needsJudge: cases != nil
+            )
             // Strict for the paid path (refuse banned/unauth before spend); replay's probe is canned and
             // free — probed anyway so the executor's version is stamped into the records (M3 provenance).
             let harnessInfo = try await backend.adapter.probe(strict: !replay)
@@ -118,9 +185,27 @@ struct RunCommand: AsyncParsableCommand {
             // Second-resolution timestamp + a short uuid so two runs in the same second never share a path.
             let stamp = "\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
             let base = root.appendingPathComponent(".skillet/runs/\(stamp)", isDirectory: true)
-            let outcome = try await Runner(adapter: backend.adapter, judge: backend.judge).run(
-                skill: skillRef, evals: cases, k: k,
-                injection: .only(load: [skillRef]), base: base, keepWorkspace: keepWorkspace
+            let runner = Runner(adapter: backend.adapter, judge: backend.judge)
+            let behavioralOutcome: Runner.Outcome? = if let cases {
+                try await runner.run(
+                    skill: skillRef, evals: cases, k: k,
+                    injection: .only(load: [skillRef]), base: base, keepWorkspace: keepWorkspace
+                )
+            } else { nil }
+            // The trigger axis (F14, §9.3): bare queries against whole-corpus frontmatter stubs,
+            // fired/not-fired judged deterministically from skillInvocations — one call per trial.
+            let triggerResults: [TriggerEvalResult]? = if let triggerCases {
+                await runner.runTrigger(
+                    target: skillRef,
+                    corpus: discovered.map { SkillRef(name: $0.lastPathComponent, path: $0.path) },
+                    cases: triggerCases, k: k, base: base, keepWorkspace: keepWorkspace
+                )
+            } else { nil }
+
+            let report = RunReport(
+                skill: skillName,
+                results: behavioralOutcome?.evals ?? [],
+                trigger: triggerResults
             )
             // Stamp the ACTUAL judge backend + executor version in records (not configured values) —
             // P3 review fix + M3 provenance: re-grade and harness-vs-skill attribution need the truth.
@@ -129,12 +214,15 @@ struct RunCommand: AsyncParsableCommand {
                 judgePromptVersion: backend.promptVersion,
                 executorBinaryVersion: harnessInfo.version.isEmpty ? "unknown" : harnessInfo.version
             )
-            try writeRecords(outcome: outcome, skillDir: skillDir, harness: backend.adapter.id.rawValue, k: k,
+            try writeRecords(report: report, behavioral: behavioralOutcome, trigger: triggerResults,
+                             skillDir: skillDir, harness: backend.adapter.id.rawValue, k: k,
                              provenance: provenance, base: base)
 
-            Console.emit(try renderer.renderRun(outcome.report, nextSteps: Self.nextSteps()))
-            // pass^k demands all k trials pass: any FAIL or FLAKY is a measured failure (exit 1).
-            if outcome.report.passed < outcome.report.evals.count {
+            Console.emit(try renderer.renderRun(report, nextSteps: Self.nextSteps(wroteGrading: behavioralOutcome != nil)))
+            // pass^k demands all k trials pass — on every axis that ran (exit 1 on any non-PASS).
+            let behavioralFailed = report.evals.count > report.passed
+            let triggerFailed = report.trigger.map { $0.passed < $0.evals.count } ?? false
+            if behavioralFailed || triggerFailed {
                 throw SilentExit(code: ExitCode.measuredFailure.rawValue)
             }
         } catch let error as EDDError {
@@ -166,9 +254,12 @@ struct RunCommand: AsyncParsableCommand {
         }
     }
 
-    private func loadEvals(skillDir: URL, skillName: String) throws -> [EvalCase] {
+    /// Behavioral cases. `required: false` (the `--axis all` default) skips an absent file with `nil`
+    /// — "each axis where its file exists" (§6.1); everything else keeps its strict error class.
+    private func loadEvals(skillDir: URL, skillName: String, required: Bool = true) throws -> [EvalCase]? {
         let raw = try SkillReader().read(skillDirectory: skillDir)
         guard let data = raw.evalsJSON else {
+            guard required else { return nil }
             throw EDDError.usage(message: "no evals to run for \(skillName)", remedy: "add evaluations/evals.json (see `skillet init`)")
         }
         let evalsFile: EvalsFile
@@ -176,6 +267,9 @@ struct RunCommand: AsyncParsableCommand {
         catch { throw EDDError.invalidArtifact(path: "\(skillName)/evaluations/evals.json", reason: "not valid evals.json") }
         let cases = evalsFile.cases
         guard !cases.isEmpty else {
+            // Present-but-empty skips the axis under the default mode — symmetric with the trigger
+            // side's empty handling, and what an init-scaffolded skeleton contains (round 5, P1).
+            guard required else { return nil }
             throw EDDError.usage(message: "no evals to run for \(skillName)", remedy: "add at least one eval to evaluations/evals.json")
         }
         // An eval with no expectations can't measure behavior — reject it rather than letting a
@@ -189,6 +283,36 @@ struct RunCommand: AsyncParsableCommand {
         return cases
     }
 
+    /// Trigger cases (F14) from the frozen `trigger-eval.json` (F8 codec). Same class discipline as
+    /// the behavioral loader: absent → `nil` under `--axis all`, usage error when explicitly
+    /// requested; present-but-corrupt → artifact (4); a case missing `query`/`should_trigger` is an
+    /// artifact error, not a silent skip. Ids are positional (`trigger-<i>`) — the file's cases are
+    /// bare `{query, should_trigger}` pairs.
+    private func loadTriggerCases(skillDir: URL, skillName: String, required: Bool) throws -> [(id: String, query: String, shouldTrigger: Bool)]? {
+        // The SHARED checker (TriggerEvalSupport) — the same judgment doctor uses to predict this
+        // command, so the two can't drift (F14 review round 3). This wrapper only maps its states
+        // onto run's error classes.
+        switch loadTriggerEvals(skillDir: skillDir) {
+        case .absent:
+            guard required else { return nil }
+            throw EDDError.usage(
+                message: "no trigger evals for \(skillName)",
+                remedy: "add evaluations/trigger-eval.json ({query, should_trigger} pairs), or run --axis behavior"
+            )
+        case .empty:
+            guard required else { return nil }
+            throw EDDError.usage(
+                message: "trigger-eval.json has no cases for \(skillName)",
+                remedy: "add at least one {query, should_trigger} pair, or run --axis behavior"
+            )
+        case .invalid(let reason):
+            // Present-but-unusable is a strict artifact error under every axis mode — never a skip.
+            throw EDDError.invalidArtifact(path: "\(skillName)/evaluations/trigger-eval.json", reason: reason)
+        case .usable(let cases):
+            return cases
+        }
+    }
+
     /// The harness adapter + judge, plus the **actual** judge `provider`/`model`/`promptVersion` for
     /// record stamping. Production: `claude-code` adapter + a `claude`-CLI-backed text judge (binary
     /// resolved once, shared by both). Tests: the offline replay wiring. An unsupported `judge.provider`
@@ -197,10 +321,18 @@ struct RunCommand: AsyncParsableCommand {
     /// absent rather than silently picking one — the reproducibility hazard the surveyed tools carry.
     /// The replay path is exempt: no real judge is built there (canned verdicts, nothing spent).
     private func buildAdapterAndJudge(
-        config: SkilletConfig?, judge judgeCfg: SkilletConfig.Judge, timeout: Duration, outputLimitBytes: Int
+        config: SkilletConfig?, judge judgeCfg: SkilletConfig.Judge, timeout: Duration, outputLimitBytes: Int, needsJudge: Bool = true
     ) throws -> (adapter: any HarnessAdapter, judge: any Judge, provider: String, model: String, promptVersion: String) {
         if replay {
             return (ReplayAdapter(), ReplayJudge(loadReplayMap(), defaultPass: replayMap == nil), "replay", "replay", "replay")
+        }
+        // Trigger-only (F14): grading is deterministic — no judge is constructed or configured-for.
+        // The sentinel provenance ("none") stamps records honestly; the behavioral judge block in a
+        // preserved benchmark.json is carried, not overwritten, by the axis merge.
+        if !needsJudge {
+            let claudePath = config?.harness?.claudeCode?.path
+            let adapter = ClaudeCodeAdapter(configPath: claudePath, timeout: timeout, outputLimitBytes: outputLimitBytes)
+            return (adapter, UnjudgedAxisJudge(), "none", "none", "none")
         }
         guard judgeCfg.provider == "claude-code" else {
             throw EDDError.usage(
@@ -239,6 +371,7 @@ struct RunCommand: AsyncParsableCommand {
         for url in [skillDir.appendingPathComponent("SKILL.md"),
                     evaluations,
                     evaluations.appendingPathComponent("evals.json"),
+                    evaluations.appendingPathComponent("trigger-eval.json"),
                     evaluations.appendingPathComponent("benchmark.json"),
                     evaluations.appendingPathComponent("grading.json")]
         where WorkspaceManager.isSymlink(url) {
@@ -275,8 +408,14 @@ struct RunCommand: AsyncParsableCommand {
     /// distinct from a *measured* non-PASS (exit 1) and from a corrupt/missing-evals artifact (exit 4/2,
     /// which `loadEvals` already enforced). Warnings (incl. a <3-case suite) proceed. `doctor` owns the
     /// broader Phase-2 preflight catalog; `run` only enforces the already-shipped free subset.
-    private func runLintPreflight(skillDir: URL, lintConfig: SkilletConfig.Lint, renderer: Renderer) throws {
-        let report = try lintSkillDirectory(skillDir, config: lintConfig)
+    private func runLintPreflight(skillDir: URL, lintConfig: SkilletConfig.Lint, renderer: Renderer, behavioralAxisRuns: Bool = true) throws {
+        var report = try lintSkillDirectory(skillDir, config: lintConfig)
+        if !behavioralAxisRuns {
+            // A run that executes no behavioral evals doesn't need evals.json: SKILL-L009's error
+            // must not block a trigger-only skill (F14's "each axis where its file exists"). The
+            // SKILL.md-quality rules (L001/L003) still gate — the description is what trigger tests.
+            report = LintReport(diagnostics: report.diagnostics.filter { $0.id != "SKILL-L009" })
+        }
         guard report.errors > 0 else { return }   // clean or warnings-only → proceed to the paid path
         Console.emit(try renderer.renderLint(report, nextSteps: ["skillet lint  # fix the findings, then re-run"]))
         throw SilentExit(code: ExitCode.usage.rawValue)   // preflight refused before measurement
@@ -307,6 +446,15 @@ struct RunCommand: AsyncParsableCommand {
         }
     }
 
+    /// The judge slot for a trigger-only run: nothing may be judged (the trigger loop never calls the
+    /// judge). Any call is a programmer error surfaced as a thrown failure, never a silent verdict.
+    private struct UnjudgedAxisJudge: Judge {
+        struct Unjudgeable: Error {}
+        func verdict(for criterion: String, evidence: JudgeEvidence) async throws -> Verdict {
+            throw Unjudgeable()
+        }
+    }
+
     private func loadReplayMap() -> [String: Bool] {
         guard let path = replayMap, let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return [:] }
         return (try? JSONDecoder().decode([String: Bool].self, from: data)) ?? [:]
@@ -316,9 +464,9 @@ struct RunCommand: AsyncParsableCommand {
 
     /// Confirm spend above the threshold (design P9). `--yes` proceeds; on a TTY we prompt; otherwise
     /// (or `--no-input`, or a declined prompt) we refuse with a usage error carrying the estimate (exit 2).
-    private func confirmSpend(trials: Int, limit: Int, skill: String) throws {
+    private func confirmSpend(trials: Int, estimatedCalls: Int, limit: Int, skill: String) throws {
         guard trials > limit, !yes else { return }
-        let estimate = "\(trials) trials for \(skill) exceeds confirm_above_trials=\(limit)"
+        let estimate = "\(trials) trials (≈ \(estimatedCalls) model calls) for \(skill) exceeds confirm_above_trials=\(limit)"
         if Console.isStdoutTTY() && Console.isStdinTTY() && !noInput {
             FileHandle.standardError.write(Data("\(estimate). Proceed? [y/N] ".utf8))
             let answer = (readLine() ?? "").trimmingCharacters(in: .whitespaces).lowercased()
@@ -335,25 +483,41 @@ struct RunCommand: AsyncParsableCommand {
     /// Write the committed records (the eval-viewer contract + the `pass^k` source of truth) into the
     /// skill's `evaluations/`, and a run summary into the deletable cache. The human commits the
     /// `evaluations/` files (P5 — skillet never auto-commits).
-    private func writeRecords(outcome: Runner.Outcome, skillDir: URL, harness: String, k: Int, provenance: RunProvenance, base: URL) throws {
+    private func writeRecords(report: RunReport, behavioral: Runner.Outcome?, trigger: [TriggerEvalResult]?,
+                              skillDir: URL, harness: String, k: Int, provenance: RunProvenance, base: URL) throws {
         let evalDir = skillDir.appendingPathComponent("evaluations", isDirectory: true)
         try FileManager.default.createDirectory(at: evalDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
-        try encoder.encode(BenchmarkFile(report: outcome.report, evals: outcome.evals, harness: harness, k: k, provenance: provenance))
-            .write(to: evalDir.appendingPathComponent("benchmark.json"))
-        try encoder.encode(GradingFile(evals: outcome.evals, provenance: provenance))
-            .write(to: evalDir.appendingPathComponent("grading.json"))
-        if let runJSON = try? SkilletJSON.encode(outcome.report) {
+        // benchmark.json is latest-run-**per-axis** (F14): the axis that didn't run this invocation is
+        // carried from the previously committed file, so a --axis trigger run can't destroy the
+        // behavioral record (or vice versa). An unreadable prior is treated as absent, never fatal.
+        let benchmarkURL = evalDir.appendingPathComponent("benchmark.json")
+        let prior = (try? Data(contentsOf: benchmarkURL)).flatMap { try? JSONDecoder().decode(BenchmarkFile.self, from: $0) }
+        try encoder.encode(BenchmarkFile(
+            skill: report.skill,
+            behavioral: behavioral.map { (report: report, evals: $0.evals) },
+            trigger: trigger, harness: harness, k: k, provenance: provenance, preserving: prior
+        )).write(to: benchmarkURL)
+        // grading.json is judge output — written only when the behavioral axis ran (a trigger-only
+        // run has no verdicts and must not blank the committed grading record).
+        if let behavioral {
+            try encoder.encode(GradingFile(evals: behavioral.evals, provenance: provenance))
+                .write(to: evalDir.appendingPathComponent("grading.json"))
+        }
+        if let runJSON = try? SkilletJSON.encode(report) {
             try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
             try? Data(runJSON.utf8).write(to: base.appendingPathComponent("run.json"))
         }
     }
 
     /// Onboarding: after a run, the human commits the records (P5); later loop verbs land in Phase 2.
-    static func nextSteps() -> [String] {
+    /// The suggestion names only files this run actually wrote — a trigger-only run produces no
+    /// grading.json (nothing was judged), so it must not tell the user to commit one (round 3, P2).
+    static func nextSteps(wroteGrading: Bool = true) -> [String] {
         let registered = Set(SkilletCommand.configuration.subcommands.compactMap { $0.configuration.commandName })
         let verbs = ["next", "iterate"].filter { registered.contains($0) }.map { "skillet \($0)" }
-        return verbs.isEmpty ? ["commit evaluations/benchmark.json + grading.json"] : verbs
+        guard verbs.isEmpty else { return verbs }
+        return [wroteGrading ? "commit evaluations/benchmark.json + grading.json" : "commit evaluations/benchmark.json"]
     }
 }

@@ -22,6 +22,13 @@ struct InitIntegrationTests {
         for sub in ["friction", "findings", "sessions"] {
             #expect(fm.fileExists(atPath: repo.appendingPathComponent("skills/demo/evaluations/\(sub)").path))
         }
+        // The design-promised skeletons (closed in F14 review round 5): empty, so they skip their
+        // axis rather than block, and never overwrite user content.
+        let evals = try String(contentsOf: repo.appendingPathComponent("skills/demo/evaluations/evals.json"), encoding: .utf8)
+        #expect(evals.contains(#""skill_name":"demo""#))
+        #expect(evals.contains(#""evals":[]"#))
+        let trigger = try String(contentsOf: repo.appendingPathComponent("skills/demo/evaluations/trigger-eval.json"), encoding: .utf8)
+        #expect(trigger.trimmingCharacters(in: .whitespacesAndNewlines) == "[]")
         // self-owned cache ignore; the repo-root .gitignore is never created
         let ignore = try String(contentsOf: repo.appendingPathComponent(".skillet/.gitignore"), encoding: .utf8)
         #expect(ignore.contains("*"))
@@ -37,6 +44,10 @@ struct InitIntegrationTests {
         _ = try await harness.run(["init"], workingDirectory: repo)
         let yaml = repo.appendingPathComponent("skillet.yaml")
         let before = try String(contentsOf: yaml, encoding: .utf8)
+        // User content in a scaffolded skeleton must survive a re-init untouched.
+        let evalsURL = repo.appendingPathComponent("skills/demo/evaluations/evals.json")
+        try #"{"skill_name":"demo","evals":[{"id":"mine","prompt":"p","expectations":["x"]}]}"#
+            .write(to: evalsURL, atomically: true, encoding: .utf8)
 
         let out = try await harness.run(["init", "--json"], workingDirectory: repo)
         #expect(out.exitCode == 0)
@@ -44,6 +55,7 @@ struct InitIntegrationTests {
         #expect((object?["created"] as? [Any])?.isEmpty == true)
         #expect((object?["skipped"] as? [Any])?.isEmpty == false)
         #expect(try String(contentsOf: yaml, encoding: .utf8) == before) // not overwritten
+        #expect(try String(contentsOf: evalsURL, encoding: .utf8).contains(#""id":"mine""#)) // skeleton never clobbers
     }
 
     @Test("--json reports the skillet.init/1 payload with discovered skills")

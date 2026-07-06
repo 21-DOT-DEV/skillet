@@ -53,5 +53,6 @@ struct DoctorReportTests {
         #expect(DoctorReport.Check.harnessAuth == "harness.auth")
         #expect(DoctorReport.Check.skillVisibility == "skill.visibility")
         #expect(DoctorReport.Check.skillLint == "skill.lint")
+        #expect(DoctorReport.Check.skillTriggerEvals == "skill.trigger-evals")   // added round 4 (additive)
     }
 }

@@ -3,12 +3,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.29 — for review |
+| **Status** | Draft v0.35 — for review |
 | **Name** | `skillet` (settled — SKILL · E · T, the *SKILL.md Evaluation Toolkit*); EDD remains the methodology's name |
 | **Deliverable** | Public, open-source, multi-harness Swift CLI |
 | **Supersedes** | The repo-private `swift-skill-eval` tool + the Python trigger harness |
 | **Decision provenance** | §2 — every load-bearing choice here was settled in the design Q&A |
-| **Revision log** | Extracted to [skillet-design-changelog.md](skillet-design-changelog.md) (v0.1 → v0.29, latest first, one linkable heading per version; historical entries never rewritten). Latest — v0.29 (2026-07-04): `skillet.doctor/1` rows presence-guaranteed (§6.1 annotation; F3 review round 2). |
+| **Revision log** | Extracted to [skillet-design-changelog.md](skillet-design-changelog.md) (v0.1 → v0.35, latest first, one linkable heading per version; historical entries never rewritten). Latest — v0.35 (2026-07-05): F14 review round 5 — empty axis files skip symmetrically under the default mode (doctor's green now true); `init` writes the §6.1-promised empty skeletons for both axes; docc sample shows the axis-labeled headline. |
 
 ---
 
@@ -290,7 +290,7 @@ Free, fast self-check, run implicitly (in relevant-subset form) before any paid 
 
 `--paid` adds one canary trial per harness: a trivial prompt that asserts a known `references/` file is readable from inside the harness. Exit `3` on any failure, each with a remedy line.
 
-*Shipped subset (F3, 2026-07-04 — Specs/008):* the phase-metric rows — config parse + file origin, harness binary/version/denylist + winning resolution link, **positive-load** visibility (a staging-parity bundle audit; symlinks staging would drop fail loudly), and all error-tier lint findings — under the frozen contract: `skillet.doctor/1` check rows — **presence-guaranteed**: every check that runs emits ≥1 row per subject, so an absent check id means *not run*, never silent-pass — exit `0` with warnings / `3` on any failure. **Auth is reported as a warning** (`run`'s strict preflight owns the refusal — never pay to discover it either way). The remaining bullets land with their owners: frontmatter conformance → F20, `--paid` → F21, per-value origins → F24, the discovery-only half + artifact sweep + `git` + betterleaks with their features — each a new row, never a schema bump.
+*Shipped subset (F3, 2026-07-04 — Specs/008):* the phase-metric rows — config parse + file origin, harness binary/version/denylist + winning resolution link, **positive-load** visibility (a staging-parity bundle audit; symlinks staging would drop fail loudly), and all error-tier lint findings — under the frozen contract: `skillet.doctor/1` check rows — **presence-guaranteed**: every check that runs emits ≥1 row per subject, so an absent check id means *not run*, never silent-pass — exit `0` with warnings / `3` on any failure. **Auth is reported as a warning** (`run`'s strict preflight owns the refusal — never pay to discover it either way). The remaining bullets land with their owners: frontmatter conformance → F20, `--paid` → F21, per-value origins → F24, the discovery-only half + artifact sweep + `git` + betterleaks with their features — each a new row, never a schema bump. Since F14, the has-evals lint error is a **warning** here only when **both** hold: `trigger-eval.json` is **usable** and `evals.json` is genuinely **absent** — judged by the **shared checker** `run` itself uses (symlink-guarded; factored in review round 3 so the two commands cannot drift). Any present-but-broken file on either side keeps the failure, with the remedy naming it. Round 4 adds the dedicated **`skill.trigger-evals` row** (additive): absent/usable pass, empty warns (`run` skips it), invalid/symlinked **fails** (`run` refuses it) — so a rotten trigger file next to valid evals can no longer hide. `run` accepts trigger-only skills, and doctor predicts the runner (P6).
 
 ---
 
@@ -336,6 +336,8 @@ The day-one neutral runner (D2) and the Measure step. Defaults: the skill of the
 - before spending: a plan line (`12 evals × 3 runs × 2 harnesses = 72 trials, ~$X est.`); above `confirm_above_trials`, confirm on TTY or require `--yes`
 
 Writes a run record under `.skillet/runs/<timestamp>/` and updates the skill's `benchmark.json` **in the frozen format** so the existing eval-viewer keeps working untouched. Exit `1` if anything failed.
+
+*Shipped axes (F7 behavioral · F14 trigger, 2026-07-04 — Specs/009):* `--axis behavior|trigger|all` with the default above (each axis where its file exists **with runnable content** — a present-but-empty file skips its axis with a note, which is exactly what an `init`-scaffolded skeleton contains). A trigger trial executes the bare query against **whole-corpus frontmatter stubs** (§9.2/§9.3, bodies withheld) and grades deterministically from `skillInvocations` — no judge, one call per trial (a behavioral trial ≈ two). Trigger results ride `benchmark.json` as `configuration: "trigger"` rows with axis-marked `consistency` entries under a **latest-run-per-axis merge** (an axis that didn't run is carried from the prior record, never blanked), and `skillet.run/1` gains the additive `trigger` block. `--eval`, `--ab`, `--matrix`, `--judge`, `--concurrency`, `--fail-fast`, and `--record`/`--replay` land with their owning features.
 
 ```
 docc-articles  behavior  k=3        claude-code   opencode
@@ -830,7 +832,7 @@ public enum SkillSet: Sendable {
 }
 ```
 
-**Loadable ≠ visible, and the distinction is load-bearing.** Refusal-routing evals require the sibling skill to be **visible but not loaded**: the skill-under-test must be able to *detect* that a sibling exists in order to correctly decline and hand off. The scar behind this: when the model could not even see the sibling, it didn't refuse out-of-scope work — it did the work itself ("the skill failed to load… so I wrote the comments directly"). Strict hermeticism makes the "should I hand off?" branch unreachable, and the cross-skill-refusal eval (§6.1's own sample output) passes vacuously or can't run. `doctor`'s visibility check verifies both halves: the positive-load condition *and* the discovery-only condition (§6.1). *(F3 ships the positive-load half — a staging-parity audit of the whole bundle; the discovery-only half lands when the `visible:` sibling set is exercised live.)*
+**Loadable ≠ visible, and the distinction is load-bearing.** Refusal-routing evals require the sibling skill to be **visible but not loaded**: the skill-under-test must be able to *detect* that a sibling exists in order to correctly decline and hand off. The scar behind this: when the model could not even see the sibling, it didn't refuse out-of-scope work — it did the work itself ("the skill failed to load… so I wrote the comments directly"). Strict hermeticism makes the "should I hand off?" branch unreachable, and the cross-skill-refusal eval (§6.1's own sample output) passes vacuously or can't run. `doctor`'s visibility check verifies both halves: the positive-load condition *and* the discovery-only condition (§6.1). *(F3 ships the positive-load half — a staging-parity audit of the whole bundle. The `visible:` tier is live as of F14 — whole-corpus frontmatter stubs for trigger trials — so doctor's discovery-only half is unblocked and remains deferred, tracked for a later slice.)*
 
 Each trial runs in a fresh, core-owned `Workspace` sandbox (create → stage `files[]` → run → diff → destroy) over **pristine fixtures** — which is why `hooks install` guards `fixtures/**` against commits (§6.2): a polluted fixture silently invalidates every later A/B. *How* `.only` materializes is the adapter's private business — staging into the harness's skill-discovery path (with siblings present-but-stubbed for the `visible` set), a flag, or (for `direct-api`) inlining `SKILL.md` + references into the system context with sibling names listed but bodies withheld. The old `--skill-path` footgun was the user doing the adapter's job; under this contract the failure class cannot recur, and `doctor` proves it per harness before money moves (P6).
 
@@ -857,7 +859,7 @@ One usage caveat, stated so the port is honest: the existing claude-code pipelin
 
 This schema is designed now, not retrofitted (D4): every field above is required to express what the *existing* Claude-only pipeline already records, which is the test of sufficiency.
 
-**The trigger axis runs on `skillInvocations`.** A trigger trial executes the bare query with the repo's skills discoverable (`.only(load: [], visible: allSkills)` — §9.2's visibility tier exists for exactly this); grading is then deterministic, no judge needed — did the target skill fire, and for `should_trigger: false` near-misses, did it correctly *not* fire (routing to a sibling instead)? Adapters surface activation events natively where the harness logs them (Claude Code does); `direct-api` approximates with the selection-prompt technique the retired Python harness used. This is where the unified two-axis `run` (§6.1) actually lives in the architecture.
+**The trigger axis runs on `skillInvocations`.** A trigger trial executes the bare query with the repo's skills discoverable (`.only(load: [], visible: allSkills)` — §9.2's visibility tier exists for exactly this); grading is then deterministic, no judge needed — did the target skill fire, and for `should_trigger: false` near-misses, did it correctly *not* fire (routing to a sibling instead)? Adapters surface activation events natively where the harness logs them (Claude Code does); `direct-api` approximates with the selection-prompt technique the retired Python harness used. This is where the unified two-axis `run` (§6.1) actually lives in the architecture. *(Shipped F14, 2026-07-04 — Specs/009: stubs are frontmatter-only — the fence verbatim, body withheld — staged for the whole corpus; attribution is target-only for `should_trigger: true`, with sibling fires recorded as routing forensics; live `stream-json` `Skill` blocks are golden-tested and validated by the opt-in smoke.)*
 
 ### 9.4 The Judge
 

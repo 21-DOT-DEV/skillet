@@ -2,7 +2,7 @@
 
 **Status:** IN PROGRESS (F3 + F14 shipped 2026-07-04)
 **Horizon:** Now
-**Last Updated:** 2026-07-04
+**Last Updated:** 2026-07-07
 
 ## Goal
 
@@ -45,6 +45,9 @@ believable before the workflow layer starts acting on it.
      tier, now live), near-misses verified with routing forensics, separate axis reporting, and
      per-axis `benchmark.json` merge (`configuration:"trigger"` + axis-marked consistency; offline
      recompute covers both axes). Suite green — see the Specs/009 status row.
+   - Diagnostic-tier smoke arm planned (F67/F68, design §9.6): a $0 on-device pre-screen lane for
+     trigger evals — the lane stays an explicit flag, its provider defaults on macOS, and smoke
+     results never merge with real-harness results.
 
 3. **[F15]** A/B baseline arm (CLI: `skillet run --ab`) — PLANNED · Ported
    - Purpose & user value: Run with-skill and without-skill arms and report Δ —
@@ -168,6 +171,21 @@ believable before the workflow layer starts acting on it.
     - Dependencies: record/replay (F19), judge.
     - Confidence: Medium — design §6.2, §9.4.
 
+14. **[F61]** Deterministic process assertions over the trace (eval-declared; graded in `skillet run` before the judge) — PLANNED · Net-new
+    - Purpose & user value: A free, judge-free assertion pass over the normalized
+      `Trace` before any paid grading — required/forbidden tools, ordered and
+      unordered groups, argument matchers (exact / key-present / substring /
+      prefix-suffix / regex / numeric-range / one-of-set) — the trigger axis
+      generalized: "did it fire" becomes "did it do it the right way," for $0.
+    - Northstar: deterministic-first (free signal before the paid judge).
+    - Success metrics:
+      - An eval can declare a trajectory expectation; a violation names the exact step/matcher that failed, deterministically (no model, no network).
+      - One pass emits both a strict all-pass verdict (the only result that gates or feeds pass^k) and a partial-credit percentage (diagnostic-only).
+      - Apple's model-assisted semantic matcher is explicitly out (deferred, §14-9).
+    - Dependencies: Trace (Phase 1), trigger axis (F14); the grammar joins the frozen eval contract when it ships.
+    - Confidence: Medium — design §14-9 (decided 2026-07-06); precedent: Apple `TrajectoryExpectation`, LangChain `agentevals`, `skill-eval-harness` process assertions.
+    - Notes: Graduated from ROADMAP Candidate Enhancements via the July-2026 Apple Evaluations cross-reference (design v0.36).
+
 ## Dependencies & Sequencing
 
 - Local ordering: `doctor` (F3) is the $0 preflight gate; the grounded judge (F16)
@@ -191,6 +209,12 @@ believable before the workflow layer starts acting on it.
 
 ## Phase Change Log
 
+- 2026-07-07: PATCH — F14 gains the diagnostic-tier smoke-arm note (design §9.6/§14-20, decided;
+  F67/F68). Roadmap → v1.14.0; no change to shipped behavior.
+- 2026-07-06: MINOR — added **F61** (deterministic process assertions over the trace; design
+  §14-9 decided via the Apple Evaluations cross-reference, graduated from ROADMAP Candidate
+  Enhancements — strict + partial-credit dual results, judge-free). Roadmap → v1.13.0; no
+  change to shipped features.
 - 2026-07-04: **F14 IMPLEMENTED** — the trigger axis ([Specs/009](../Specs/009-trigger-axis/plan.md)):
   `run --axis behavior|trigger|all`, deterministic `skillInvocations` grading over whole-corpus
   frontmatter stubs (§9.2 `visible:` tier live), per-axis `benchmark.json` merge, additive

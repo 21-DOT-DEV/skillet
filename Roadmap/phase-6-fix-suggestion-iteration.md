@@ -2,7 +2,7 @@
 
 **Status:** PLANNED
 **Horizon:** Next
-**Last Updated:** 2026-06-24
+**Last Updated:** 2026-07-06
 
 ## Goal
 
@@ -73,6 +73,9 @@ failures, never imagined ones.
      - Under `--strict`, a missing held-out blocks promotion (exit `5`); advisory otherwise (D6).
    - Dependencies: iterate (F43), the Proof gate + evidence `root_cause`/`cluster` keys (design §8, §7.3).
    - Confidence: Medium — design §8 (Held-out proof), §5.2 `gates.proof`, §6.1 `iterate`; adopted from §14-8.
+   - Notes (2026-07-06): a **synthetic sibling** — generated under F63/F64 from a seed in the
+     same failure class — is proof-eligible; such marks are recorded `synthetic-backed`
+     (visible in `next`/`report`). Evidence-side gates remain observed-only. Design §14-16.
 
 ## Dependencies & Sequencing
 
@@ -102,3 +105,6 @@ failures, never imagined ones.
 - 2026-06-24: Added F5 [now F45] (held-out proof discipline), adopting design §14-8 (R2) from the v0.8
   competitive cross-reference; graduated from ROADMAP *Candidate Enhancements*. Roadmap MINOR → v1.6.0.
 - 2026-06-26: PATCH — adopted the global stable Fn ids (F41–F45; roadmap v1.8.0 scheme reconciliation). Mechanical renumber; no scope change.
+- 2026-07-06: PATCH — F45 gains the `synthetic-backed` held-out note (design §14-16, decided:
+  synthetic siblings are proof-eligible within their seed's failure class; evidence-side gates
+  stay observed-only). Roadmap → v1.13.0.

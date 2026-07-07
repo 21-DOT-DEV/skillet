@@ -4,6 +4,55 @@ The roadmap's versioned change log, extracted from `ROADMAP.md` on 2026-07-04 (v
 stays lean. Latest first; every version is a linkable heading; historical entries are never rewritten.
 Companion: [`skillet-design-changelog.md`](skillet-design-changelog.md).
 
+## v1.14.1 — 2026-07-07
+
+PATCH — **review-round consistency fixes** (three reviewed findings; no scope or priority change;
+design → v0.38): (1) the Global-Risks *judge-reliability* bullet now cites the **specified F10
+agreement check** (report-only Cohen's kappa, design §14-14) instead of the pre-v1.13.0
+"`needs-research` calibration harness" framing — the `needs-research` tag is reserved for the Apple
+provider (F68); (2) design §13's v1 scope line reconciled with the F61–F68 rounds (F61/F62/F63 into
+*Ships in v1*; F10/F64–F68 + the declined public Swift-library surface into *Later / explicitly
+out*), ending the two-scope-stories drift; (3) Phase 8's risks text now names all cross-reference
+additions (F10–F13 from the v0.8 competitive round; F64–F68 from the July-2026 Apple Evaluations
+rounds) instead of "one cross-reference addition."
+
+## v1.14.0 — 2026-07-07
+
+MINOR — **Diagnostic model tier + Apple Foundation Models provider** (design → v0.37; §14-19/§14-20
+decided — full record in [skillet-design-changelog.md](skillet-design-changelog.md) v0.37): **F67**
+the provider-neutral cheap-model slot (Phase 8, pulls forward with F62) — the two-tier contract in
+design §9.6: the diagnostic tier generates/scores/clusters/smokes and **never gates**, may float
+with provenance stamped, calibrate-before-trust (F10 κ ≥ 0.6 before any judging use); platform
+defaults only for $0/offline/entitlement-free providers, always announced (plan note + `doctor`
+row); deliberately not Apple-only (Ollama-class cross-platform local runners are the research
+alternative). **F68** the Apple FM/PCC provider (Phase 8, `needs-research`) — macOS zero-config
+default = the on-device model behind `#if canImport(FoundationModels)` (compiles out on Linux and
+older SDKs; zero new dependencies); PCC **never defaults** (managed entitlement, per-user iCloud
+quota, network) — an explicit build-from-source lane; research exit-conditions: entitlement-for-CLI
+viability, Apple Intelligence in CI VMs, SDK/OS timeline, skill context-fit rates vs 4–8K,
+provenance identifiers. Diagnostic-tier lane notes added to F62 (Phase 4), F63 (Phase 5),
+F64/F10/F52 (Phase 8), and the F14 smoke arm (Phase 2); `skillet.yaml` gains the `models.diagnostic`
+slot (design §5.2). Docs-only; no shipped-code change.
+
+## v1.13.0 — 2026-07-06
+
+MINOR — **Apple Evaluations (WWDC26) cross-reference adopted** (design → v0.36; §14-9 decided + new
+§14-13…§14-18 — the full decision record is [skillet-design-changelog.md](skillet-design-changelog.md)
+v0.36): **F61** deterministic process assertions over the trace (Phase 2 — graduated from Candidate
+Enhancements; required/forbidden tools, ordered/unordered groups, seven deterministic argument
+matchers, strict + partial-credit dual results, judge-free; Apple's model-assisted matcher deferred),
+**F62** scored diagnostic dimensions (Phase 4; anchored scales + rationales beside the binary
+verdict — diagnostics-only, never gates), **F63** trigger-corpus paraphrase expansion (Phase 5;
+observed seeds only, `synthetic` provenance, deterministic validators), **F10** re-specified
+(Phase 8; report-only judge↔human Cohen's-kappa agreement check, ≥ 0.6 target, `needs-research`
+dropped), **F64** general observed-seed synthetic generator (Phase 8), **F65** named aggregation
+catalog (Phase 8; config-invoked, no formula language), **F66** test-framework integration recipe
+(Phase 8, docs; the Swift-library surface declined and recorded as a Phase 8 non-goal). **F45**
+gains the `synthetic-backed` held-out proof note (§14-16: synthetic siblings proof-eligible within
+their seed's failure class; evidence-side gates stay observed-only). Candidate Enhancements: §14-9
+graduated; §14-10 (ablation arms) remains staged. Docs-only; no shipped-code change; Phase 2
+remains IN PROGRESS.
+
 ## v1.12.0 — 2026-07-04
 
 MINOR — **F14 SHIPPED: the trigger axis** ([Specs/009](Specs/009-trigger-axis/plan.md); design → v0.30).

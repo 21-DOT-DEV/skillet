@@ -50,6 +50,7 @@ public extension BenchmarkFile {
     init(
         skill: String,
         behavioral: (report: RunReport, evals: [EvalResult])?,
+        baseline: [EvalResult]? = nil,
         trigger: [TriggerEvalResult]?,
         harness: String,
         k: Int,
@@ -65,6 +66,12 @@ public extension BenchmarkFile {
         var behavioralPerEval: [JSONValue] = []
         var behavioralConsistency: [String: JSONValue] = [:]
         var behavioralSummary: JSONValue?
+        // F15: an --ab run writes the canonical arm names (`with_skill`/`without_skill` — the
+        // viewer's exact grouping strings, reserved for F15 by Specs/009); a single-arm run keeps
+        // F7's `"default"`, which readers treat as the with-arm. A single-arm behavioral run
+        // supersedes the whole behavioral axis, including any prior baseline (latest-run-per-axis:
+        // a stale baseline paired with fresh with-arm rows would mint cross-run deltas).
+        let withConfiguration = baseline != nil ? "with_skill" : "default"
         if let behavioral {
             var allTrialRates: [Double] = []
             for eval in behavioral.evals {
@@ -74,7 +81,7 @@ public extension BenchmarkFile {
                     let rate = total == 0 ? 0 : Double(passed) / Double(total)
                     allTrialRates.append(rate)
                     behavioralRows.append(.object([
-                        "configuration": .string("default"),
+                        "configuration": .string(withConfiguration),
                         "eval_id": .string(eval.evalId),
                         "run_number": .number(Double(index + 1)),
                         "expectations": .array(trial.verdicts.map { v in
@@ -113,14 +120,103 @@ public extension BenchmarkFile {
                 "suite_pass_1": .number(behavioral.report.passOne),   // additive (§14-11)
                 "flaky_eval_ids": .array(behavioral.report.evals.filter { $0.status == .flaky }.map { .string($0.id) })
             ]
-            behavioralSummary = .object(["pass_rate": Self.stats(allTrialRates)])
+            let withDurations = behavioral.evals.flatMap { $0.trials.compactMap(\.durationSeconds) }
+            behavioralSummary = baseline != nil
+                ? Self.armSummary(passRates: allTrialRates, durations: withDurations)
+                : .object(["pass_rate": Self.stats(allTrialRates)])
         } else {
             behavioralRows = prior?.runs.filter { $0.objectValue?["configuration"]?.stringValue != "trigger" } ?? []
             behavioralPerEval = priorPerEval.filter { $0.objectValue?["axis"]?.stringValue != "trigger" }
             for key in ["k", "meaningful", "suite_pass_power_k", "suite_pass_1", "flaky_eval_ids"] {
                 if let value = priorConsistency?[key] { behavioralConsistency[key] = value }
             }
-            behavioralSummary = priorSummary?["default"]
+            behavioralSummary = priorSummary?["default"] ?? priorSummary?["with_skill"]
+        }
+
+        // --- Baseline arm (F15): canonical `without_skill` rows; polluted trials (the §9.2
+        // tripwire fired) are excluded from rows and counts — unmeasured, never a graded result.
+        // Baseline artifacts are behavioral-axis members, so the non-trigger carry filters above
+        // already preserve them (rows + per_eval) on a trigger-only run.
+        var baselineRows: [JSONValue] = []
+        var baselinePerEval: [JSONValue] = []
+        var baselineSummary: JSONValue?
+        var deltaSummary: JSONValue?
+        if let baseline, let behavioral {
+            var baselineTrialRates: [Double] = []
+            for eval in baseline {
+                let measured = eval.trials.filter { $0.exit != .polluted }
+                for (index, trial) in measured.enumerated() {
+                    let total = trial.verdicts.count
+                    let passed = trial.verdicts.filter(\.passed).count
+                    let rate = total == 0 ? 0 : Double(passed) / Double(total)
+                    baselineTrialRates.append(rate)
+                    baselineRows.append(.object([
+                        "configuration": .string("without_skill"),
+                        "eval_id": .string(eval.evalId),
+                        "run_number": .number(Double(index + 1)),
+                        "expectations": .array(trial.verdicts.map { v in
+                            .object(["text": .string(v.criterion), "passed": .bool(v.passed), "evidence": .string(v.rationale)])
+                        }),
+                        "result": .object([
+                            "passed": .number(Double(passed)),
+                            "failed": .number(Double(total - passed)),
+                            "total": .number(Double(total)),
+                            "pass_rate": .number(rate)
+                        ])
+                    ]))
+                }
+            }
+            baselinePerEval = baseline.map { eval in
+                let measured = eval.trials.filter { $0.exit != .polluted }
+                let passes = measured.filter(\.passed).count
+                let status = PassK.status(passes: passes, recorded: measured.count)
+                let rates = measured.map { trial -> Double in
+                    let total = trial.verdicts.count
+                    return total == 0 ? 0 : Double(trial.verdicts.filter(\.passed).count) / Double(total)
+                }
+                return .object([
+                    "arm": .string("baseline"),
+                    "eval_id": .string(eval.evalId),
+                    "runs": .number(Double(measured.count)),
+                    "perfect_passes": .number(Double(passes)),
+                    "pass_power_k": .number(status == .pass ? 1 : 0),
+                    "flaky": .bool(status == .flaky),
+                    "mean_pass_rate": .number(rates.isEmpty ? 0 : rates.reduce(0, +) / Double(rates.count)),
+                    "polluted": .number(Double(eval.polluted))
+                ])
+            }
+            let baseDurations = baseline.flatMap { $0.trials.filter { $0.exit != .polluted }.compactMap(\.durationSeconds) }
+            let withDurations = behavioral.evals.flatMap { $0.trials.compactMap(\.durationSeconds) }
+            baselineSummary = Self.armSummary(passRates: baselineTrialRates, durations: baseDurations)
+            // The canonical delta block: signed fixed-precision strings (predecessor
+            // `Benchmark.swift` format parity — `+0.50` / `+13.0` / `+1700`); tokens zeros until
+            // F60's usage telemetry. `pass_rate` uses the **paired** estimator — the SAME
+            // `ABComparison` math the report carries, so `skillet.run/1`'s `ab.paired_mean_delta`
+            // and the committed record can never disagree (review finding, 2026-07-07: a pooled
+            // trial-mean difference diverges when pollution removes baseline trials unevenly).
+            // `time_seconds` stays the pooled-mean difference, matching the per-arm stats beside it
+            // and the live `timeDeltaSeconds`.
+            let comparison = ABComparison(withArm: behavioral.evals, baseline: baseline)
+            // Preserve the live report's optionality (review round 2): a key appears only when the
+            // quantity was MEASURED — `mean([])` is not a measurement, and writing "+0.0"/"+N.0"
+            // off an all-polluted arm would fabricate a delta the live report honestly withholds.
+            let measuredPairs = comparison.perEval.count - comparison.unmeasuredEvalIds.count
+            var delta: [String: JSONValue] = [:]
+            if measuredPairs > 0 {
+                delta["pass_rate"] = .string(String(format: "%+.2f", comparison.pairedMeanDelta))
+            }
+            if !withDurations.isEmpty && !baseDurations.isEmpty {
+                delta["time_seconds"] = .string(String(format: "%+.1f", Self.mean(withDurations) - Self.mean(baseDurations)))
+            }
+            if !delta.isEmpty {
+                delta["tokens"] = .string("+0")
+                deltaSummary = .object(delta)
+            }
+        } else if behavioral == nil {
+            // Trigger-only run after an --ab run: carry the arms' summaries like every other
+            // behavioral-axis artifact.
+            baselineSummary = priorSummary?["without_skill"]
+            deltaSummary = priorSummary?["delta"]
         }
 
         // --- Trigger axis (F14): deterministic single-expectation rows, `configuration: "trigger"`. ---
@@ -224,14 +320,22 @@ public extension BenchmarkFile {
         }
 
         var consistency = behavioralConsistency.merging(triggerConsistency) { current, _ in current }
-        consistency["per_eval"] = .array(behavioralPerEval + triggerPerEval)
+        consistency["per_eval"] = .array(behavioralPerEval + baselinePerEval + triggerPerEval)
         var summary: [String: JSONValue] = [:]
-        if let behavioralSummary { summary["default"] = behavioralSummary }
+        if let behavioralSummary {
+            // Fresh --ab runs (and carried post-ab records) key the with-arm canonically; every
+            // other case keeps F7's "default".
+            let withKey = (baseline != nil) || (behavioral == nil && priorSummary?["with_skill"] != nil)
+                ? "with_skill" : "default"
+            summary[withKey] = behavioralSummary
+        }
+        if let baselineSummary { summary["without_skill"] = baselineSummary }
+        if let deltaSummary { summary["delta"] = deltaSummary }
         if let triggerSummary { summary["trigger"] = triggerSummary }
 
         self.init(fields: [
             "metadata": .object(metadata),
-            "runs": .array(behavioralRows + triggerRows),
+            "runs": .array(behavioralRows + baselineRows + triggerRows),
             "consistency": .object(consistency),
             "run_summary": .object(summary)
         ])
@@ -245,17 +349,63 @@ public extension BenchmarkFile {
         return .object(["mean": .number(mean), "stddev": .number(variance.squareRoot()), "min": .number(xs.min() ?? 0), "max": .number(xs.max() ?? 0)])
     }
 
+    /// Canonical per-arm summary (F15): viewer-shaped stats for `pass_rate` (+ `tokens`, zeros
+    /// until F60's usage telemetry — a documented sentinel). `time_seconds` appears only when the
+    /// arm actually measured durations — zero-stats for an unmeasured arm would read as real
+    /// instant trials and let the offline time delta fabricate a number (review round 2).
+    private static func armSummary(passRates: [Double], durations: [Double]) -> JSONValue {
+        var arm: [String: JSONValue] = [
+            "pass_rate": stats(passRates),
+            "tokens": stats([])
+        ]
+        if !durations.isEmpty { arm["time_seconds"] = stats(durations) }
+        return .object(arm)
+    }
+
+    private static func mean(_ xs: [Double]) -> Double {
+        xs.isEmpty ? 0 : xs.reduce(0, +) / Double(xs.count)
+    }
+
     /// Re-derive per-eval `(passes, recorded)` from the committed `benchmark.json` — the authoritative
     /// `pass^k` recompute basis (P2/D3). Reads skillet's **`consistency.per_eval`** (`perfect_passes`/
     /// `runs`), not the viewer's per-run `result` (whose counts are *expectations*, a different unit).
     /// `eval_id` is coerced string-or-number so real numeric-id records aren't silently dropped.
     var evalCounts: [(id: String, passes: Int, recorded: Int)] {
-        counts { $0["axis"]?.stringValue != "trigger" }   // behavioral = no marker (legacy) or non-trigger
+        // Behavioral WITH-arm = non-trigger and non-baseline (F15's `arm` marker keeps arms unmixed).
+        counts { $0["axis"]?.stringValue != "trigger" && $0["arm"]?.stringValue != "baseline" }
     }
 
     /// The trigger axis's per-case `(passes, recorded)` — entries marked `"axis": "trigger"` (F14).
     var triggerCounts: [(id: String, passes: Int, recorded: Int)] {
         counts { $0["axis"]?.stringValue == "trigger" }
+    }
+
+    /// The baseline arm's per-eval `(passes, recorded)` — entries marked `"arm": "baseline"` (F15;
+    /// `recorded` here is the *measured* count, polluted trials already excluded by the producer).
+    var baselineCounts: [(id: String, passes: Int, recorded: Int)] {
+        counts { $0["arm"]?.stringValue == "baseline" }
+    }
+
+    /// The committed arms' mean wall-clock delta (with − without) from `run_summary` (F15); `nil`
+    /// when either arm's `time_seconds` stats are absent — the producer omits them for an arm with
+    /// no measured durations, so absence means unmeasured, mirroring the live report's optionality.
+    var abTimeDelta: Double? {
+        let summary = fields["run_summary"]?.objectValue
+        guard let with = summary?["with_skill"]?.objectValue?["time_seconds"]?.objectValue?["mean"]?.numberValue,
+              let without = summary?["without_skill"]?.objectValue?["time_seconds"]?.objectValue?["mean"]?.numberValue
+        else { return nil }
+        return with - without
+    }
+
+    /// Total baseline trials the pollution tripwire disqualified, summed from the arm's `per_eval`
+    /// entries (F15).
+    var abPolluted: Int {
+        guard let perEval = fields["consistency"]?.objectValue?["per_eval"]?.arrayValue else { return 0 }
+        return perEval.reduce(0) { total, entry in
+            guard let o = entry.objectValue, o["arm"]?.stringValue == "baseline",
+                  let p = o["polluted"]?.numberValue.flatMap({ Int(exactly: $0) }) else { return total }
+            return total + p
+        }
     }
 
     private func counts(where include: ([String: JSONValue]) -> Bool) -> [(id: String, passes: Int, recorded: Int)] {
@@ -281,13 +431,30 @@ public extension BenchmarkFile {
 public extension RunReport {
     /// Re-derive the report offline from a committed `benchmark.json` — the basis for a `pass^k` that
     /// survives `rm -rf .skillet` (P2). The skill name comes from the record's metadata; the trigger
-    /// axis re-derives from its own marked `per_eval` entries when present (F14).
+    /// axis re-derives from its own marked `per_eval` entries when present (F14), and the A/B block
+    /// rebuilds from the baseline-arm entries (F15) — same paired math and units as the live path
+    /// (trial full-pass rates: `perfect_passes / runs`).
     init(benchmark: BenchmarkFile) {
         let triggerCounts = benchmark.triggerCounts
+        let withCounts = benchmark.evalCounts
+        let baseCounts = benchmark.baselineCounts
+        var ab: ABComparison?
+        if !baseCounts.isEmpty {
+            // The SHARED paired builder (measured-pair rules included) — offline and live cannot
+            // diverge because there is only one implementation of the math.
+            let baseById = Dictionary(baseCounts.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+            let pairs: [ABComparison.Pair] = withCounts.map { with in
+                let base = baseById[with.id]
+                return (id: with.id, withPasses: with.passes, withRecorded: with.recorded,
+                        basePasses: base?.passes ?? 0, baseRecorded: base?.recorded ?? 0)
+            }
+            ab = ABComparison(pairs: pairs, timeDeltaSeconds: benchmark.abTimeDelta, polluted: benchmark.abPolluted)
+        }
         self.init(
             skill: benchmark.skillName ?? "unknown",
-            counts: benchmark.evalCounts,
-            trigger: triggerCounts.isEmpty ? nil : Axis(counts: triggerCounts)
+            counts: withCounts,
+            trigger: triggerCounts.isEmpty ? nil : Axis(counts: triggerCounts),
+            ab: ab
         )
     }
 }

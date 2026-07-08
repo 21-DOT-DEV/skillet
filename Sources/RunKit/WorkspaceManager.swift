@@ -129,21 +129,25 @@ public struct WorkspaceManager: Sendable {
     }
 
     /// Create a fresh sandbox `base/<label>`, stage the skill (minus `evaluations/`) + input files.
+    /// `stageSkill: false` (F15's baseline arm, `SkillSet.none`) stages **fixtures only** — the
+    /// sandbox carries no skill at all; fixtures still resolve against the skill directory.
     /// (`FileManager` is non-`Sendable`, so this seam uses `.default` inline rather than storing it.)
-    public func prepare(skill: SkillRef, files: [String], base: URL, label: String) throws -> Workspace {
+    public func prepare(skill: SkillRef, files: [String], base: URL, label: String, stageSkill: Bool = true) throws -> Workspace {
         let fm = FileManager.default
         let root = base.appendingPathComponent(label, isDirectory: true)
         if fm.fileExists(atPath: root.path) { try fm.removeItem(at: root) }   // no leaked state
         try fm.createDirectory(at: root, withIntermediateDirectories: true)
 
-        // Stage the skill under the discovery path, minus evaluations/.
-        let dest = root.appendingPathComponent(".claude/skills/\(skill.name)", isDirectory: true)
-        try fm.createDirectory(at: dest, withIntermediateDirectories: true)
         let source = URL(fileURLWithPath: skill.path, isDirectory: true)
-        // Stage non-hidden, non-evaluations top-level entries via the filtered copy, so nested hidden
-        // files / symlinks are dropped too (RunCommand preflight also fails loud on a bundle symlink).
-        for entry in Self.stagedEntries(skillDir: source) {
-            try Self.copyFiltered(from: source.appendingPathComponent(entry), to: dest.appendingPathComponent(entry))
+        if stageSkill {
+            // Stage the skill under the discovery path, minus evaluations/.
+            let dest = root.appendingPathComponent(".claude/skills/\(skill.name)", isDirectory: true)
+            try fm.createDirectory(at: dest, withIntermediateDirectories: true)
+            // Stage non-hidden, non-evaluations top-level entries via the filtered copy, so nested hidden
+            // files / symlinks are dropped too (RunCommand preflight also fails loud on a bundle symlink).
+            for entry in Self.stagedEntries(skillDir: source) {
+                try Self.copyFiltered(from: source.appendingPathComponent(entry), to: dest.appendingPathComponent(entry))
+            }
         }
 
         // Stage eval input files at their declared sandbox path (the `fixtures/` fallback resolves the

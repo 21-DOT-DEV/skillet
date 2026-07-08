@@ -1,6 +1,6 @@
 # Product Roadmap — skillet
 
-**Version:** v1.14.1
+**Version:** v1.15.0
 **Last Updated:** 2026-07-07
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
@@ -139,7 +139,8 @@ Phase 1's `F1–F8` and Phase 8's `F10–F13` were already global and were prese
   & output contract), F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6
   (claude-code adapter), F8 (frozen boundary codecs), and now F7 (`skillet run` — the neutral runner,
   `pass^k`, `RunKit`+`JudgeKit`) — `Specs/001`–`007`, 235 tests green. **Phase 2 is IN PROGRESS —
-  F3 (`skillet doctor`) + F14 (the trigger axis) shipped 2026-07-04 (`Specs/008`–`009`, 292 tests green)**; the remaining Phase 2–8
+  F3 (`skillet doctor`) + F14 (the trigger axis) shipped 2026-07-04, F15 (the A/B baseline arm)
+  shipped 2026-07-07 (`Specs/008`–`010`, 321 tests green)**; the remaining Phase 2–8
   features are PLANNED/FUTURE: those statuses reflect design intent verified against the design doc
   (Medium confidence), not running code.
 - **"Ported" assumption.** The design doc says much of v1 is faithfully
@@ -192,11 +193,11 @@ process-assertions — decided 2026-07-06 via the Apple Evaluations cross-refere
 
 ## Change Log
 
-Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.14.1, latest first, one
+Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.15.0, latest first, one
 linkable heading per version (extracted 2026-07-04; historical entries are never rewritten).
 
-- **Latest — v1.14.1 (2026-07-07): PATCH** — review-round consistency fixes: the Global-Risks
-  judge-reliability bullet now cites the specified F10 agreement check (`needs-research` reserved
-  for F68); design §13's v1 scope line reconciled with F61–F68 (design → v0.38); Phase 8's risks
-  text names all cross-reference additions. (Prior: v1.14.0 — diagnostic model tier F67 + Apple
-  FM/PCC provider F68; v1.13.0 — Apple Evaluations cross-reference, F61–F66.)
+- **Latest — v1.15.0 (2026-07-07): MINOR** — **F15 `skillet run --ab` SHIPPED**: the provably
+  skill-free baseline arm — prevent + verify + preflight isolation (session-level skill disabling,
+  $0 flag preflight, per-trial `polluted` tripwire), paired per-eval Δ ± SE, canonical
+  `with_skill`/`without_skill` benchmark rows + signed delta, offline recompute. (Prior: v1.14.1 —
+  review-round fixes; v1.14.0 — diagnostic model tier F67 + Apple FM/PCC provider F68.)

@@ -28,8 +28,11 @@ public struct RunPlan: SchemaIdentified, Sendable, Equatable {
     /// trial-denominated (`confirm_above_trials` has meant trials since it shipped; decided
     /// in-session 2026-07-05); this field makes the cost visible before consent (P9).
     public let estimatedCalls: Int?
+    /// Baseline-arm trials added by `--ab` (F15, additive) — `nil` (key absent) on single-arm runs.
+    /// Already included in `trials` and `estimatedCalls`; broken out so the doubling is visible.
+    public let abBaselineTrials: Int?
 
-    public init(skill: String, evals: Int, k: Int, trials: Int, confirmAboveTrials: Int, requiresConfirmation: Bool, willSpend: Bool, triggerCases: Int? = nil, triggerTrials: Int? = nil, estimatedCalls: Int? = nil) {
+    public init(skill: String, evals: Int, k: Int, trials: Int, confirmAboveTrials: Int, requiresConfirmation: Bool, willSpend: Bool, triggerCases: Int? = nil, triggerTrials: Int? = nil, estimatedCalls: Int? = nil, abBaselineTrials: Int? = nil) {
         self.skill = skill
         self.evals = evals
         self.k = k
@@ -40,5 +43,6 @@ public struct RunPlan: SchemaIdentified, Sendable, Equatable {
         self.triggerCases = triggerCases
         self.triggerTrials = triggerTrials
         self.estimatedCalls = estimatedCalls
+        self.abBaselineTrials = abBaselineTrials
     }
 }

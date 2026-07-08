@@ -4,6 +4,26 @@ The roadmap's versioned change log, extracted from `ROADMAP.md` on 2026-07-04 (v
 stays lean. Latest first; every version is a linkable heading; historical entries are never rewritten.
 Companion: [`skillet-design-changelog.md`](skillet-design-changelog.md).
 
+## v1.15.0 — 2026-07-07
+
+MINOR — **F15 SHIPPED: the A/B baseline arm** ([Specs/010](Specs/010-ab-baseline/plan.md); design →
+v0.39). `skillet run --ab` runs every behavioral eval through a with-skill arm and a **provably
+skill-free** baseline arm and reports the **paired** Δ ("is the skill earning its tokens?").
+Isolation is prevent + verify + preflight (decided in-session after a Claude-Code-flags +
+promptfoo/Anthropic-error-bars cross-reference): baseline trials launch with the session-level
+no-skills switch (`--disable-slash-commands`), a $0 `--help` preflight refuses unsupported binaries
+(exit 3 — §9.2's declare-cannot), and every baseline trial's trace must show zero skill invocations
+or the trial is `polluted` — never judged, excluded from counts, loud in the report. Reporting:
+per-eval paired Δ, mean ± Bessel SE (honest "too few" below n = 2), flip tally, time Δ (new
+per-trial durations); additive `ab` block in `skillet.run/1` + `ab_baseline_trials` in the plan
+payload. `benchmark.json` gains the canonical `with_skill`/`without_skill` rows (reserved by
+Specs/009), arm-marked `per_eval` entries, per-arm stats + signed `delta` strings; single-arm runs
+keep `"default"`; trigger-only runs carry the AB record (latest-run-per-axis); the offline
+recompute rebuilds the block (P2/D3). Behavioral-axis only — trigger-only + `--ab` refuses (exit 2),
+mixed runs print the single-arm note. Both roadmap F15 metrics verified against the built binary.
++25 tests at implementation and +4 across two post-review rounds (**321 green final**, verified
+full-suite run). Phase 2 remains IN PROGRESS.
+
 ## v1.14.1 — 2026-07-07
 
 PATCH — **review-round consistency fixes** (three reviewed findings; no scope or priority change;

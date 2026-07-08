@@ -209,9 +209,26 @@ public struct Renderer: Sendable {
                 ? String(format: "pass^k %.2f (k=%d) · pass^1 %.2f", report.passK, report.observedK, report.passOne)
                 : String(format: "consistency unmeasurable (k=%d) · pass^1 %.2f", report.observedK, report.passOne)
             out += (allPass ? bold("✓ run: \(report.skill) — behavior — \(headline)") : red("✗ run: \(report.skill) — behavior — \(headline)")) + "\n"
-            let rows = report.evals.map { [$0.id, $0.status.rawValue, "\($0.passes)/\($0.recorded)"] }
-            out += renderTable(["EVAL", "STATUS", "PASSES"], rows).stdout
-            out += "\n\(report.passed) passed · \(report.flaky) flaky · \(report.failed) failed · observed k=\(report.observedK)\n"
+            if let ab = report.ab {
+                // F15: both arms side by side in the STATUS passes/trials idiom, plus the paired Δ
+                // per eval — flips and magnitudes read together. An unmeasured pair (no measured
+                // trials in an arm) prints "—"/"n/a", never a fabricated status or ±1.00.
+                let rows = ab.perEval.map { row in
+                    [row.id,
+                     "\(row.withStatus.rawValue) \(row.withPasses)/\(row.withRecorded)",
+                     row.baselineRecorded == 0
+                         ? "— 0/0"
+                         : "\(row.baselineStatus.rawValue) \(row.baselinePasses)/\(row.baselineRecorded)",
+                     row.delta.map { String(format: "%+.2f", $0) } ?? "n/a"]
+                }
+                out += renderTable(["EVAL", "WITH", "BASELINE", "Δ"], rows).stdout
+                out += "\n\(report.passed) passed · \(report.flaky) flaky · \(report.failed) failed · observed k=\(report.observedK) (with-skill arm)\n"
+                out += abFooter(ab)
+            } else {
+                let rows = report.evals.map { [$0.id, $0.status.rawValue, "\($0.passes)/\($0.recorded)"] }
+                out += renderTable(["EVAL", "STATUS", "PASSES"], rows).stdout
+                out += "\n\(report.passed) passed · \(report.flaky) flaky · \(report.failed) failed · observed k=\(report.observedK)\n"
+            }
         }
         // Trigger section (F14) — the description axis, reported separately (§6.1).
         if let trigger = report.trigger {
@@ -226,6 +243,34 @@ public struct Renderer: Sendable {
         }
         if !nextSteps.isEmpty {
             out += "\(bold("→ next:")) \(nextSteps.joined(separator: " · "))\n"
+        }
+        return out
+    }
+
+    /// The paired-comparison footer (F15): the suite verdict as a paired mean Δ ± SE (or an honest
+    /// "too few" / "unmeasured" — never invented certainty), the flip tally over measured pairs,
+    /// the time Δ, and the loud hygiene lines (pollution; unmeasured pairs; flaky-in-either-arm
+    /// evals whose Δ is untrusted).
+    private func abFooter(_ ab: ABComparison) -> String {
+        var out = ""
+        let measured = ab.perEval.count - ab.unmeasuredEvalIds.count
+        let effect: String
+        if measured == 0 {
+            effect = "unmeasured — no eval has measured trials in both arms"
+        } else {
+            effect = ab.pairedSE.map { String(format: "%+.2f ± %.2f", ab.pairedMeanDelta, $0) }
+                ?? String(format: "%+.2f (too few evals for uncertainty)", ab.pairedMeanDelta)
+        }
+        let time = ab.timeDeltaSeconds.map { String(format: "%+.1fs", $0) } ?? "—"
+        out += "skill effect (paired Δ pass rate): \(effect) · flips \(ab.flipsUp)↑ \(ab.flipsDown)↓ of \(measured) · time Δ \(time) · tokens Δ —\n"
+        if ab.polluted > 0 {
+            out += red("⚠ \(ab.polluted) baseline trial(s) polluted — a skill fired in the no-skill arm; excluded from every count (isolation failed on this machine)") + "\n"
+        }
+        if !ab.unmeasuredEvalIds.isEmpty {
+            out += "\(ab.unmeasuredEvalIds.count) eval(s) without measured trials in both arms — no Δ, no flip: \(ab.unmeasuredEvalIds.joined(separator: ", "))\n"
+        }
+        if !ab.untrustedEvalIds.isEmpty {
+            out += "\(ab.untrustedEvalIds.count) eval(s) flaky in an arm — Δ untrusted until stabilized: \(ab.untrustedEvalIds.joined(separator: ", "))\n"
         }
         return out
     }

@@ -129,6 +129,10 @@ public protocol HarnessAdapter: Sendable {
     func parseTrace(_ raw: RawTrace) throws -> Trace
     func locateSessions(_ query: SessionQuery) async throws -> [NativeSessionRef]
     func exportSession(_ ref: NativeSessionRef) async throws -> RawTrace
+    /// Prove the harness can run a `SkillSet.none` baseline arm with ambient skills provably
+    /// excluded (F15, §9.2) — a **$0** check, run before any paid `--ab` trial. Throws (never
+    /// warns) when isolation can't be proven: `--ab` is refused rather than polluted.
+    func verifyBaselineIsolation() async throws
 }
 
 /// Capability-gated methods degrade **loudly** by default (§9.1): an adapter that doesn't override
@@ -152,5 +156,8 @@ public extension HarnessAdapter {
     }
     func exportSession(_ ref: NativeSessionRef) async throws -> RawTrace {
         throw HarnessError.notSupported(capability: "session_capture")
+    }
+    func verifyBaselineIsolation() async throws {
+        throw HarnessError.notSupported(capability: "baseline_isolation")
     }
 }

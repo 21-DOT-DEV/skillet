@@ -24,10 +24,13 @@ struct RunCommand: AsyncParsableCommand {
         against the run's response + post-run files. TRIGGER: each evaluations/trigger-eval.json \
         query runs k times against frontmatter-only stubs of every repo skill, judged fired/not-fired \
         deterministically from the trace — no judge call. Both print PASS/FAIL/FLAKY tables with \
-        aggregate pass^k, reported separately. Estimates trials and model calls first; won't spend \
-        above runs.confirm_above_trials without --yes; --dry-run previews the plan. Writes \
-        evaluations/benchmark.json (both axes, merged per axis) and grading.json (behavioral runs \
-        only — trigger trials produce no judge verdicts). Commit these; pass^k re-derives from them.
+        aggregate pass^k, reported separately. --ab doubles every behavioral eval with a provably \
+        skill-free BASELINE arm (skills disabled at the session level, verified from each trial's \
+        trace) and reports the paired per-eval Δ — "is the skill earning its tokens?". Estimates \
+        trials and model calls first; won't spend above runs.confirm_above_trials without --yes; \
+        --dry-run previews the plan. Writes evaluations/benchmark.json (both axes, merged per axis; \
+        --ab adds canonical with_skill/without_skill rows) and grading.json (with-skill behavioral \
+        runs only — trigger trials produce no judge verdicts). Commit these; pass^k re-derives from them.
         """
     )
 
@@ -59,11 +62,16 @@ struct RunCommand: AsyncParsableCommand {
     @Flag(name: .customLong("keep-workspace"), help: "Keep each per-trial sandbox for debugging.")
     var keepWorkspace = false
 
+    @Flag(name: .long, help: "Add a provably skill-free baseline arm to every behavioral eval and report the paired Δ.")
+    var ab = false
+
     // Hidden test-only offline wiring (ReplayAdapter + ReplayJudge); the public --record/--replay is F19.
     @Flag(name: .long, help: ArgumentHelp("Test-only offline replay wiring.", visibility: .private))
     var replay = false
     @Option(name: .customLong("replay-map"), help: ArgumentHelp("Test-only replay verdict map (criterion→bool JSON).", visibility: .private))
     var replayMap: String?
+    @Option(name: .customLong("replay-baseline-map"), help: ArgumentHelp("Test-only baseline-arm replay verdict map (criterion→bool JSON).", visibility: .private))
+    var replayBaselineMap: String?
 
     func run() async throws {
         let renderer = options.makeRenderer()
@@ -128,6 +136,20 @@ struct RunCommand: AsyncParsableCommand {
             try runLintPreflight(skillDir: skillDir, lintConfig: config?.lint ?? .init(), renderer: renderer,
                                  behavioralAxisRuns: cases != nil)
 
+            // F15 scope (D-4): the baseline arm is behavioral-only — activation is tested with the
+            // skill present (universal practice); a run executing no behavioral evals makes --ab
+            // meaningless, so refuse before anything is spent ("check early and bail").
+            if ab && cases == nil {
+                throw EDDError.usage(
+                    message: "--ab adds a without-skill baseline to behavioral evals, but no behavioral evals are running"
+                        + (triggerCases != nil ? " (only the trigger axis is)" : ""),
+                    remedy: "add cases to evaluations/evals.json, or drop --ab (activation is tested with the skill present)"
+                )
+            }
+            if ab && triggerCases != nil {
+                Console.emit(Rendering(stderr: "note: --ab applies to the behavior axis; the trigger axis runs single-arm\n"))
+            }
+
             // Skipped-axis notes (Specs/009 A4): the default mode says which axis it skipped and why,
             // on stderr so machine-readable stdout stays untouched (P7).
             if axis == .all {
@@ -143,9 +165,12 @@ struct RunCommand: AsyncParsableCommand {
             // meant trials since it shipped, so its unit never silently changes (decided in-session,
             // F14 review round 2). The CALL estimate (behavioral × 2: task + judge; trigger × 1: no
             // judge) is shown in previews and the prompt so the cost is visible before consent.
-            let behavioralTrials = (cases?.count ?? 0) * k
+            let withArmTrials = (cases?.count ?? 0) * k
+            let baselineTrials = ab ? withArmTrials : 0
+            let behavioralTrials = withArmTrials + baselineTrials
             let triggerTrials = (triggerCases?.count ?? 0) * k
             let trials = behavioralTrials + triggerTrials
+            // Baseline trials are judged too (same rubric, both arms — F15 A1): × 2 calls each.
             let estimatedCalls = behavioralTrials * 2 + triggerTrials
             if dryRun {
                 let plan = RunPlan(
@@ -153,13 +178,14 @@ struct RunCommand: AsyncParsableCommand {
                     confirmAboveTrials: runsCfg.confirmAboveTrials,
                     requiresConfirmation: trials > runsCfg.confirmAboveTrials, willSpend: !replay,
                     triggerCases: triggerCases?.count, triggerTrials: triggerCases.map { _ in triggerTrials },
-                    estimatedCalls: estimatedCalls
+                    estimatedCalls: estimatedCalls,
+                    abBaselineTrials: ab ? baselineTrials : nil
                 )
                 if options.json {
                     Console.emit(Rendering(stdout: try SkilletJSON.encode(plan) + "\n"))
                 } else {
                     var parts: [String] = []
-                    if let cases { parts.append("\(cases.count) eval(s) × k=\(k)") }
+                    if let cases { parts.append("\(cases.count) eval(s) × k=\(k)\(ab ? " × 2 arms" : "")") }
                     if let triggerCases { parts.append("\(triggerCases.count) trigger case(s) × k=\(k)") }
                     Console.emit(Rendering(stdout: "plan: \(parts.joined(separator: " + ")) = \(trials) trial(s) ≈ \(estimatedCalls) model call(s) for \(skillName) (nothing spent)\n"))
                 }
@@ -178,6 +204,21 @@ struct RunCommand: AsyncParsableCommand {
             // Strict for the paid path (refuse banned/unauth before spend); replay's probe is canned and
             // free — probed anyway so the executor's version is stamped into the records (M3 provenance).
             let harnessInfo = try await backend.adapter.probe(strict: !replay)
+            // F15 D-1: prove the harness can hold a skill-free baseline BEFORE any paid trial — a
+            // $0 interrogation of the resolved binary. Flag support shifts across harness versions
+            // (the denylist class), so it is checked every run, never assumed; refusal is exit 3.
+            if ab {
+                do {
+                    try await backend.adapter.verifyBaselineIsolation()
+                } catch let error as EDDError {
+                    throw error
+                } catch {
+                    throw EDDError.baselineNotIsolable(
+                        harness: backend.adapter.id.rawValue,
+                        reason: "the \(backend.adapter.id.rawValue) adapter does not implement baseline isolation"
+                    )
+                }
+            }
 
             let skillRef = SkillRef(name: skillName, path: skillDir.path)
             try assertCacheNotSymlinked(projectRoot: root)   // confine cache writes to the repo (no symlink escape)
@@ -192,6 +233,12 @@ struct RunCommand: AsyncParsableCommand {
                     injection: .only(load: [skillRef]), base: base, keepWorkspace: keepWorkspace
                 )
             } else { nil }
+            // The baseline arm (F15): same evals, same judge + rubric (A1 — that IS the
+            // comparison), `SkillSet.none` — nothing staged, isolation switch on, tripwire armed.
+            let baselineResults: [EvalResult]? = if ab, let cases {
+                await Runner(adapter: backend.adapter, judge: backend.baselineJudge)
+                    .runBaseline(skill: skillRef, evals: cases, k: k, base: base, keepWorkspace: keepWorkspace)
+            } else { nil }
             // The trigger axis (F14, §9.3): bare queries against whole-corpus frontmatter stubs,
             // fired/not-fired judged deterministically from skillInvocations — one call per trial.
             let triggerResults: [TriggerEvalResult]? = if let triggerCases {
@@ -205,7 +252,8 @@ struct RunCommand: AsyncParsableCommand {
             let report = RunReport(
                 skill: skillName,
                 results: behavioralOutcome?.evals ?? [],
-                trigger: triggerResults
+                trigger: triggerResults,
+                baseline: baselineResults
             )
             // Stamp the ACTUAL judge backend + executor version in records (not configured values) —
             // P3 review fix + M3 provenance: re-grade and harness-vs-skill attribution need the truth.
@@ -214,7 +262,8 @@ struct RunCommand: AsyncParsableCommand {
                 judgePromptVersion: backend.promptVersion,
                 executorBinaryVersion: harnessInfo.version.isEmpty ? "unknown" : harnessInfo.version
             )
-            try writeRecords(report: report, behavioral: behavioralOutcome, trigger: triggerResults,
+            try writeRecords(report: report, behavioral: behavioralOutcome, baseline: baselineResults,
+                             trigger: triggerResults,
                              skillDir: skillDir, harness: backend.adapter.id.rawValue, k: k,
                              provenance: provenance, base: base)
 
@@ -322,9 +371,14 @@ struct RunCommand: AsyncParsableCommand {
     /// The replay path is exempt: no real judge is built there (canned verdicts, nothing spent).
     private func buildAdapterAndJudge(
         config: SkilletConfig?, judge judgeCfg: SkilletConfig.Judge, timeout: Duration, outputLimitBytes: Int, needsJudge: Bool = true
-    ) throws -> (adapter: any HarnessAdapter, judge: any Judge, provider: String, model: String, promptVersion: String) {
+    ) throws -> (adapter: any HarnessAdapter, judge: any Judge, baselineJudge: any Judge, provider: String, model: String, promptVersion: String) {
         if replay {
-            return (ReplayAdapter(), ReplayJudge(loadReplayMap(), defaultPass: replayMap == nil), "replay", "replay", "replay")
+            // Arm-distinct canned verdicts (F15 A5): the baseline map defaults to fail-all, so a
+            // replayed --ab shows a deterministic positive Δ; tests override either arm's map.
+            return (ReplayAdapter(),
+                    ReplayJudge(loadReplayMap(), defaultPass: replayMap == nil),
+                    ReplayJudge(loadBaselineReplayMap(), defaultPass: false),
+                    "replay", "replay", "replay")
         }
         // Trigger-only (F14): grading is deterministic — no judge is constructed or configured-for.
         // The sentinel provenance ("none") stamps records honestly; the behavioral judge block in a
@@ -332,7 +386,7 @@ struct RunCommand: AsyncParsableCommand {
         if !needsJudge {
             let claudePath = config?.harness?.claudeCode?.path
             let adapter = ClaudeCodeAdapter(configPath: claudePath, timeout: timeout, outputLimitBytes: outputLimitBytes)
-            return (adapter, UnjudgedAxisJudge(), "none", "none", "none")
+            return (adapter, UnjudgedAxisJudge(), UnjudgedAxisJudge(), "none", "none", "none")
         }
         guard judgeCfg.provider == "claude-code" else {
             throw EDDError.usage(
@@ -352,7 +406,9 @@ struct RunCommand: AsyncParsableCommand {
         }
         let adapter = ClaudeCodeAdapter(configPath: claudePath, timeout: timeout, outputLimitBytes: outputLimitBytes)
         let judge = TextJudge(runner: ClaudeCLIJudgeRunner(binaryPath: resolved.path), model: model)
-        return (adapter, judge, "claude-code", model, TextJudge.promptVersion)
+        // Live --ab: the SAME judge grades both arms (F15 A1) — the comparison is the arms, never
+        // the grader.
+        return (adapter, judge, judge, "claude-code", model, TextJudge.promptVersion)
     }
 
     /// Validate that every declared eval fixture (`files[]`, resolved against the skill directory)
@@ -460,6 +516,11 @@ struct RunCommand: AsyncParsableCommand {
         return (try? JSONDecoder().decode([String: Bool].self, from: data)) ?? [:]
     }
 
+    private func loadBaselineReplayMap() -> [String: Bool] {
+        guard let path = replayBaselineMap, let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return [:] }
+        return (try? JSONDecoder().decode([String: Bool].self, from: data)) ?? [:]
+    }
+
     // MARK: - spend gate
 
     /// Confirm spend above the threshold (design P9). `--yes` proceeds; on a TTY we prompt; otherwise
@@ -483,7 +544,8 @@ struct RunCommand: AsyncParsableCommand {
     /// Write the committed records (the eval-viewer contract + the `pass^k` source of truth) into the
     /// skill's `evaluations/`, and a run summary into the deletable cache. The human commits the
     /// `evaluations/` files (P5 — skillet never auto-commits).
-    private func writeRecords(report: RunReport, behavioral: Runner.Outcome?, trigger: [TriggerEvalResult]?,
+    private func writeRecords(report: RunReport, behavioral: Runner.Outcome?, baseline: [EvalResult]?,
+                              trigger: [TriggerEvalResult]?,
                               skillDir: URL, harness: String, k: Int, provenance: RunProvenance, base: URL) throws {
         let evalDir = skillDir.appendingPathComponent("evaluations", isDirectory: true)
         try FileManager.default.createDirectory(at: evalDir, withIntermediateDirectories: true)
@@ -497,6 +559,7 @@ struct RunCommand: AsyncParsableCommand {
         try encoder.encode(BenchmarkFile(
             skill: report.skill,
             behavioral: behavioral.map { (report: report, evals: $0.evals) },
+            baseline: baseline,
             trigger: trigger, harness: harness, k: k, provenance: provenance, preserving: prior
         )).write(to: benchmarkURL)
         // grading.json is judge output — written only when the behavioral axis ran (a trigger-only

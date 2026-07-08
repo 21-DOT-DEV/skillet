@@ -2,7 +2,7 @@
 
 **Status:** PLANNED
 **Horizon:** Next
-**Last Updated:** 2026-06-17
+**Last Updated:** 2026-07-07
 
 ## Goal
 
@@ -59,6 +59,22 @@ decide what's worth a test. This phase is sequenced ahead of the harness matrix
    - Dependencies: baseline compare (F35).
    - Confidence: Medium — design §6.2, §8.
 
+5. **[F62]** Scored diagnostic dimensions (judge; surfaces in `triage`/`report`) — PLANNED · Net-new
+   - Purpose & user value: A rubric criterion may declare named quality dimensions
+     with anchored numeric scales (every score value carries a written description);
+     the judge returns per-dimension score + rationale *alongside* the binary
+     verdict. Scores never gate — they make failure analysis denser: rationales and
+     low dimensions point triage at *what* to fix, not just that something failed.
+   - Northstar: gap #1 (diagnosis density per failure).
+   - Success metrics:
+     - A criterion with dimensions yields per-dimension scores + rationales in run records and `triage`/`report`; verdicts, gates, and pass^k are provably unchanged by any score.
+     - Anchored scales are required (no bare 1–5); an all-samples-same-score dimension is surfaced with a "split this dimension" hint (Apple's guidance).
+   - Dependencies: judge (Phase 2), triage (F33).
+   - Confidence: Medium — design §14-13 (decided 2026-07-06, diagnostics-only; the binary-preferred counter-guidance is recorded in Appendix D).
+   - Diagnostic-tier lane (F67, design §9.6): Apple's Private Cloud Compute model is the candidate
+     scoring judge — explicit opt-in, never a default, and only after the F10 agreement check
+     clears κ ≥ 0.6 (§14-20).
+
 ## Dependencies & Sequencing
 
 - Local ordering: triage (F33) and contradiction detection (F34) first (consumer-skill
@@ -83,3 +99,8 @@ decide what's worth a test. This phase is sequenced ahead of the harness matrix
 - 2026-06-17: Phase created and spotlighted as its own phase (Northstar gap #1),
   sequenced before codification per the error-analysis-first cross-reference.
 - 2026-06-26: PATCH — adopted the global stable Fn ids (F33–F36; roadmap v1.8.0 scheme reconciliation). Mechanical renumber; no scope change.
+- 2026-07-06: MINOR — added **F62** (scored diagnostic dimensions, design §14-13 via the Apple
+  Evaluations cross-reference; diagnostics-only — binary verdicts remain the sole gate).
+  Roadmap → v1.13.0.
+- 2026-07-07: PATCH — F62 gains the diagnostic-tier lane note (F67/§14-20: PCC scoring judge,
+  opt-in behind F10 calibration). Roadmap → v1.14.0.

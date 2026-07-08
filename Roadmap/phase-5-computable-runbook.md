@@ -2,7 +2,7 @@
 
 **Status:** PLANNED
 **Horizon:** Next
-**Last Updated:** 2026-06-17
+**Last Updated:** 2026-07-07
 
 ## Goal
 
@@ -63,6 +63,26 @@ that justify a new tool, and it encodes the expert's cost-benefit discipline:
    - Dependencies: evidence (Phase 3), gates engine (F37), boundary codecs (Phase 1).
    - Confidence: Medium — design §6.2 `eval new`, §7.3.
 
+5. **[F63]** Trigger-corpus paraphrase expansion (CLI: `skillet eval new --expand <seed>`, name provisional) — PLANNED · Net-new
+   - Purpose & user value: Grow the trigger axis's query corpus from *observed*
+     seeds — paraphrase variants and near-misses of real trigger phrasings (from
+     captured sessions, friction, or existing trigger evals) — because activation
+     is wording-sensitive and thin coverage bites hardest there. Every generated
+     case records its seed, carries a `synthetic` provenance marker, and passes a
+     deterministic validator before entering the corpus (rejects reported, never
+     silently dropped).
+   - Northstar: loop integrity — coverage where the description axis needs volume,
+     without breaking codify-what-you-discover: seeds are always observed reality.
+   - Success metrics:
+     - Expansion refuses to run without a real seed; each generated case records seed + `synthetic` provenance and passes the validator.
+     - Generated near-misses land as `should_trigger:false` cases with routing expectations.
+   - Dependencies: trigger axis (F14, Phase 2), evidence formats (Phase 3), codify scaffolding (F40).
+   - Confidence: Medium — design §14-15 (decided 2026-07-06); precedent: Apple `SampleGenerator` (validator-gated), the retired Python harness's paraphrase technique.
+   - Notes: First slice of the general generator (F64, Phase 8); proof standing of synthetic cases is §14-16 / F45.
+   - Diagnostic-tier lane (F67, design §9.6): on macOS the unconfigured model slot defaults to
+     Apple's on-device model — $0, offline, announced in the plan, validator-gated (§14-20); on
+     Linux the slot stays unset until configured.
+
 ## Dependencies & Sequencing
 
 - Local ordering: gates engine (F37) → `next` (F38) → `--strict` (F39); `eval new`
@@ -86,3 +106,8 @@ that justify a new tool, and it encodes the expert's cost-benefit discipline:
 - 2026-06-17: Phase created. Sequenced after Error Analysis (Phase 4) so
   codification follows discovered failures, per the error-analysis-first ordering.
 - 2026-06-26: PATCH — adopted the global stable Fn ids (F37–F40; roadmap v1.8.0 scheme reconciliation). Mechanical renumber; no scope change.
+- 2026-07-06: MINOR — added **F63** (trigger-corpus paraphrase expansion; first slice of design
+  §14-15's observed-seed synthetic generation, Apple Evaluations cross-reference).
+  Roadmap → v1.13.0.
+- 2026-07-07: PATCH — F63 gains the diagnostic-tier lane note (F67/§14-20: macOS defaults to the
+  on-device model, announced + validator-gated). Roadmap → v1.14.0.

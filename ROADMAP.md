@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.12.0
-**Last Updated:** 2026-07-04
+**Version:** v1.14.1
+**Last Updated:** 2026-07-07
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is
@@ -56,22 +56,29 @@ derived from `skillet-design.md` and an external best-practice cross-reference
   shipped; the `doctor` preflight moved to Phase 2.)
 - **Phase 2 (Now):** Make deltas trustworthy — trigger axis, A/B baseline,
   grounded judge, scorers, flaky hygiene, record/replay, the `doctor` preflight
-  gate, the full free static-gate catalog, and TTY/HTML reporting.
+  gate, the full free static-gate catalog, TTY/HTML reporting, and deterministic
+  process assertions over the trace (F61).
 - **Phase 3 (Next):** Record production sessions and human friction as
   structured, greppable evidence (secret-sanitized on capture) — the raw material
   for error analysis.
 - **Phase 4 (Next):** Mine the corpus into a routed failure taxonomy,
-  contradictions first — error analysis *before* codification.
+  contradictions first — error analysis *before* codification. Scored judge
+  diagnostics (F62) densify the signal; scores never gate.
 - **Phase 5 (Next):** The gates engine + `skillet next` — "git status for EDD":
-  the single highest-value action, with its reason and the exact command.
+  the single highest-value action, with its reason and the exact command. Plus
+  observed-seed trigger-corpus expansion (F63).
 - **Phase 6 (Next):** Draft minimal `SKILL.md` edits from observed evidence and
   prove them by A/B in a throwaway worktree before a human lands them.
 - **Phase 7 (Next):** Run the same suite across multiple agents and print a
   per-harness `pass^k` portability table.
 - **Phase 8 (Later):** Track B axial coding, more adapters, the remaining lint
   rules — incl. the **skill-security** (F12) and **skill-bundle-integrity** (F13) groups from the
-  competitive cross-reference — **user-authored (YAML) lint rules**, real spend numbers, a
-  judge↔human-label calibration harness — plus the explicit non-goals.
+  competitive cross-reference — **user-authored (YAML) lint rules**, real spend numbers, the
+  judge↔human agreement check (F10; report-only Cohen's kappa), the general observed-seed
+  synthetic generator (F64), the named aggregation catalog (F65), the test-framework
+  integration recipe (F66), and the **diagnostic model tier** (F67 — the provider-neutral
+  cheap-model slot that informs but never gates; macOS defaults to Apple's on-device model via
+  F68, `needs-research`) — plus the explicit non-goals.
 
 ## Feature identifiers
 
@@ -152,8 +159,10 @@ Phase 1's `F1–F8` and Phase 8's `F10–F13` were already global and were prese
 - **Judge-reliability risk.** External research shows LLM judges are
   systematically over-confident and that evaluation criteria drift as outputs are
   reviewed. Mitigation: the scorer↔judge contradiction gate, `judge_prompt_version`,
-  and offline re-grade; a judge↔human-label calibration harness is tracked as a
-  `needs-research` item in Phase 8.
+  and offline re-grade; the judge↔human **agreement check** (F10, Phase 8) is now a
+  specified, report-only Cohen's-kappa workflow (design §14-14) — no longer
+  `needs-research`; that tag now sits on the Apple provider (F68) whose research
+  exit-conditions are listed in its Phase 8 entry.
 - **Cost risk.** Paid trials and judging spend money. Mitigation: deterministic-first
   gates, up-front estimates, confirm-above-threshold.
 - **Upstream dependency watch — `swift-system` / SE-0529 (design §14-12).** The direct
@@ -174,21 +183,20 @@ Phase 1's `F1–F8` and Phase 8's `F10–F13` were already global and were prese
 
 From the v0.8 design competitive cross-reference, **staged as design open questions and not yet in
 the phase plan**. Each graduates into a phase once its §14 question is decided; until then the
-phases and the v1 scope line are unchanged.
+phases and the v1 scope line are unchanged. *(Graduated so far: §14-9 — deterministic
+process-assertions — decided 2026-07-06 via the Apple Evaluations cross-reference → Phase 2 **F61**.)*
 
-- **Deterministic process-assertions over the Trace** → design **§14-9** (with a metrics/events
-  schema-split sub-question). Free, judge-free assertions (skill loaded? tool-calls in order? within
-  budget?) before the paid judge, extending the Phase 2 trigger axis.
 - **Ablation arms** → design **§14-10**. Partial-skill A/B (drop a section / reference / rule) to
   isolate which part of a skill earns its tokens — feeds *evidence-to-edit ratio*. Touches the
   Phase 6 `run --ab` / `SkillSet`.
 
 ## Change Log
 
-Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.12.0, latest first, one
+Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.14.1, latest first, one
 linkable heading per version (extracted 2026-07-04; historical entries are never rewritten).
 
-- **Latest — v1.12.0 (2026-07-04): MINOR** — **F14 `skillet run --axis trigger` SHIPPED**: the
-  deterministic description axis over whole-corpus frontmatter stubs; per-axis `benchmark.json`
-  merge; additive `skillet.run/1` `trigger` block. (Prior: v1.11.1 — changelog extraction;
-  v1.11.0 — F3 `skillet doctor` shipped, Phase 2 → IN PROGRESS.)
+- **Latest — v1.14.1 (2026-07-07): PATCH** — review-round consistency fixes: the Global-Risks
+  judge-reliability bullet now cites the specified F10 agreement check (`needs-research` reserved
+  for F68); design §13's v1 scope line reconciled with F61–F68 (design → v0.38); Phase 8's risks
+  text names all cross-reference additions. (Prior: v1.14.0 — diagnostic model tier F67 + Apple
+  FM/PCC provider F68; v1.13.0 — Apple Evaluations cross-reference, F61–F66.)

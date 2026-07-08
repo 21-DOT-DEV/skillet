@@ -3,12 +3,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.38 — for review |
+| **Status** | Draft v0.39 — for review |
 | **Name** | `skillet` (settled — SKILL · E · T, the *SKILL.md Evaluation Toolkit*); EDD remains the methodology's name |
 | **Deliverable** | Public, open-source, multi-harness Swift CLI |
 | **Supersedes** | The repo-private `swift-skill-eval` tool + the Python trigger harness |
 | **Decision provenance** | §2 — every load-bearing choice here was settled in the design Q&A |
-| **Revision log** | Extracted to [skillet-design-changelog.md](skillet-design-changelog.md) (v0.1 → v0.38, latest first, one linkable heading per version; historical entries never rewritten). Latest — v0.38 (2026-07-07): review-round consistency fixes — §13 v1 scope line reconciled with the F61–F68 rounds (F61/F62/F63 into the v1 column; F10/F64–F68 + the declined Swift-library non-goal into Later/out); no decision change. |
+| **Revision log** | Extracted to [skillet-design-changelog.md](skillet-design-changelog.md) (v0.1 → v0.39, latest first, one linkable heading per version; historical entries never rewritten). Latest — v0.39 (2026-07-07): F15 implemented — `skillet run --ab`, the provably skill-free baseline arm: session-level skill disabling + $0 flag preflight + per-trial trace tripwire (`polluted`), canonical `with_skill`/`without_skill` benchmark rows with per-arm stats + signed delta, paired per-eval Δ ± SE in report + `skillet.run/1`; §6.1/§9.2 annotated. |
 
 ---
 
@@ -342,7 +342,9 @@ The day-one neutral runner (D2) and the Measure step. Defaults: the skill of the
 
 Writes a run record under `.skillet/runs/<timestamp>/` and updates the skill's `benchmark.json` **in the frozen format** so the existing eval-viewer keeps working untouched. Exit `1` if anything failed.
 
-*Shipped axes (F7 behavioral · F14 trigger, 2026-07-04 — Specs/009):* `--axis behavior|trigger|all` with the default above (each axis where its file exists **with runnable content** — a present-but-empty file skips its axis with a note, which is exactly what an `init`-scaffolded skeleton contains). A trigger trial executes the bare query against **whole-corpus frontmatter stubs** (§9.2/§9.3, bodies withheld) and grades deterministically from `skillInvocations` — no judge, one call per trial (a behavioral trial ≈ two). Trigger results ride `benchmark.json` as `configuration: "trigger"` rows with axis-marked `consistency` entries under a **latest-run-per-axis merge** (an axis that didn't run is carried from the prior record, never blanked), and `skillet.run/1` gains the additive `trigger` block. `--eval`, `--ab`, `--matrix`, `--judge`, `--concurrency`, `--fail-fast`, and `--record`/`--replay` land with their owning features.
+*Shipped axes (F7 behavioral · F14 trigger, 2026-07-04 — Specs/009):* `--axis behavior|trigger|all` with the default above (each axis where its file exists **with runnable content** — a present-but-empty file skips its axis with a note, which is exactly what an `init`-scaffolded skeleton contains). A trigger trial executes the bare query against **whole-corpus frontmatter stubs** (§9.2/§9.3, bodies withheld) and grades deterministically from `skillInvocations` — no judge, one call per trial (a behavioral trial ≈ two). Trigger results ride `benchmark.json` as `configuration: "trigger"` rows with axis-marked `consistency` entries under a **latest-run-per-axis merge** (an axis that didn't run is carried from the prior record, never blanked), and `skillet.run/1` gains the additive `trigger` block. `--eval`, `--matrix`, `--judge`, `--concurrency`, `--fail-fast`, and `--record`/`--replay` land with their owning features.
+
+*Shipped `--ab` (F15, 2026-07-07 — Specs/010):* the without-skill baseline arm, behavioral-axis only (a trigger-only invocation with `--ab` refuses at exit 2 before spend; mixed runs note the single-arm trigger on stderr). Isolation is **prevent + verify + preflight**: baseline trials launch claude-code with its session-level no-skills switch (`--disable-slash-commands` — surgical; `--bare`/`--safe-mode` would strip CLAUDE.md/hooks and make the arms differ by more than the skill), a $0 `--help` interrogation proves the resolved binary supports it before money moves (exit 3 otherwise — §9.2's declare-cannot), and every baseline trial's parsed `Trace` must show zero `skillInvocations` or the trial is reclassified **`polluted`** (a new exit class): never judged, excluded from every count, surfaced loudly. Reporting is **paired** (Anthropic error-bars style): per-eval Δ of trial full-pass rates, the mean of those Δs ± a Bessel SE (absent below 2 evals — never invented), a flip tally, and the time Δ; `benchmark.json` gains canonical `with_skill`/`without_skill` rows, arm-marked `consistency.per_eval` entries, per-arm `pass_rate`/`time_seconds`/`tokens` stats and a signed `delta` block (tokens `+0` until F60's usage telemetry); single-arm runs keep `configuration:"default"`, trigger-only runs carry the whole AB record per the latest-run-per-axis rule, and the offline recompute rebuilds the `ab` block from the committed file (P2/D3).
 
 ```
 docc-articles  behavior  k=3        claude-code   opencode
@@ -841,7 +843,7 @@ public enum SkillSet: Sendable {
 
 Each trial runs in a fresh, core-owned `Workspace` sandbox (create → stage `files[]` → run → diff → destroy) over **pristine fixtures** — which is why `hooks install` guards `fixtures/**` against commits (§6.2): a polluted fixture silently invalidates every later A/B. *How* `.only` materializes is the adapter's private business — staging into the harness's skill-discovery path (with siblings present-but-stubbed for the `visible` set), a flag, or (for `direct-api`) inlining `SKILL.md` + references into the system context with sibling names listed but bodies withheld. The old `--skill-path` footgun was the user doing the adapter's job; under this contract the failure class cannot recur, and `doctor` proves it per harness before money moves (P6).
 
-`.none` is equally rigorous: the adapter must isolate the trial from ambient user skills, or declare it cannot — in which case `--ab` on that harness is refused with an explanation rather than producing a polluted baseline.
+`.none` is equally rigorous: the adapter must isolate the trial from ambient user skills, or declare it cannot — in which case `--ab` on that harness is refused with an explanation rather than producing a polluted baseline. *(Shipped F15, 2026-07-07 — Specs/010: claude-code isolates via its session-level no-skills switch, preflighted for $0 per run (`verifyBaselineIsolation()`, `HarnessCapabilities.baselineIsolation`; adapters without it refuse loudly); every baseline trial is additionally tripwire-verified from `Trace.skillInvocations`, and a trial where any skill fired is classed `polluted` — disqualified, never graded.)*
 
 ### 9.3 The normalized trace
 

@@ -9,7 +9,7 @@ import TraceKit
 /// F7's opt-in env-gated smoke, since claude-code isn't installable in CI.
 public struct ClaudeCodeAdapter: HarnessAdapter {
     public let id: HarnessID = "claude-code"
-    public let capabilities: HarnessCapabilities = [.runTask, .skillInjection, .traceParsing, .sessionCapture]
+    public let capabilities: HarnessCapabilities = [.runTask, .skillInjection, .traceParsing, .sessionCapture, .baselineIsolation]
 
     let configPath: String?
     let launcher: any ProcessLauncher
@@ -143,8 +143,9 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         // Honor the injection contract (§9.2): the runner stages skills under the workspace discovery
         // path (`<workspace>/.claude/skills/<name>/`). For `.only`, enforce that each requested skill is
         // actually staged, so a staging failure is caught here rather than silently running skill-less.
-        // (Global `~/.claude/skills` can still be discovered — claude-code has no project-only-skills
-        // switch today; documented limitation, tracked for the isolation hardening in a later phase.)
+        // (Global `~/.claude/skills` can still be discovered on `.only` runs — a documented with-arm
+        // limitation. The BASELINE arm (`.none`, F15) is hardened: skills disabled at the session
+        // level below, preflighted by `verifyBaselineIsolation()`, tripwire-verified per trial.)
         if case let .only(load, visible) = skills {
             for ref in load {
                 let staged = workspace.root.appendingPathComponent(".claude/skills/\(ref.name)/SKILL.md")
@@ -161,11 +162,15 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
                 }
             }
         }
+        // `.none` (the F15 baseline arm, §9.2): nothing is staged by the runner, and the session
+        // launches with skills disabled so ambient personal skills (`~/.claude/skills`) are
+        // provably excluded too — the isolation `verifyBaselineIsolation()` preflights for $0.
+        let isolated: Bool = { if case .none = skills { return true } else { return false } }()
         // The watchdog (`timeout`) and the sandbox cwd are enforced by the launcher; a non-zero exit
         // means the trial could not run.
         let output = try await launcher.run(
             resolved.path,
-            Self.runArguments(prompt: task.query),
+            Self.runArguments(prompt: task.query, isolated: isolated),
             workingDirectory: workspace.root.path,
             timeout: timeout,
             environment: nil,
@@ -181,8 +186,45 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
     /// `parseTrace`. `stream-json` requires `--verbose`; `acceptEdits` lets file-writing evals proceed
     /// unattended inside the throwaway per-trial workspace. This live flag contract is validated/tuned
     /// by F7's env-gated smoke (claude-code isn't runnable in CI) — the arg *shape* is unit-tested here.
-    static func runArguments(prompt: String) -> [String] {
-        ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"]
+    /// `isolated` (F15, the `.none` baseline arm) appends the session-level no-skills switch — the
+    /// surgical choice over `--bare`/`--safe-mode`, which also strip CLAUDE.md/hooks and would make
+    /// the two arms differ by more than the skill.
+    static func runArguments(prompt: String, isolated: Bool = false) -> [String] {
+        var args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"]
+        if isolated { args.append(Self.isolationFlag) }
+        return args
+    }
+
+    /// The session-level switch that disables all skills and commands (documented in the claude-code
+    /// CLI reference) — how a `.none` baseline excludes ambient personal skills without touching
+    /// auth or the config dir.
+    static let isolationFlag = "--disable-slash-commands"
+
+    /// The $0 `--ab` preflight (F15, §9.2): prove the resolved binary supports the isolation switch
+    /// before any paid baseline trial — flag support shifts across harness versions (the denylist
+    /// class), so it is checked per run, never assumed. The per-trial pollution tripwire (RunKit)
+    /// then verifies the switch actually held, from the parsed trace.
+    public func verifyBaselineIsolation() async throws {
+        guard let resolved = resolver.resolve(
+            flag: nil, envVar: "SKILLET_CLAUDE_CODE_BIN", configPath: configPath, pathName: "claude"
+        ) else {
+            throw EDDError.harnessNotFound(harness: "claude-code")
+        }
+        let output: ProcessOutput
+        do {
+            output = try await launcher.run(resolved.path, ["--help"], workingDirectory: nil, timeout: .seconds(60), environment: nil, outputLimitBytes: nil)
+        } catch {
+            throw EDDError.baselineNotIsolable(
+                harness: "claude-code",
+                reason: "could not interrogate the resolved binary (`claude --help` failed)"
+            )
+        }
+        guard output.exitCode == 0, output.stdout.contains(Self.isolationFlag) else {
+            throw EDDError.baselineNotIsolable(
+                harness: "claude-code",
+                reason: "the resolved binary does not advertise \(Self.isolationFlag), so ambient personal skills cannot be provably excluded from the baseline arm"
+            )
+        }
     }
 
     public func locateSessions(_ query: SessionQuery) async throws -> [NativeSessionRef] {

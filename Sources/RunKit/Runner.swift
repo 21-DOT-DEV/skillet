@@ -54,12 +54,38 @@ public struct Runner {
         return Outcome(report: RunReport(skill: skill.name, results: results), evals: results)
     }
 
+    /// The F15 baseline arm: every eval `k` times under `SkillSet.none` — nothing staged
+    /// (`stageSkill: false`), the harness's own isolation switch engaged (adapter), and the §9.2
+    /// **pollution tripwire** armed: a trial in which *any* skill fired is `polluted` — never
+    /// judged, never a graded result. Forensics land under `base/baseline/`.
+    public func runBaseline(skill: SkillRef, evals: [EvalCase], k: Int, base: URL, keepWorkspace: Bool = false) async -> [EvalResult] {
+        var results: [EvalResult] = []
+        for (index, eval) in evals.enumerated() {
+            let id = eval.id ?? "eval-\(index)"
+            guard let prompt = eval.prompt else {
+                results.append(EvalResult(evalId: id, trials: []))   // no prompt → can't run → FAILs (0 passes)
+                continue
+            }
+            var trials: [TrialResult] = []
+            for trial in 0..<max(k, 0) {
+                // Index-based cache path (hostile-id defense, same rule as the with-arm loop).
+                let trialDir = base.appendingPathComponent("baseline/eval-\(index)/trial-\(trial)", isDirectory: true)
+                trials.append(await runTrial(skill: skill, eval: eval, evalId: id, prompt: prompt, injection: SkillSet.none,
+                                             trialDir: trialDir, keepWorkspace: keepWorkspace,
+                                             stageSkill: false, pollutionTripwire: true))
+            }
+            results.append(EvalResult(evalId: id, trials: trials))
+        }
+        return results
+    }
+
     /// One trial: prepare sandbox → run → parse → judge each criterion → classify exit → record
-    /// forensics → tear down the sandbox (unless `keepWorkspace`).
-    private func runTrial(skill: SkillRef, eval: EvalCase, evalId: String, prompt: String, injection: SkillSet, trialDir: URL, keepWorkspace: Bool) async -> TrialResult {
+    /// forensics → tear down the sandbox (unless `keepWorkspace`). `stageSkill: false` +
+    /// `pollutionTripwire: true` is the baseline-arm shape (F15).
+    private func runTrial(skill: SkillRef, eval: EvalCase, evalId: String, prompt: String, injection: SkillSet, trialDir: URL, keepWorkspace: Bool, stageSkill: Bool = true, pollutionTripwire: Bool = false) async -> TrialResult {
         let workspace: Workspace
         do {
-            workspace = try workspaces.prepare(skill: skill, files: eval.files, base: trialDir, label: "workspace")
+            workspace = try workspaces.prepare(skill: skill, files: eval.files, base: trialDir, label: "workspace", stageSkill: stageSkill)
         } catch {
             writeForensics(trialDir: trialDir, evalId: evalId, raw: nil, trace: nil, verdicts: [], exit: .failed)   // couldn't stage → infra failure
             return TrialResult(exit: .failed, verdicts: [])
@@ -72,11 +98,26 @@ public struct Runner {
         var raw: RawTrace?
         var trace: Trace?
         var verdicts: [Verdict] = []
+        let started = Date()
+        // Wall-clock of the harness execution ONLY (F15 → the canonical `time_seconds` stats):
+        // stamped immediately after adapter.run returns and reused on the parse/judge error paths,
+        // so grader/parser time never leaks into the arms' time Δ (review round 2). When
+        // adapter.run itself threw, elapsed-at-catch IS the harness time (the failed run attempt).
+        var harnessSeconds: Double?
         do {
             let produced = try await adapter.run(TaskSpec(query: prompt, files: eval.files), in: workspace, skills: injection)
             raw = produced
+            harnessSeconds = Date().timeIntervalSince(started)
+            let executionSeconds = harnessSeconds
             let parsed = try adapter.parseTrace(produced)
             trace = parsed
+            // The §9.2 pollution tripwire (F15): on a baseline trial, ANY skill invocation means the
+            // isolation claim failed on this machine/run — the trial is unmeasurable, never judged
+            // (no spend on an ungradeable trial), and the report surfaces it loudly.
+            if pollutionTripwire && !parsed.skillInvocations.isEmpty {
+                writeForensics(trialDir: trialDir, evalId: evalId, raw: produced.raw, trace: parsed, verdicts: [], exit: .polluted)
+                return TrialResult(exit: .polluted, verdicts: [], durationSeconds: executionSeconds)
+            }
             let response = parsed.turns.last(where: { $0.role == .assistant })?.text ?? ""
             let listing = (try? workspaces.listing(workspace)) ?? []
             let evidence = JudgeEvidence(responseText: response, trace: parsed, workspaceListing: listing)
@@ -84,16 +125,16 @@ public struct Runner {
                 verdicts.append(try await judge.verdict(for: criterion, evidence: evidence))
             }
             writeForensics(trialDir: trialDir, evalId: evalId, raw: produced.raw, trace: parsed, verdicts: verdicts, exit: .passed)
-            return TrialResult(exit: .passed, verdicts: verdicts)
+            return TrialResult(exit: .passed, verdicts: verdicts, durationSeconds: executionSeconds)
         } catch let error as ProcessError {
             let exit: TrialExit = { if case .timedOut = error { return .timeout } else { return .failed } }()
             writeForensics(trialDir: trialDir, evalId: evalId, raw: raw?.raw, trace: trace, verdicts: verdicts, exit: exit)
-            return TrialResult(exit: exit, verdicts: [])
+            return TrialResult(exit: exit, verdicts: [], durationSeconds: harnessSeconds ?? Date().timeIntervalSince(started))
         } catch {
             // HarnessError.executionFailed / parse / judge failure → the trial couldn't be measured, but
             // persist the raw output + partial verdicts collected so far for debugging/replay.
             writeForensics(trialDir: trialDir, evalId: evalId, raw: raw?.raw, trace: trace, verdicts: verdicts, exit: .failed)
-            return TrialResult(exit: .failed, verdicts: [])
+            return TrialResult(exit: .failed, verdicts: [], durationSeconds: harnessSeconds ?? Date().timeIntervalSince(started))
         }
     }
 

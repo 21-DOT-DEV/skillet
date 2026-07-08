@@ -18,6 +18,9 @@ public enum EDDError: Error, Sendable, Equatable {
     case harnessUnauthenticated(harness: String)
     /// A skill is not visible to the harness under its injection strategy. Exit ``ExitCode/environment``.
     case skillNotVisible(skill: String, reason: String)
+    /// The harness cannot prove a skill-free baseline arm (`--ab`, §9.2: isolate ambient skills or
+    /// declare it cannot) — refused before spend, never a polluted baseline. Exit ``ExitCode/environment``.
+    case baselineNotIsolable(harness: String, reason: String)
     /// A committed artifact is corrupt/invalid against its schema (e.g. unparseable `evals.json`).
     /// Exit ``ExitCode/artifact``.
     case invalidArtifact(path: String, reason: String)
@@ -26,7 +29,7 @@ public enum EDDError: Error, Sendable, Equatable {
     public var exitCode: ExitCode {
         switch self {
         case .usage: .usage
-        case .directoryNotFound, .projectNotFound, .harnessNotFound, .harnessBanned, .harnessUnauthenticated, .skillNotVisible: .environment
+        case .directoryNotFound, .projectNotFound, .harnessNotFound, .harnessBanned, .harnessUnauthenticated, .skillNotVisible, .baselineNotIsolable: .environment
         case .invalidArtifact: .artifact
         }
     }
@@ -41,6 +44,7 @@ public enum EDDError: Error, Sendable, Equatable {
         case .harnessBanned: "harness_banned"
         case .harnessUnauthenticated: "harness_unauthenticated"
         case .skillNotVisible: "skill_not_visible"
+        case .baselineNotIsolable: "baseline_not_isolable"
         case .invalidArtifact: "invalid_artifact"
         }
     }
@@ -62,6 +66,8 @@ public enum EDDError: Error, Sendable, Equatable {
             "the \(harness) harness is not authenticated (no usable credential)"
         case let .skillNotVisible(skill, reason):
             "skill \(skill) is not visible to the harness: \(reason)"
+        case let .baselineNotIsolable(harness, reason):
+            "the \(harness) harness cannot prove a skill-free baseline for --ab: \(reason)"
         case let .invalidArtifact(path, reason):
             "\(path) is invalid: \(reason)"
         }
@@ -90,6 +96,8 @@ public enum EDDError: Error, Sendable, Equatable {
             "authenticate \(harness) (e.g. `claude auth login`, or set ANTHROPIC_API_KEY / CLAUDE_CODE_OAUTH_TOKEN), then re-run"
         case .skillNotVisible:
             "check the skill directory has a SKILL.md (and references/) resolvable under the harness"
+        case let .baselineNotIsolable(harness, _):
+            "pin a \(harness) version that supports session-level skill disabling (SKILLET_\(Self.envID(harness))_BIN), or run without --ab"
         case .invalidArtifact:
             "fix or regenerate the file so it matches its schema (see skillet-design §7)"
         }

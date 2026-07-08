@@ -1,6 +1,6 @@
 # Phase 2 — Trustworthy Measurement & Static Gates
 
-**Status:** IN PROGRESS (F3 + F14 shipped 2026-07-04)
+**Status:** IN PROGRESS (F3 + F14 shipped 2026-07-04; F15 shipped 2026-07-07)
 **Horizon:** Now
 **Last Updated:** 2026-07-07
 
@@ -49,7 +49,7 @@ believable before the workflow layer starts acting on it.
      trigger evals — the lane stays an explicit flag, its provider defaults on macOS, and smoke
      results never merge with real-harness results.
 
-3. **[F15]** A/B baseline arm (CLI: `skillet run --ab`) — PLANNED · Ported
+3. **[F15]** A/B baseline arm (CLI: `skillet run --ab`) — IMPLEMENTED (2026-07-07) · Ported
    - Purpose & user value: Run with-skill and without-skill arms and report Δ —
      "is the skill earning its tokens?" — matching `agent-skills-eval` on day one.
    - Northstar: loop integrity (value attribution).
@@ -58,6 +58,14 @@ believable before the workflow layer starts acting on it.
      - On a harness that cannot isolate ambient skills, `--ab` is refused with an explanation rather than producing a polluted baseline.
    - Dependencies: runner (Phase 1).
    - Confidence: Medium — design §6.1 `run`, §9.2.
+   - Shipped (2026-07-07, [Specs/010](../Specs/010-ab-baseline/plan.md)): both success metrics —
+     isolation is prevent + verify + preflight (session-level `--disable-slash-commands`; a $0
+     `--help` preflight refuses unsupported binaries at exit 3; a per-trial trace tripwire
+     reclassifies any skill-fire as `polluted`, never graded); reporting is paired (per-eval Δ,
+     mean ± SE or an honest "too few", flips, time Δ) in the table, `skillet.run/1` (`ab` block),
+     and `benchmark.json` (canonical `with_skill`/`without_skill` rows + per-arm stats + signed
+     delta; offline recompute rebuilds the block). Behavioral-only: trigger-only + `--ab` refuses
+     (exit 2); mixed runs note the single-arm trigger. Suite green — see the Specs/010 status row.
 
 4. **[F16]** Grounded judge — file-outcome grading (CLI: `--judge <grounded-id>`) — PLANNED · Net-new
    - Purpose & user value: Most skill criteria assert *file* outcomes ("wrote
@@ -209,6 +217,11 @@ believable before the workflow layer starts acting on it.
 
 ## Phase Change Log
 
+- 2026-07-07: **F15 IMPLEMENTED** — the A/B baseline arm ([Specs/010](../Specs/010-ab-baseline/plan.md)):
+  `run --ab` with prevent+verify+preflight isolation (`--disable-slash-commands`, $0 flag preflight,
+  per-trial `polluted` tripwire), paired Δ ± SE reporting, canonical `with_skill`/`without_skill`
+  benchmark rows + signed delta, offline `ab` recompute. Third Phase-2 feature; no scope change to
+  the rest. Roadmap → v1.15.0.
 - 2026-07-07: PATCH — F14 gains the diagnostic-tier smoke-arm note (design §9.6/§14-20, decided;
   F67/F68). Roadmap → v1.14.0; no change to shipped behavior.
 - 2026-07-06: MINOR — added **F61** (deterministic process assertions over the trace; design

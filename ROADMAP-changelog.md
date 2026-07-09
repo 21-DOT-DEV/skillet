@@ -4,6 +4,10 @@ The roadmap's versioned change log, extracted from `ROADMAP.md` on 2026-07-04 (v
 stays lean. Latest first; every version is a linkable heading; historical entries are never rewritten.
 Companion: [`skillet-design-changelog.md`](skillet-design-changelog.md).
 
+## v1.17.0 — 2026-07-09
+
+MINOR — **F17 SHIPPED: deterministic scorers → SARIF** ([Specs/012](Specs/012-deterministic-scorers/plan.md); design → v0.49). New `skillet score <path> [--format tty|json|sarif]` — free, model-free checks over produced text emitting standard SARIF 2.1.0; a reporter, not a gate. Adds `ScoreKit` (S001–S007 + S000), `scorers:` config block, `SarifDocument`/`ScoreReport` frozen boundary formats, RenderKit human table, and ProjectKit safe-read/confinement ownership. 390 tests green. Phase 2 remains IN PROGRESS.
+
 ## v1.16.6 — 2026-07-08
 
 PATCH — **F16 polish round 6** (4 optional-polish observations; 2 acted, 2 reaffirmed-as-tracked;

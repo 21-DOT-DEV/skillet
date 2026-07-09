@@ -3,12 +3,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.48 — for review |
+| **Status** | Draft v0.49 — for review |
 | **Name** | `skillet` (settled — SKILL · E · T, the *SKILL.md Evaluation Toolkit*); EDD remains the methodology's name |
 | **Deliverable** | Public, open-source, multi-harness Swift CLI |
 | **Supersedes** | The repo-private `swift-skill-eval` tool + the Python trigger harness |
 | **Decision provenance** | §2 — every load-bearing choice here was settled in the design Q&A |
-| **Revision log** | Extracted to [skillet-design-changelog.md](skillet-design-changelog.md) (v0.1 → v0.48, latest first, one linkable heading per version; historical entries never rewritten). Latest — v0.48 (2026-07-08): F16 polish round 6 — explicit `import TraceKit` in both judge files, and a dedicated `FileContent.omitted` flag so `truncatedBytes` strictly means "a prefix was shown" (budget-omitted files no longer overload it); `snapshotStaged` bounded-read and a `--judge` enum reaffirmed as tracked future items. No behavior change to grading. (v0.47: hard-link guard.) |
+| **Revision log** | Extracted to [skillet-design-changelog.md](skillet-design-changelog.md) (v0.1 → v0.49, latest first, one linkable heading per version; historical entries never rewritten). Latest — v0.49 (2026-07-09): F17 deterministic scorers shipped — `skillet score <path> [--format tty|json|sarif]`, `ScoreKit` (S001–S007/S000), `scorers:` config block in `skillet.yaml`, SARIF 2.1.0 emitter, `ScoreReport` boundary format, and human table. (v0.48: F16 polish round 6.) |
 
 ---
 
@@ -176,14 +176,24 @@ gates:
 # (Supersedes the predecessor's .skill-eval/vendored-prefixes.txt and vocab-exemptions.txt;
 # one-time import via `skillet migrate knobs`.)
 scorers:
-  vendored_prefixes: ["Vendored/", "Generated/"]
+  vendored_prefixes: ["Vendored/", "Generated/"]   # ILLUSTRATIVE — see note
   vocab:
-    exempt: ["secp256k1", "Schnorr"]
+    exempt: ["secp256k1", "Schnorr"]               # ILLUSTRATIVE — see note
+  disable: []                      # default-on `SKILL-Sxxx` ids to turn off
+  enable:  []                      # experimental/default-off ids to turn on (e.g. ["SKILL-S006"])
 lint:
   disable: []                      # stable rule ids, e.g. ["SKILL-L011"]
   body_warn_lines: 500             # SKILL-L003: warn above this …
   body_error_lines: 1000           # … error above this
 ```
+
+> **`scorers:` defaults vs. suggestions (F17).** The **built-in defaults are `[]`** for both
+> `vendored_prefixes` and `vocab.exempt` (score everything; exempt nothing). The values shown above are
+> **illustrative template output**, not runtime defaults — `skillet init` pre-writes the
+> `["Vendored/","Generated/"]` skips as a starting suggestion, and `secp256k1`/`Schnorr` illustrate the
+> per-repo domain-term exemptions a crypto skill might add. `vendored_prefixes` matches gitignore-style
+> (a folder name at any depth; whole-segment; case-sensitive); `vocab.exempt` removes whole word-list
+> entries (case-insensitive) before scoring. The user/`$XDG_CONFIG_HOME` layer is deferred to F24.
 
 > **Config writes stay surgical.** `swift-yaml` (§11) parses this file but does not
 > preserve comments on re-emit, so `skillet config set` rewrites the targeted lines
@@ -231,6 +241,12 @@ standard environment: `NO_COLOR`/`TERM` (color), `EDITOR` (`friction add`), `PAG
 > distinct from a *measured* non-PASS (exit 1) and from a corrupt/missing-evals artifact (exit 4/2, owned
 > by the eval loader, which runs first). The code is **command-contextual**: `skillet lint`'s own
 > error-tier finding is *that command's result* → exit 1; the same finding as `run`'s *preflight* → exit 2.
+
+> **`score` is a reporter, not a gate (F17).** `skillet score` is deterministic-first *signal* that feeds
+> triage/§8 — it emits findings and **exits 0 even when scorers fire**, deliberately unlike `lint`'s
+> error-tier gate (exit 1). A missing/unreadable `<path>` is exit 3 (environment) and a corrupt
+> `skillet.yaml` is still exit 4 (artifact); a malformed *scored* `.sarif` under `<path>` is a *finding*
+> (`SKILL-S007`), never a command failure. CI that wants a hard gate keys off the emitted SARIF itself.
 
 ### 5.5 Output contract
 
@@ -320,6 +336,25 @@ The shipped catalog (ported; 5 of a planned 12):
 Roadmap rules, framed as *additions* (not existing behavior): name↔directory match, reserved `anthropic-*`/`claude-*` prefixes, third-person what+when description voice, all-caps ALWAYS/NEVER density, reference-extraction candidates, dead reference links.
 
 This command is the implementer of the `lint` lever, the free pre-API gate (`skillet lint && skillet fixtures verify` is the intended pre-commit pair), its error-tier findings surface in `doctor` and `next`, and it's where "fix it without touching prose" usually lands.
+
+##### The `SKILL-Sxxx` scorer catalog (F17)
+
+`skillet score` (§6.2 plumbing) emits its own stable id space beside `SKILL-Lxxx` — the deterministic-first
+signal over produced *output* (vs. lint's checks over *source*). Unlike lint, scorers **never gate** (§5.4).
+
+| ID | Checks | Level |
+|---|---|---|
+| `SKILL-S001` slop-vocabulary | over-used AI vocabulary density (`WP:AIVOCAB`) | note/warning/error |
+| `SKILL-S002` puffery | marketing-puffery density (`WP:AIPUFFERY`) | note/warning/error |
+| `SKILL-S003` em-dash | em-dash (U+2014) over-use vs. a ~1.5/100w target | note/warning/error |
+| `SKILL-S004` rule-of-three | rhetorical `X, Y, and Z` triples (technical/inline-code triples skipped) | note/warning/error |
+| `SKILL-S005` knowledge-cutoff | AI knowledge-cutoff disclaimer count | note/warning/error |
+| `SKILL-S006` not-x-but-y | "not X, but Y" contrast constructions — **experimental, default-off** (`scorers.enable`) | note/warning/error |
+| `SKILL-S007` sarif-validity | a produced `.sarif`/`.sarif.json` parses as SARIF 2.1.0 | error |
+| `SKILL-S000` file-unreadable | a file couldn't be scored (unreadable/oversized) — disclosure | note |
+
+Density levels derive from a ported goodness scale (≥0.5 clean, 0.4–0.5 `warning`, <0.4 `error`); each finding
+also carries a continuous `rank` (0–100). Exemptions/skips live in the `[scorers]` knob tables (§5.2).
 
 ---
 
@@ -576,7 +611,7 @@ Everything porcelain does decomposes into these; all support `--json`; their con
 | `skillet harness which <id> [--search <root>]` | Print the resolved binary as an `export`-able pin; `--search` is the *opt-in* recursive vendored-copy finder — it probes each candidate's `--version` and picks the **highest non-denylisted version** (newest-mtime only as a tiebreaker), so it never returns a stale or banned copy. Adapters never auto-probe other apps' private caches (§9.1) |
 | `skillet grade --rubric <file> --against <trace\|file\|->` | One Judge pass over criteria; the grading primitive |
 | `skillet grade --run <ts> [--judge <id>]` | Offline re-grade of a recorded run under a new judge/prompt version — no harness, no re-execution |
-| `skillet score <bundle\|path>` | Deterministic scorers → SARIF on stdout |
+| `skillet score <path>` | Deterministic, model-free scorers over produced text → SARIF on stdout (`--format tty\|json\|sarif`). A **reporter, not a gate**: exit 0 even with findings (feeds triage/§8); config-corrupt → exit 4. *(saved-run `<bundle>` input arrives with capture, Phase 3.)* **Shipped (F17).** |
 | `skillet baseline compare --from <session> --to <session>` | SARIF drift between two captures: resolution-to-discovery ratio, severity drift (pp), rule-ID Shannon entropy — emitted **un-gated** (§8) |
 | `skillet baseline matrix <skill>` | Cross-corpus drift: per-rule trajectories across packages, surfacing **generalizing rules** (firing in ≥3 packages) and **stuck rules** (zero variance across ≥3) as producer-skill friction candidates |
 | `skillet fixtures verify [<skill>]` | The producer-output contract: every finding in a fixture's `expected.audit-baseline.sarif` must appear in `actual` (recall), and any extra `ruleId` must be in `fixture.json`'s `allowedExtraRuleIds`. For SARIF-emitting skills this is the *only* positive-output correctness assertion — judges grade prose, not emitted-finding recall |

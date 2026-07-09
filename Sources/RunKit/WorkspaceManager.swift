@@ -1,6 +1,7 @@
 import Foundation
 import HarnessKit
 import JudgeKit
+import ProjectKit   // SafeFile — the shared confinement/safe-read primitives (F17)
 
 /// Creates and tears down the per-trial sandbox a run executes in, and lists its post-run contents as
 /// ground truth for the judge. Staging copies the skill (`SKILL.md` + `references/` + `scripts/` +
@@ -63,45 +64,24 @@ public struct WorkspaceManager: Sendable {
         return ResolvedFixture(source: source, sandboxRelativePath: entry)
     }
 
+    // These confinement predicates now live in ProjectKit's ``SafeFile`` (F17, shared with ScoreKit);
+    // the wrappers below keep RunKit's existing call sites (and `RunnerTests`) unchanged.
+
     /// True iff no component from `base` down to `url` is a symlink, and `url` nests none.
-    static func noSymlink(at url: URL, under base: URL) -> Bool {
-        var walk = base
-        for component in url.path.dropFirst(base.path.count).split(separator: "/") {
-            walk.appendPathComponent(String(component))
-            if isSymlink(walk) { return false }
-        }
-        return firstSymlink(in: url) == nil
-    }
+    static func noSymlink(at url: URL, under base: URL) -> Bool { SafeFile.noSymlink(at: url, under: base) }
 
     /// Whether `url` is itself a symbolic link (lstat semantics — does not follow the link).
-    /// Delegates to the shared ``SkillBundleRules`` (kept here so existing call sites don't churn).
-    public static func isSymlink(_ url: URL) -> Bool {
-        SkillBundleRules.isSymlink(url)
-    }
+    public static func isSymlink(_ url: URL) -> Bool { SafeFile.isSymlink(url) }
 
     /// The first symlink at or under `url` (recursively), or `nil` if the subtree is symlink-free.
     /// Used to reject symlinks in staged skill-bundle entries and directory fixtures (F7 policy).
-    public static func firstSymlink(in url: URL) -> URL? {
-        if isSymlink(url) { return url }
-        guard let enumerator = FileManager.default.enumerator(at: url, includingPropertiesForKeys: [.isSymbolicLinkKey]) else { return nil }
-        for case let child as URL in enumerator where isSymlink(child) { return child }
-        return nil
-    }
+    public static func firstSymlink(in url: URL) -> URL? { SafeFile.firstSymlink(in: url) }
 
     /// The first symlink among the path components from `base` (exclusive) down to `target` (inclusive),
     /// or `nil` if every component is a real entry. Confines the skill / `evaluations/` I/O paths so a
-    /// symlinked component can't redirect reads or writes outside the project — the staging check skips
-    /// `evaluations/` and the skill root itself, so those need this guard.
+    /// symlinked component can't redirect reads or writes outside the project.
     public static func firstSymlinkOnPath(from base: URL, to target: URL) -> URL? {
-        let basePath = base.standardizedFileURL.path
-        let targetPath = target.standardizedFileURL.path
-        guard targetPath == basePath || targetPath.hasPrefix(basePath + "/") else { return target }   // not under base → escape
-        var walk = base.standardizedFileURL
-        for component in targetPath.dropFirst(basePath.count).split(separator: "/") {
-            walk.appendPathComponent(String(component))
-            if isSymlink(walk) { return walk }
-        }
-        return nil
+        SafeFile.firstSymlinkOnPath(from: base, to: target)
     }
 
     /// Top-level skill entries that staging copies: not `evaluations/`, not hidden. Shared by staging
@@ -379,18 +359,7 @@ public struct WorkspaceManager: Sendable {
     /// prefix of only stray continuation bytes can trim to empty and read as empty text. Unreachable at
     /// the shipped 32 KiB cap — a genuinely binary file's first 32 KiB carries a NUL or a
     /// non-continuation invalid byte and fails to binary.
-    static func decodeText(_ data: Data, truncated: Bool) -> String? {
-        if data.contains(0) { return nil }
-        if let whole = String(bytes: data, encoding: .utf8) { return whole }
-        guard truncated else { return nil }   // invalid UTF-8 that isn't a boundary cut ⇒ binary
-        var d = data
-        var trimmedContinuations = 0
-        while let last = d.last, (last & 0b1100_0000) == 0b1000_0000, trimmedContinuations < 3 {
-            d.removeLast(); trimmedContinuations += 1
-        }
-        if let last = d.last, ((0xC2 as UInt8)...(0xF4 as UInt8)).contains(last) { d.removeLast() }   // a genuine incomplete lead byte only
-        return String(bytes: d, encoding: .utf8)   // still invalid ⇒ binary
-    }
+    static func decodeText(_ data: Data, truncated: Bool) -> String? { SafeFile.decodeText(data, truncated: truncated) }
 
     /// Non-`.claude` file-or-symlink entries under the workspace (dirs excluded), sorted. Symlink
     /// entries are kept (to be disclosed, never read); real directories are skipped.
@@ -419,11 +388,5 @@ public struct WorkspaceManager: Sendable {
 
     /// Read up to `cap` bytes (the capture ceiling) without slurping a huge file whole; also returns
     /// the file's full byte size (from metadata) so truncation can be disclosed precisely.
-    private func boundedRead(_ url: URL, cap: Int) -> (data: Data, fullSize: Int)? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        let data = (try? handle.read(upToCount: max(cap, 0))) ?? Data()
-        let fullSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int).flatMap { $0 } ?? data.count
-        return (data, fullSize)
-    }
+    private func boundedRead(_ url: URL, cap: Int) -> (data: Data, fullSize: Int)? { SafeFile.boundedRead(url, cap: cap) }
 }

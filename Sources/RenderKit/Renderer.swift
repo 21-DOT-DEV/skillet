@@ -84,6 +84,18 @@ public struct Renderer: Sendable {
         }
     }
 
+    /// `skillet score`'s output (F17): the findings table + a summary line (human), or the
+    /// `skillet.score/1` payload (json). The SARIF surface bypasses the renderer — the command emits
+    /// `SarifDocument.jsonString()` straight to stdout, since `Renderer` models only `.human`/`.json`.
+    public func renderScore(_ report: ScoreReport, nextSteps: [String] = []) throws -> Rendering {
+        switch mode {
+        case .json:
+            return Rendering(stdout: try SkilletJSON.encode(report) + "\n")
+        case .human:
+            return Rendering(stdout: humanScore(report, nextSteps: nextSteps))
+        }
+    }
+
     /// A generic aligned table for plumbing/listing output (e.g. `harness info`). Column widths come
     /// from the widest cell; the last column is left unpadded to avoid trailing whitespace.
     public func renderTable(_ headers: [String], _ rows: [[String]]) -> Rendering {
@@ -135,6 +147,34 @@ public struct Renderer: Sendable {
     private func humanError(_ error: EDDError) -> String {
         var out = "\(red("error:")) \(error.message)\n"
         out += "  fix: \(error.remedy)\n"
+        return out
+    }
+
+    private func humanScore(_ report: ScoreReport, nextSteps: [String]) -> String {
+        var out = ""
+        if report.findings.isEmpty {
+            out += bold("✓ score: no findings") + "\n"
+        } else {
+            let rows = report.findings.map { finding -> [String] in
+                let location: String
+                switch finding.location {
+                case let .region(file, line, _, _, _, _, _): location = "\(file):\(line)"
+                case let .file(file): location = file
+                }
+                let rank = finding.rank.map { String(Int($0)) } ?? ""
+                return [finding.ruleId, finding.level.rawValue, rank, location, finding.message]
+            }
+            out += renderTable(["RULE", "LEVEL", "RANK", "FILE:LINE", "MESSAGE"], rows).stdout
+            let errors = report.findings.filter { $0.level == .error }.count
+            let warnings = report.findings.filter { $0.level == .warning }.count
+            let findingCount = report.findings.count, fileCount = report.summary.filesScored
+            let findingWord = findingCount == 1 ? "finding" : "findings"
+            let fileWord = fileCount == 1 ? "file" : "files"
+            out += "\n\(findingCount) \(findingWord) (\(errors) error · \(warnings) warning) across \(fileCount) \(fileWord)\n"
+        }
+        if !nextSteps.isEmpty {
+            out += "\(bold("→ next:")) \(nextSteps.joined(separator: " · "))\n"
+        }
         return out
     }
 

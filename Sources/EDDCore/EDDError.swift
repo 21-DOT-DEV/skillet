@@ -7,6 +7,9 @@ public enum EDDError: Error, Sendable, Equatable {
     case usage(message: String, remedy: String)
     /// `-C <dir>` pointed at a directory that does not exist or is not readable. Exit ``ExitCode/environment``.
     case directoryNotFound(path: String)
+    /// A command argument that must name an existing file or directory did not (e.g. `skillet score <path>`).
+    /// Exit ``ExitCode/environment``.
+    case pathNotFound(path: String)
     /// A command that requires a project was run outside one. Exit ``ExitCode/environment``.
     case projectNotFound(cwd: String)
     /// A harness binary could not be resolved (no flag/env/config/PATH). Exit ``ExitCode/environment``.
@@ -29,7 +32,7 @@ public enum EDDError: Error, Sendable, Equatable {
     public var exitCode: ExitCode {
         switch self {
         case .usage: .usage
-        case .directoryNotFound, .projectNotFound, .harnessNotFound, .harnessBanned, .harnessUnauthenticated, .skillNotVisible, .baselineNotIsolable: .environment
+        case .directoryNotFound, .pathNotFound, .projectNotFound, .harnessNotFound, .harnessBanned, .harnessUnauthenticated, .skillNotVisible, .baselineNotIsolable: .environment
         case .invalidArtifact: .artifact
         }
     }
@@ -39,6 +42,7 @@ public enum EDDError: Error, Sendable, Equatable {
         switch self {
         case .usage: "usage"
         case .directoryNotFound: "directory_not_found"
+        case .pathNotFound: "path_not_found"
         case .projectNotFound: "project_not_found"
         case .harnessNotFound: "harness_not_found"
         case .harnessBanned: "harness_banned"
@@ -56,6 +60,8 @@ public enum EDDError: Error, Sendable, Equatable {
             message
         case let .directoryNotFound(path):
             "the directory passed to -C does not exist or is not readable: \(path)"
+        case let .pathNotFound(path):
+            "the path to score does not exist or is not readable: \(path)"
         case let .projectNotFound(cwd):
             "no skillet project found from \(cwd) (no skillet.yaml or .git boundary up the tree)"
         case let .harnessNotFound(harness):
@@ -86,6 +92,8 @@ public enum EDDError: Error, Sendable, Equatable {
             remedy
         case .directoryNotFound:
             "pass an existing, readable directory to -C, or omit -C to use the current directory"
+        case .pathNotFound:
+            "pass an existing, readable file or directory to `skillet score`"
         case .projectNotFound:
             "run from inside a skills repository, or initialize one with `skillet init`"
         case let .harnessNotFound(harness):

@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.16.6
-**Last Updated:** 2026-07-08
+**Version:** v1.17.0
+**Last Updated:** 2026-07-09
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is

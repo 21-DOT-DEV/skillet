@@ -86,16 +86,24 @@ believable before the workflow layer starts acting on it.
      explicitly (default `text-judge`); auto-routing staged (design §14-21); a P9 cost note prints.
      Suite green — see the Specs/011 status row.
 
-5. **[F17]** Deterministic scorers → SARIF (CLI: `skillet score`) — PLANNED · Ported
-   - Purpose & user value: Free, model-free checks over outputs/bundles emitting
+5. **[F17]** Deterministic scorers → SARIF (CLI: `skillet score <path>`) — IMPLEMENTED
+   - Purpose & user value: Free, model-free checks over produced text emitting
      standard SARIF 2.1.0 — the deterministic-first signal that feeds triage and
-     editors/CI.
+     editors/CI. A reporter, not a gate (exit 0 even with findings).
    - Northstar: deterministic-first; gap #1 input.
    - Success metrics:
-     - `score <bundle>` emits valid SARIF 2.1.0 on stdout (schema-validated).
+     - `score <path>` emits valid SARIF 2.1.0 on stdout (`--format sarif`; structural
+       goldens). *(`<path>` input ships now; the saved-run `<bundle>` mode arrives with
+       capture, Phase 3.)*
      - Runs with no model and no network.
-   - Dependencies: Trace/bundle model.
-   - Confidence: Medium — design §6.2, §11 (ScoreKit).
+   - Checks: `SKILL-S001`–`S005` (slop-vocabulary, puffery, em-dash, rule-of-three,
+     knowledge-cutoff), `S006` not-x-but-y (experimental, default-off), `S007`
+     sarif-validity, `S000` file-unreadable. Also `--format tty|json`.
+   - Dependencies: ProjectKit `SafeFile`; EDDCore `SarifDocument`/`ScoreReport`.
+   - Known limitation: reads repo `skillet.yaml` + built-in defaults only; the
+     user/`$XDG_CONFIG_HOME` config layer for `scorers` is deferred to **F24** (config
+     precedence), a known gap vs. design §5.2.
+   - Confidence: High — shipped; Specs/012-deterministic-scorers/plan.md, design §6.2, §11 (ScoreKit).
 
 6. **[F18]** Flaky-eval hygiene, watchdog & infra-only retry — PLANNED · Net-new
    - Purpose & user value: Make reliability honest — flag flaky evals as hygiene
@@ -224,6 +232,11 @@ believable before the workflow layer starts acting on it.
 
 ## Phase Change Log
 
+- 2026-07-09: **F17 IMPLEMENTED** — deterministic scorers → SARIF ([Specs/012](../Specs/012-deterministic-scorers/plan.md)):
+  `skillet score <path> [--format tty|json|sarif]`, free model-free checks over produced text,
+  `ScoreKit` (S001–S007 + S000), `scorers:` config block, EDDCore `SarifDocument`/`ScoreReport`
+  frozen boundaries, RenderKit human table. A reporter, not a gate. Fifth Phase-2 feature.
+  Roadmap → v1.17.0. Design → v0.49.
 - 2026-07-08: PATCH — F16 capture-hardening rounds 1–5 (17 reviewed points, incl. one correctness
   bug): grounded capture never opens special files (FIFO/socket/device — a hang past the harness
   timeout) or hard-linked/symlinked files (host-content leak), withholds non-UTF-8/unreadable files

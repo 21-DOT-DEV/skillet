@@ -24,3 +24,4 @@ roadmap re-phasing.
 | 009 | The trigger axis — description-fires-skill measurement (`skillet run --axis trigger`) | 2 · F14 | Implemented | [plan.md](009-trigger-axis/plan.md) |
 | 010 | The A/B baseline arm — paired with/without-skill Δ (`skillet run --ab`) | 2 · F15 | Implemented | [plan.md](010-ab-baseline/plan.md) |
 | 011 | The grounded judge — file-contents grading (`skillet run --judge grounded-judge`) | 2 · F16 | Implemented | [plan.md](011-grounded-judge/plan.md) |
+| 012 | Deterministic scorers → SARIF (`skillet score`) | 2 · F17 | Implemented | [plan.md](012-deterministic-scorers/plan.md) |

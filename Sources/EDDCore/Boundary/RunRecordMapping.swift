@@ -14,12 +14,17 @@ import Foundation
 /// v2-graded runs stay distinguishable after a cache wipe. Provenance not captured at run time is
 /// unrecoverable later; `"unknown"` is the defined sentinel (§7.4) when a field can't be resolved.
 public struct RunProvenance: Sendable, Equatable {
+    /// The grader's stable id — `text-judge` / `grounded-judge` / `replay` / `none` (F16). Recorded
+    /// additively in the committed `judge` block so text vs grounded stay distinguishable in the
+    /// committed record after a `.skillet/` cache wipe — not only by a coincidental `prompt_version`.
+    public let judgeId: String
     public let judgeProvider: String
     public let judgeModel: String
     public let judgePromptVersion: String
     public let executorBinaryVersion: String
 
-    public init(judgeProvider: String, judgeModel: String, judgePromptVersion: String, executorBinaryVersion: String) {
+    public init(judgeId: String = "text-judge", judgeProvider: String, judgeModel: String, judgePromptVersion: String, executorBinaryVersion: String) {
+        self.judgeId = judgeId
         self.judgeProvider = judgeProvider
         self.judgeModel = judgeModel
         self.judgePromptVersion = judgePromptVersion
@@ -307,6 +312,7 @@ public extension BenchmarkFile {
             "executor_binary_version": .string(provenance.executorBinaryVersion),
             "judge": behavioral != nil || prior?.metadata?["judge"] == nil
                 ? .object([
+                    "id": .string(provenance.judgeId),   // additive (F16): the grader's stable id
                     "provider": .string(provenance.judgeProvider),
                     "model": .string(provenance.judgeModel),
                     "prompt_version": .string(provenance.judgePromptVersion)
@@ -499,6 +505,7 @@ public extension GradingFile {
                 "pass_rate": .number(total == 0 ? 0 : Double(passed) / Double(total))
             ]),
             "judge": .object([
+                "id": .string(provenance.judgeId),   // additive (F16): the grader's stable id
                 "provider": .string(provenance.judgeProvider),
                 "model": .string(provenance.judgeModel),
                 "prompt_version": .string(provenance.judgePromptVersion)

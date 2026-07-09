@@ -1,5 +1,6 @@
 import Foundation
 import HarnessKit
+import JudgeKit
 
 /// Creates and tears down the per-trial sandbox a run executes in, and lists its post-run contents as
 /// ground truth for the judge. Staging copies the skill (`SKILL.md` + `references/` + `scripts/` +
@@ -245,5 +246,184 @@ public struct WorkspaceManager: Sendable {
         if fm.fileExists(atPath: workspace.root.path) {
             try fm.removeItem(at: workspace.root)
         }
+    }
+
+    // MARK: - Grounded-judge content capture (F16)
+
+    /// Raw bytes of the files staged into the workspace before the run — the baseline for the
+    /// produced/changed snapshot diff (plan D-6). Non-`.claude`, non-symlink regular files only
+    /// (staged input fixtures; the skill lives under `.claude/` and is never graded as output).
+    /// Staged inputs are small by nature, so holding their bytes for the post-run comparison is cheap.
+    public func snapshotStaged(_ workspace: Workspace) -> [String: Data] {
+        var out: [String: Data] = [:]
+        for rel in producedWalk(workspace) {
+            let url = workspace.root.appendingPathComponent(rel)
+            // Regular files only — never open a FIFO/socket (would block), never follow a symlink.
+            guard Self.noSymlink(at: url, under: workspace.root), fileType(url) == .typeRegular,
+                  let data = try? Data(contentsOf: url) else { continue }
+            out[rel] = data
+        }
+        return out
+    }
+
+    /// The produced/changed files' **bounded, disclosed** contents (plan D-6/D-7, F16): created +
+    /// modified vs `baseline` get their contents (cut at `perFileCap`, whole set bounded by `totalCap`),
+    /// deleted staged files are disclosed with no content, genuinely-untouched inputs are skipped, and
+    /// **symlinks are never followed** — a symlinked (or under-a-symlink) output is disclosed, never
+    /// read, so a `out.txt → /etc/passwd` can't funnel host contents into the judge (plan-review P1).
+    /// Deterministic (path-sorted) for byte-reproducible `--replay` re-grades. Reads are size-bounded
+    /// (a huge output is not slurped whole).
+    public func readProducedContents(_ workspace: Workspace, baseline: [String: Data], perFileCap: Int, totalCap: Int) -> [FileContent] {
+        let fm = FileManager.default
+        let root = workspace.root
+        var results: [FileContent] = []
+        var total = 0
+
+        for rel in producedWalk(workspace) {
+            let url = root.appendingPathComponent(rel)
+            let staged = baseline[rel]
+            let change: FileContent.Change = (staged == nil) ? .created : .modified
+            // The entry itself is a symlink: never follow — disclose it (plan-review P1).
+            if Self.isSymlink(url) {
+                results.append(FileContent(path: rel, change: change, content: nil, symlink: true))
+                continue
+            }
+            // A path UNDER a symlinked ancestor (e.g. `linkdir/inner.txt` where `linkdir` is a link):
+            // the ancestor link is disclosed on its own row, so skip the phantom child — it isn't a real
+            // produced file, and following it would read outside the sandbox. `noSymlink` also rejects a
+            // symlink nested inside the entry, so this is the full confinement guard.
+            if !Self.noSymlink(at: url, under: root) { continue }
+            // Non-regular special file (FIFO / socket / device): disclose WITHOUT opening it — a
+            // `FileHandle` read on a pipe blocks forever, which would hang capture past the harness
+            // timeout (finding 1). This check is BEFORE any read, so `unchanged`/`boundedRead` never
+            // touch a special file either.
+            guard fileType(url) == .typeRegular else {
+                results.append(FileContent(path: rel, change: change, content: nil, sizeBytes: fileSize(url), special: true))
+                continue
+            }
+            // Hard link (link count > 1): another directory entry points at this inode — possibly a
+            // host file outside the sandbox (a same-fs hard link; cross-fs hard links are impossible,
+            // so this catches the realistic escape). Never read it — disclose. Defense-in-depth beside
+            // the symlink guard; the robust fix is workspace-level isolation (a future sandbox pass).
+            if linkCount(url) > 1 {
+                results.append(FileContent(path: rel, change: change, content: nil, sizeBytes: fileSize(url), hardlink: true))
+                continue
+            }
+            // A regular staged file whose bytes are unchanged is an input, not the skill's output.
+            if let staged, unchanged(url, staged: staged) { continue }
+            let allowed = min(perFileCap, max(0, totalCap - total))
+            if allowed == 0 {   // total budget spent → disclose as omitted (no prefix shown; not truncation)
+                results.append(FileContent(path: rel, change: change, content: nil, sizeBytes: fileSize(url), omitted: true))
+                continue
+            }
+            guard let (data, fullSize) = boundedRead(url, cap: allowed) else {
+                // A regular file that couldn't be opened (e.g. `chmod 000`): disclose it, never drop it
+                // silently — the "every omission disclosed" rule (post-ship review finding).
+                results.append(FileContent(path: rel, change: change, content: nil, sizeBytes: fileSize(url), unreadable: true))
+                continue
+            }
+            let truncated = fullSize > data.count
+            guard let text = Self.decodeText(data, truncated: truncated) else {
+                // NUL or non-UTF-8 (after trimming an incomplete trailing scalar): withhold as binary,
+                // disclosed with size — never lossy-decode into U+FFFD garbage (findings 2, 3).
+                results.append(FileContent(path: rel, change: change, content: nil, sizeBytes: fullSize, binary: true))
+                continue
+            }
+            let shown = text.utf8.count
+            total += shown
+            results.append(FileContent(path: rel, change: change, content: text, truncatedBytes: fullSize - shown, sizeBytes: fullSize))
+        }
+        // Deleted: a staged path with NO entry present now — using **lstat** existence, so a dangling
+        // symlink that replaced a staged file (already disclosed above) is not *also* recorded as
+        // deleted (finding 4).
+        for rel in baseline.keys.sorted() {
+            let url = root.appendingPathComponent(rel)
+            if !Self.isSymlink(url) && !fm.fileExists(atPath: url.path) {
+                results.append(FileContent(path: rel, change: .deleted, content: nil))
+            }
+        }
+        return results.sorted { $0.path < $1.path }
+    }
+
+    /// The file's type from its metadata attributes. Callers apply this only **after** the `isSymlink`
+    /// / `noSymlink` guards, so the entry is never a symlink here (follow-vs-`lstat` semantics are moot);
+    /// `nil` on error. A FIFO/device shows as `.typeUnknown`, a socket as `.typeSocket` — anything but
+    /// `.typeRegular` must not be opened.
+    private func fileType(_ url: URL) -> FileAttributeType? {
+        (try? FileManager.default.attributesOfItem(atPath: url.path)[.type]) as? FileAttributeType
+    }
+
+    /// The file's byte size from metadata (no read), for disclosing a withheld file's size.
+    private func fileSize(_ url: URL) -> Int {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path)[.size]) as? Int) ?? 0
+    }
+
+    /// The file's hard-link count (`st_nlink`) from metadata; `1` on error. `> 1` ⇒ the inode has
+    /// another directory entry (possibly a host file), so the content is withheld, not read.
+    private func linkCount(_ url: URL) -> Int {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path)[.referenceCount]) as? Int) ?? 1
+    }
+
+    /// Strictly decode captured bytes as UTF-8, or `nil` to withhold as binary: **never** lossy-decode.
+    /// A NUL byte ⇒ binary (git heuristic). When the read was truncated at the cap, at most **one**
+    /// incomplete trailing UTF-8 scalar is trimmed before validation — a cap can only split the final
+    /// character — so a valid text file cut mid-character stays text (minus the partial byte(s)), while
+    /// genuinely non-text bytes still fail → binary.
+    ///
+    /// The trailing scalar is at most 4 bytes: a lead byte in `0xC2...0xF4` plus ≤ 3 continuation bytes
+    /// (`10xxxxxx`). Crucially, an invalid byte like `0xFF`/`0xFE` or a run of > 3 continuation bytes is
+    /// **not** a truncation artifact, so it is left in place and the decode falls through to `nil` ⇒
+    /// binary (post-ship review: `0xFF` at the cap boundary must stay binary, not be stripped to text).
+    ///
+    /// Known heuristic limitation (accepted): with an absurdly small cap (< one scalar, ~4 bytes), a
+    /// prefix of only stray continuation bytes can trim to empty and read as empty text. Unreachable at
+    /// the shipped 32 KiB cap — a genuinely binary file's first 32 KiB carries a NUL or a
+    /// non-continuation invalid byte and fails to binary.
+    static func decodeText(_ data: Data, truncated: Bool) -> String? {
+        if data.contains(0) { return nil }
+        if let whole = String(bytes: data, encoding: .utf8) { return whole }
+        guard truncated else { return nil }   // invalid UTF-8 that isn't a boundary cut ⇒ binary
+        var d = data
+        var trimmedContinuations = 0
+        while let last = d.last, (last & 0b1100_0000) == 0b1000_0000, trimmedContinuations < 3 {
+            d.removeLast(); trimmedContinuations += 1
+        }
+        if let last = d.last, ((0xC2 as UInt8)...(0xF4 as UInt8)).contains(last) { d.removeLast() }   // a genuine incomplete lead byte only
+        return String(bytes: d, encoding: .utf8)   // still invalid ⇒ binary
+    }
+
+    /// Non-`.claude` file-or-symlink entries under the workspace (dirs excluded), sorted. Symlink
+    /// entries are kept (to be disclosed, never read); real directories are skipped.
+    private func producedWalk(_ workspace: Workspace) -> [String] {
+        let fm = FileManager.default
+        let root = workspace.root
+        let all = (try? fm.subpathsOfDirectory(atPath: root.path)) ?? []
+        return all.filter { rel in
+            if rel == ".claude" || rel.hasPrefix(".claude/") { return false }
+            let url = root.appendingPathComponent(rel)
+            if Self.isSymlink(url) { return true }
+            var isDir: ObjCBool = false
+            fm.fileExists(atPath: url.path, isDirectory: &isDir)
+            return !isDir.boolValue
+        }.sorted()
+    }
+
+    /// True iff `url`'s current bytes equal the staged bytes — size first (cheap), then a bounded byte
+    /// compare only when sizes match (bounded by the small staged input).
+    private func unchanged(_ url: URL, staged: Data) -> Bool {
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? nil
+        if let size, size != staged.count { return false }
+        guard let (data, fullSize) = boundedRead(url, cap: staged.count) else { return false }
+        return fullSize == staged.count && data == staged
+    }
+
+    /// Read up to `cap` bytes (the capture ceiling) without slurping a huge file whole; also returns
+    /// the file's full byte size (from metadata) so truncation can be disclosed precisely.
+    private func boundedRead(_ url: URL, cap: Int) -> (data: Data, fullSize: Int)? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let data = (try? handle.read(upToCount: max(cap, 0))) ?? Data()
+        let fullSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int).flatMap { $0 } ?? data.count
+        return (data, fullSize)
     }
 }

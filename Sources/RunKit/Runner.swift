@@ -18,11 +18,15 @@ public struct Runner {
     let adapter: any HarnessAdapter
     let judge: any Judge
     let workspaces: WorkspaceManager
+    /// Whether each trial captures produced-file contents for the judge (F16). `.listingOnly` (default)
+    /// is the text-judge path — no content read, no cost; `.withContents` is set for the grounded judge.
+    let evidencePolicy: EvidencePolicy
 
-    public init(adapter: any HarnessAdapter, judge: any Judge, workspaces: WorkspaceManager = WorkspaceManager()) {
+    public init(adapter: any HarnessAdapter, judge: any Judge, workspaces: WorkspaceManager = WorkspaceManager(), evidencePolicy: EvidencePolicy = .listingOnly) {
         self.adapter = adapter
         self.judge = judge
         self.workspaces = workspaces
+        self.evidencePolicy = evidencePolicy
     }
 
     /// A completed run: the pure report plus per-eval trial detail. The command builds + writes the
@@ -91,6 +95,18 @@ public struct Runner {
             return TrialResult(exit: .failed, verdicts: [])
         }
         defer { if !keepWorkspace { try? workspaces.destroy(workspace) } }
+        // F16: hash the staged inputs BEFORE the run, so post-run we can capture only what the skill
+        // *produced or changed* (created + modified), not leftover inputs — the snapshot-diff (D-6).
+        // Only under the grounded policy; the text path skips this entirely (no cost).
+        let stagedBaseline: [String: Data] = { if case .withContents = evidencePolicy { return workspaces.snapshotStaged(workspace) } else { return [:] } }()
+        // Capture the produced/changed contents under the grounded policy — a pure filesystem snapshot
+        // diff (no trace needed), so it works on failure paths too; `nil` under the text policy. An
+        // **empty** produced set is itself evidence (a "wrote file X" criterion that wrote nothing), so
+        // it is captured as `[]`, not skipped.
+        func captureEvidence() -> [FileContent]? {
+            guard case let .withContents(perFileCap, totalCap) = evidencePolicy else { return nil }
+            return workspaces.readProducedContents(workspace, baseline: stagedBaseline, perFileCap: perFileCap, totalCap: totalCap)
+        }
 
         // Hoisted so the catch paths persist whatever was gathered before a parse/judge failure — the raw
         // harness output + any partial verdicts are most useful exactly when a trial errors (the cache is
@@ -98,6 +114,7 @@ public struct Runner {
         var raw: RawTrace?
         var trace: Trace?
         var verdicts: [Verdict] = []
+        var fileContents: [FileContent]?   // F16: hoisted so it is persisted for replay/re-grade on every exit path
         let started = Date()
         // Wall-clock of the harness execution ONLY (F15 → the canonical `time_seconds` stats):
         // stamped immediately after adapter.run returns and reused on the parse/judge error paths,
@@ -111,29 +128,36 @@ public struct Runner {
             let executionSeconds = harnessSeconds
             let parsed = try adapter.parseTrace(produced)
             trace = parsed
+            // F16: capture produced/changed contents once here (post-parse, workspace still live) so
+            // EVERY exit below persists the grounded evidence — the pollution return, a judge failure,
+            // and success alike.
+            fileContents = captureEvidence()
             // The §9.2 pollution tripwire (F15): on a baseline trial, ANY skill invocation means the
             // isolation claim failed on this machine/run — the trial is unmeasurable, never judged
             // (no spend on an ungradeable trial), and the report surfaces it loudly.
             if pollutionTripwire && !parsed.skillInvocations.isEmpty {
-                writeForensics(trialDir: trialDir, evalId: evalId, raw: produced.raw, trace: parsed, verdicts: [], exit: .polluted)
+                writeForensics(trialDir: trialDir, evalId: evalId, raw: produced.raw, trace: parsed, verdicts: [], exit: .polluted, fileContents: fileContents)
                 return TrialResult(exit: .polluted, verdicts: [], durationSeconds: executionSeconds)
             }
             let response = parsed.turns.last(where: { $0.role == .assistant })?.text ?? ""
             let listing = (try? workspaces.listing(workspace)) ?? []
-            let evidence = JudgeEvidence(responseText: response, trace: parsed, workspaceListing: listing)
+            let evidence = JudgeEvidence(responseText: response, trace: parsed, workspaceListing: listing, fileContents: fileContents)
             for criterion in eval.expectations {
                 verdicts.append(try await judge.verdict(for: criterion, evidence: evidence))
             }
-            writeForensics(trialDir: trialDir, evalId: evalId, raw: produced.raw, trace: parsed, verdicts: verdicts, exit: .passed)
+            writeForensics(trialDir: trialDir, evalId: evalId, raw: produced.raw, trace: parsed, verdicts: verdicts, exit: .passed, fileContents: fileContents)
             return TrialResult(exit: .passed, verdicts: verdicts, durationSeconds: executionSeconds)
         } catch let error as ProcessError {
             let exit: TrialExit = { if case .timedOut = error { return .timeout } else { return .failed } }()
-            writeForensics(trialDir: trialDir, evalId: evalId, raw: raw?.raw, trace: trace, verdicts: verdicts, exit: exit)
+            // On a pre-capture failure (harness/parse threw before the post-parse capture), snapshot the
+            // live workspace now so grounded evidence still survives; `?? ` keeps an already-captured
+            // set (e.g. a judge failure captured before it threw).
+            writeForensics(trialDir: trialDir, evalId: evalId, raw: raw?.raw, trace: trace, verdicts: verdicts, exit: exit, fileContents: fileContents ?? captureEvidence())
             return TrialResult(exit: exit, verdicts: [], durationSeconds: harnessSeconds ?? Date().timeIntervalSince(started))
         } catch {
             // HarnessError.executionFailed / parse / judge failure → the trial couldn't be measured, but
-            // persist the raw output + partial verdicts collected so far for debugging/replay.
-            writeForensics(trialDir: trialDir, evalId: evalId, raw: raw?.raw, trace: trace, verdicts: verdicts, exit: .failed)
+            // persist the raw output + partial verdicts (+ the produced-file evidence) collected so far.
+            writeForensics(trialDir: trialDir, evalId: evalId, raw: raw?.raw, trace: trace, verdicts: verdicts, exit: .failed, fileContents: fileContents ?? captureEvidence())
             return TrialResult(exit: .failed, verdicts: [], durationSeconds: harnessSeconds ?? Date().timeIntervalSince(started))
         }
     }
@@ -254,7 +278,10 @@ public struct Runner {
     }
 
     /// The per-trial forensics record under `.skillet/runs` (deletable cache; best-effort I/O).
-    private func writeForensics(trialDir: URL, evalId: String, raw: String?, trace: Trace?, verdicts: [Verdict], exit: TrialExit) {
+    /// `fileContents` (F16, grounded policy) is persisted as `file_contents.json` so the exact evidence
+    /// the grounded judge saw is auditable and re-gradable (F19/F25) after the workspace is destroyed —
+    /// making the plan's "captured contents ride along for --record/re-grade" real.
+    private func writeForensics(trialDir: URL, evalId: String, raw: String?, trace: Trace?, verdicts: [Verdict], exit: TrialExit, fileContents: [FileContent]? = nil) {
         let fm = FileManager.default
         try? fm.createDirectory(at: trialDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
@@ -265,6 +292,12 @@ public struct Runner {
         }
         if !verdicts.isEmpty, let data = try? encoder.encode(verdicts) {
             try? data.write(to: trialDir.appendingPathComponent("verdicts.json"))
+        }
+        // Write whenever contents were captured (grounded policy), **including an empty `[]`** — an
+        // empty produced set is meaningful evidence and must be distinguishable from "not captured"
+        // (text policy / old cache) after teardown. `nil` (text policy) writes nothing.
+        if let fileContents, let data = try? encoder.encode(fileContents) {
+            try? data.write(to: trialDir.appendingPathComponent("file_contents.json"))
         }
         if let data = try? encoder.encode(TrialMeta(evalId: evalId, exit: exit, verdicts: verdicts.count)) {
             try? data.write(to: trialDir.appendingPathComponent("metadata.json"))

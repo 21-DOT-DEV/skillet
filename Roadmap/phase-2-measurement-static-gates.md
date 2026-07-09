@@ -1,8 +1,8 @@
 # Phase 2 — Trustworthy Measurement & Static Gates
 
-**Status:** IN PROGRESS (F3 + F14 shipped 2026-07-04; F15 shipped 2026-07-07)
+**Status:** IN PROGRESS (F3 + F14 shipped 2026-07-04; F15 shipped 2026-07-07; F16 shipped 2026-07-08)
 **Horizon:** Now
-**Last Updated:** 2026-07-07
+**Last Updated:** 2026-07-08
 
 ## Goal
 
@@ -67,7 +67,7 @@ believable before the workflow layer starts acting on it.
      delta; offline recompute rebuilds the block). Behavioral-only: trigger-only + `--ab` refuses
      (exit 2); mixed runs note the single-arm trigger. Suite green — see the Specs/010 status row.
 
-4. **[F16]** Grounded judge — file-outcome grading (CLI: `--judge <grounded-id>`) — PLANNED · Net-new
+4. **[F16]** Grounded judge — file-outcome grading (CLI: `--judge grounded-judge`) — IMPLEMENTED (2026-07-08) · Net-new
    - Purpose & user value: Most skill criteria assert *file* outcomes ("wrote
      SARIF to X", "scaffolded the catalog"); a grounded judge reads the post-run
      sandbox instead of grading from prose, killing the "surface compliance"
@@ -78,6 +78,13 @@ believable before the workflow layer starts acting on it.
      - Every verdict records `judge_id`, `model`, `judge_prompt_version`.
    - Dependencies: text judge (Phase 1), Workspace sandbox (Phase 1).
    - Confidence: Medium — design §9.4.
+   - Shipped (2026-07-08, [Specs/011](../Specs/011-grounded-judge/plan.md)): both success metrics —
+     `--judge grounded-judge` reads the **produced/changed set** (before/after snapshot diff,
+     symlink-confined, cut/binary/deleted disclosed, 32 KiB/file · 128 KiB total), grades strictly
+     to the criterion, and stamps `judge_id`/`model`/`judge_prompt_version` per verdict **and**
+     additively into the committed `judge` block (so grounded vs text survive a cache wipe). Selected
+     explicitly (default `text-judge`); auto-routing staged (design §14-21); a P9 cost note prints.
+     Suite green — see the Specs/011 status row.
 
 5. **[F17]** Deterministic scorers → SARIF (CLI: `skillet score`) — PLANNED · Ported
    - Purpose & user value: Free, model-free checks over outputs/bundles emitting
@@ -217,6 +224,19 @@ believable before the workflow layer starts acting on it.
 
 ## Phase Change Log
 
+- 2026-07-08: PATCH — F16 capture-hardening rounds 1–5 (17 reviewed points, incl. one correctness
+  bug): grounded capture never opens special files (FIFO/socket/device — a hang past the harness
+  timeout) or hard-linked/symlinked files (host-content leak), withholds non-UTF-8/unreadable files
+  with disclosed sizes (no lossy decode, no silent drop, invalid byte at the cap stays binary), uses
+  lstat for deletion + symlink-child confinement, and persists evidence to the run cache on **every**
+  exit path (incl. empty `[]`). Deferred with rationale: workspace-level isolation (robust
+  hard-link/sandbox fix) + bounded fixture reads. 356 tests green. Roadmap → v1.16.5.
+- 2026-07-08: **F16 IMPLEMENTED** — the grounded judge ([Specs/011](../Specs/011-grounded-judge/plan.md)):
+  `run --judge grounded-judge` reads produced-file contents (snapshot-diff produced set,
+  symlink-confined, bounded+disclosed) to catch created-but-wrong; additive committed `judge_id`;
+  auto-routing staged (design §14-21). Fourth Phase-2 feature; no scope change to the rest.
+  Roadmap → v1.16.0. (Design header pointer reconciled v0.39→v0.42; F15 review rounds had advanced
+  the changelog to v0.41.)
 - 2026-07-07: **F15 IMPLEMENTED** — the A/B baseline arm ([Specs/010](../Specs/010-ab-baseline/plan.md)):
   `run --ab` with prevent+verify+preflight isolation (`--disable-slash-commands`, $0 flag preflight,
   per-trial `polluted` tripwire), paired Δ ± SE reporting, canonical `with_skill`/`without_skill`

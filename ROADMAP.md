@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.15.0
-**Last Updated:** 2026-07-07
+**Version:** v1.16.6
+**Last Updated:** 2026-07-08
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is
@@ -140,8 +140,8 @@ Phase 1's `F1–F8` and Phase 8's `F10–F13` were already global and were prese
   (claude-code adapter), F8 (frozen boundary codecs), and now F7 (`skillet run` — the neutral runner,
   `pass^k`, `RunKit`+`JudgeKit`) — `Specs/001`–`007`, 235 tests green. **Phase 2 is IN PROGRESS —
   F3 (`skillet doctor`) + F14 (the trigger axis) shipped 2026-07-04, F15 (the A/B baseline arm)
-  shipped 2026-07-07 (`Specs/008`–`010`, 321 tests green)**; the remaining Phase 2–8
-  features are PLANNED/FUTURE: those statuses reflect design intent verified against the design doc
+  shipped 2026-07-07, F16 (the grounded judge) shipped 2026-07-08 (`Specs/008`–`011`, 356 tests
+  green)**; the remaining Phase 2–8 features are PLANNED/FUTURE: those statuses reflect design intent verified against the design doc
   (Medium confidence), not running code.
 - **"Ported" assumption.** The design doc says much of v1 is faithfully
   translated from a predecessor (`swift-skill-eval` + a Python trigger harness).
@@ -190,14 +190,22 @@ process-assertions — decided 2026-07-06 via the Apple Evaluations cross-refere
 - **Ablation arms** → design **§14-10**. Partial-skill A/B (drop a section / reference / rule) to
   isolate which part of a skill earns its tokens — feeds *evidence-to-edit ratio*. Touches the
   Phase 6 `run --ab` / `SkillSet`.
+- **Automatic per-criterion grounded routing** → design **§14-21**. Auto-send file-content criteria
+  to the grounded judge (vs today's explicit `--judge grounded-judge`); a fallible classifier vs an
+  author-declared per-criterion field — deferred, revisit on mixed-criterion demand.
 
 ## Change Log
 
-Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.15.0, latest first, one
+Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.16.6, latest first, one
 linkable heading per version (extracted 2026-07-04; historical entries are never rewritten).
 
-- **Latest — v1.15.0 (2026-07-07): MINOR** — **F15 `skillet run --ab` SHIPPED**: the provably
-  skill-free baseline arm — prevent + verify + preflight isolation (session-level skill disabling,
-  $0 flag preflight, per-trial `polluted` tripwire), paired per-eval Δ ± SE, canonical
-  `with_skill`/`without_skill` benchmark rows + signed delta, offline recompute. (Prior: v1.14.1 —
-  review-round fixes; v1.14.0 — diagnostic model tier F67 + Apple FM/PCC provider F68.)
+- **Latest — v1.16.6 (2026-07-08): PATCH** — F16 polish round 6 (4 observations; 2 acted, 2 tracked):
+  explicit `import TraceKit` in both judge files, and a dedicated `FileContent.omitted` flag so
+  `truncatedBytes` strictly means "a prefix was shown" (budget-omitted files no longer overload it);
+  bounded `snapshotStaged` reads and a `--judge` enum reaffirmed as tracked follow-ups. No grading
+  change; 356 green. (Prior: v1.16.5 — round 5; v1.16.0 — F16 shipped.)
+- **v1.16.0 (2026-07-08): MINOR** — **F16 `skillet run --judge grounded-judge` SHIPPED**:
+  the file-contents grader — reads the produced/changed set (before/after snapshot diff,
+  symlink-confined, bounded 32 KiB/128 KiB + disclosed) to catch created-but-wrong; additive
+  committed `judge_id`; explicit selection (auto-routing staged §14-21); P9 cost note. (Prior:
+  v1.15.0 — F15 `--ab` baseline arm; v1.14.x — diagnostic tier F67 + Apple provider F68.)

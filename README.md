@@ -12,8 +12,9 @@ skillet drafts and proves — **a human lands every write**.
 > F8 (frozen boundary codecs — the skill-creator formats round-trip faithfully), and
 > F7 (`skillet run` — the neutral runner with `pass^k`) have landed, and Phase 2 is underway:
 > F3 (`skillet doctor` — the free $0 preflight), F14 (`skillet run --axis trigger` — the
-> description axis: does the skill *fire*?), and F15 (`skillet run --ab` — the provably
-> skill-free baseline arm with paired Δ) shipped. The rest
+> description axis: does the skill *fire*?), F15 (`skillet run --ab` — the provably
+> skill-free baseline arm with paired Δ), and F16 (`skillet run --judge grounded-judge` — the
+> file-contents grader: did it write the *right* file?) shipped. The rest
 > of the loop lights up across later phases. See [ROADMAP.md](ROADMAP.md).
 
 ## How it works
@@ -72,11 +73,15 @@ skillet run <skill>         # run the skill's evals k×, judge, report pass^k (p
 skillet run <skill> -n      # dry-run: preview the trial-count estimate, spend nothing
 skillet run <skill> --axis trigger  # description axis: did it fire? (deterministic, judge-free)
 skillet run <skill> --ab    # + a provably skill-free baseline arm; paired Δ ("is it earning its tokens?")
+skillet run <skill> --judge grounded-judge  # grade produced-file CONTENTS, not just existence (larger prompts)
 skillet run --json          # machine-readable result (schema: skillet.run/1)
 skillet run --json -n        # spend-free plan preview (schema: skillet.run-plan/1)
 skillet harness info        # harness adapters, capabilities, probe status
 skillet harness info --json # machine-readable (schema: skillet.harness-info/1)
 ```
+
+The paid `run` shells the `claude` binary, resolved via `SKILLET_CLAUDE_CODE_BIN` (env), then
+`harness.claude-code.path` in `skillet.yaml`, then your `PATH`.
 
 Every command speaks to **humans** (TTY) and **scripts** (`--json`, each payload carrying a `schema`
 field) and returns stable exit codes: `0` ok · `1` measured failure · `2` usage · `3` environment ·

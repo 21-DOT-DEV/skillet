@@ -1,5 +1,6 @@
 import Foundation
 import EDDCore
+import TraceKit   // `evidence.trace` (Turn / SkillInvocation) — imported explicitly, not via Judge.swift
 
 /// The Phase-1 ``Judge``: it renders a deterministic grading prompt from the evidence, sends it once
 /// through an injected ``JudgeRunner`` (the resolved `claude` CLI in production), and parses a strict

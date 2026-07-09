@@ -4,6 +4,101 @@ The roadmap's versioned change log, extracted from `ROADMAP.md` on 2026-07-04 (v
 stays lean. Latest first; every version is a linkable heading; historical entries are never rewritten.
 Companion: [`skillet-design-changelog.md`](skillet-design-changelog.md).
 
+## v1.16.6 — 2026-07-08
+
+PATCH — **F16 polish round 6** (4 optional-polish observations; 2 acted, 2 reaffirmed-as-tracked;
+design → v0.48). ACTED: (1) `import TraceKit` made explicit in both `GroundedJudge` and `TextJudge`
+(the sibling had the same implicit dependency, so both are made explicit for consistency). (2) a
+dedicated `FileContent.omitted` flag — a file dropped because the total evidence budget was spent is
+disclosed as `omitted: true` (with `sizeBytes`) rather than overloading `truncatedBytes`, so
+`truncatedBytes > 0` now strictly means a shown `content` prefix (sharper judge contract). TRACKED
+(no change): bounded `snapshotStaged` reads (fixtures are maintainer-controlled/copied — robustness,
+not a boundary) and a `--judge` `ExpressibleByArgument` enum (fine at two values). No grading-behavior
+change. Detail: [Specs/011](Specs/011-grounded-judge/plan.md). 356 tests green. Phase 2 remains IN PROGRESS.
+
+## v1.16.5 — 2026-07-08
+
+PATCH — **F16 capture-hardening round 5** (4 minor concerns; 2 acted, 2 deferred with rationale;
+design → v0.47). (1) **Hard-link guard**: grounded content-read escalates a hard link into a leak the
+same way a symlink does, so a produced file with `st_nlink > 1` (another directory entry, possibly a
+same-fs host file) is now disclosed (`hardlink: true`) and never read — regression test included; the
+robust workspace-isolation fix is deferred to a future sandbox pass (broader than grounded). (2) the
+`--judge` `@Option` is renamed `judgeSelection` (flag unchanged) to remove a `judge`/`judgeCfg`
+shadowing subtlety. (3) `decodeText`'s absurd-sub-scalar-cap continuation edge is documented as an
+accepted heuristic limitation (unreachable at 32 KiB). (4) `snapshotStaged`'s full-fixture read is a
+deferred follow-up (fixtures are maintainer-controlled + copied, `nlink = 1` — not a boundary). +1
+test (356 green). Detail: [Specs/011](Specs/011-grounded-judge/plan.md). Phase 2 remains IN PROGRESS.
+
+## v1.16.4 — 2026-07-08
+
+PATCH — **F16 capture-hardening round 4** (4 reviewed findings, all valid; design → v0.46). (1)
+**correctness bug**: `decodeText`'s truncation trim stripped any high-bit trailing byte, so a binary
+file whose 32 KiB prefix ended in an invalid byte (`0xFF`/`0xFE` — JPEG, UTF-16 BOM) was mis-classified
+as truncated *text* the judge would grade; now it trims only a genuine incomplete trailing scalar
+(lead `0xC2…0xF4` + ≤3 continuations), so invalid bytes fall through to binary (regression test added).
+(2) `fileType` doc comment corrected (it doesn't use `lstat`; moot behind the symlink guards). (3) a
+timeout/`ProcessError` catch-path test added to back the round-3 persistence claim. (4) `--judge
+grounded-judge` on a trigger-only run now notes it has no effect instead of silently ignoring the flag.
++3 tests (355 green). Detail: [Specs/011](Specs/011-grounded-judge/plan.md). Phase 2 remains IN PROGRESS.
+
+## v1.16.3 — 2026-07-08
+
+PATCH — **F16 capture-hardening round 3** (1 reviewed finding, valid; design → v0.45): grounded
+evidence persistence was not actually "every exit path" — capture ran only after harness + parse +
+the pollution check, so polluted baseline trials, process/timeout failures, and parse failures wrote
+no `file_contents.json`, and an empty produced set (`[]`) was skipped (indistinguishable from
+"not captured" after teardown, which matters for "wrote file X" criteria). Fixed: capture hoisted
+post-parse (covers pollution + judge-fail + success), catch paths capture from the live workspace,
+and the writer persists whenever contents were captured **including `[]`** (`nil` = text policy = no
+file). +3 tests (empty-set, parse-failure, polluted). Reviewer's `unchanged()`-follows-symlink
+non-finding confirmed not reachable (round-2 guards). +3 tests (352 green). Detail:
+[Specs/011](Specs/011-grounded-judge/plan.md). Phase 2 remains IN PROGRESS.
+
+## v1.16.2 — 2026-07-08
+
+PATCH — **F16 capture-hardening round 2** (3 reviewed findings, all valid; design → v0.44). (1) a
+regular produced file that can't be opened (e.g. `chmod 000`) is disclosed (`unreadable: true` +
+size), not silently dropped — the last hole in "every omission disclosed". (2) the grounded judge's
+captured file contents are now persisted as `file_contents.json` in the run cache (grounded policy,
+every exit path), so the evidence survives workspace teardown — making the plan's "captured contents
+ride along so `--record`/re-grade reproduce for free" real and grounded verdicts auditable. (3) test
+hardening: the symlinked-directory case asserts the link is disclosed and no child path enters
+evidence; production refined to skip under-symlink children (ancestor link already disclosed) rather
+than mislabel a child as a symlink. +3 tests (349 green). Detail:
+[Specs/011](Specs/011-grounded-judge/plan.md). Phase 2 remains IN PROGRESS.
+
+## v1.16.1 — 2026-07-08
+
+PATCH — **F16 capture-hardening review round** (5 reviewed findings, all valid; design → v0.43). The
+grounded judge's produced-file capture is hardened: (1) **HIGH** — it no longer opens FIFO/socket/device
+files (a `FileHandle` read on a pipe blocks forever — a skill could `mkfifo` in the sandbox and hang
+capture *after* the harness timeout); non-regular files are disclosed without being opened. (2)
+**MEDIUM** — non-UTF-8 bytes are withheld as binary instead of being lossy-decoded into U+FFFD garbage
+(only NUL was caught before), and a UTF-8 character cut at the byte cap is trimmed cleanly rather than
+mangled. (3) **MEDIUM** — withheld binary files now disclose their byte size. (4) **LOW** — a staged
+file replaced by a dangling symlink is recorded once (modified symlink), not also as deleted (the
+deletion pass now uses lstat existence). (5) **LOW** — doc date drift corrected. +4 regression tests
+including a DoS test with a `.timeLimit` guard so a reintroduced hang fails instead of hanging CI (346
+green). Detail: [Specs/011](Specs/011-grounded-judge/plan.md) status row. Phase 2 remains IN PROGRESS.
+
+## v1.16.0 — 2026-07-08
+
+MINOR — **F16 SHIPPED: the grounded judge** ([Specs/011](Specs/011-grounded-judge/plan.md); design →
+v0.42). `skillet run --judge grounded-judge` reads produced-file **contents** to catch
+*created-but-wrong/empty* — the "surface compliance" failure grading-from-prose can't see. Selected
+explicitly (default `text-judge`; the value equals the recorded `judge_id`); automatic per-criterion
+routing is staged (design §14-21), not a silent classifier. The runner captures the **produced/changed
+set** via a before/after snapshot diff (created + modified vs stage-time hashes; deleted disclosed;
+untouched inputs skipped — never trusting the live-degraded trace diff), **symlink-confined** (a
+linked-out output is disclosed, never followed — no host-file leak), bounded **32 KiB/file · 128 KiB
+total** with every cut/binary/skip disclosed. Provenance: the verdict stamps `grounded-judge` + its
+own `prompt_version`, recorded **additively** in the committed `judge` block (`id`) in both
+`benchmark.json` and `grading.json`, so text vs grounded stay attributable after a cache wipe. A P9
+cost note prints when grounded is selected. Decided across an 8-point in-session Q&A + a plan-review
+round + a pre-implementation protocol, each industry-cross-referenced (state-diff artifact grading;
+long-context-degrades-judges). +21 tests (342 green). Also reconciled the design header pointer
+(v0.39→v0.42; F15's review rounds had advanced the changelog to v0.41). Phase 2 remains IN PROGRESS.
+
 ## v1.15.0 — 2026-07-07
 
 MINOR — **F15 SHIPPED: the A/B baseline arm** ([Specs/010](Specs/010-ab-baseline/plan.md); design →

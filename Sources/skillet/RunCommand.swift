@@ -65,6 +65,9 @@ struct RunCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Add a provably skill-free baseline arm to every behavioral eval and report the paired Δ.")
     var ab = false
 
+    @Option(name: .customLong("judge"), help: "Grader for behavioral evals: text-judge (default) or grounded-judge (reads produced-file contents to catch created-but-wrong).")
+    var judgeSelection: String = TextJudge.id   // named `judgeSelection` (not `judge`) so it never shadows the `judge` config/param inside buildAdapterAndJudge
+
     // Hidden test-only offline wiring (ReplayAdapter + ReplayJudge); the public --record/--replay is F19.
     @Flag(name: .long, help: ArgumentHelp("Test-only offline replay wiring.", visibility: .private))
     var replay = false
@@ -149,6 +152,24 @@ struct RunCommand: AsyncParsableCommand {
             if ab && triggerCases != nil {
                 Console.emit(Rendering(stderr: "note: --ab applies to the behavior axis; the trigger axis runs single-arm\n"))
             }
+            // F16: validate the grader selection early (before any spend/dry-run), and warn on the
+            // grounded grader's larger, pricier grading requests (P9 spend-honesty — the trial/call
+            // counts don't change, so the note is the honest signal until F60 parses real tokens).
+            guard judgeSelection == TextJudge.id || judgeSelection == GroundedJudge.id else {
+                throw EDDError.usage(
+                    message: "unknown judge '\(judgeSelection)'",
+                    remedy: "use --judge \(TextJudge.id) (default) or --judge \(GroundedJudge.id)"
+                )
+            }
+            if judgeSelection == GroundedJudge.id {
+                if cases != nil {
+                    Console.emit(Rendering(stderr: "note: grounded judge includes file contents — larger grading requests, higher per-call cost (up to ~128 KiB of file text each)\n"))
+                } else {
+                    // Grounded is behavioral-only; on a trigger-only run it has no effect. Say so rather
+                    // than silently ignoring the flag (post-ship review finding 4).
+                    Console.emit(Rendering(stderr: "note: --judge \(GroundedJudge.id) applies to behavioral evals; none are running, so it has no effect (the trigger axis is judge-free)\n"))
+                }
+            }
 
             // Skipped-axis notes (Specs/009 A4): the default mode says which axis it skipped and why,
             // on stderr so machine-readable stdout stays untouched (P7).
@@ -226,7 +247,7 @@ struct RunCommand: AsyncParsableCommand {
             // Second-resolution timestamp + a short uuid so two runs in the same second never share a path.
             let stamp = "\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
             let base = root.appendingPathComponent(".skillet/runs/\(stamp)", isDirectory: true)
-            let runner = Runner(adapter: backend.adapter, judge: backend.judge)
+            let runner = Runner(adapter: backend.adapter, judge: backend.judge, evidencePolicy: backend.evidencePolicy)
             let behavioralOutcome: Runner.Outcome? = if let cases {
                 try await runner.run(
                     skill: skillRef, evals: cases, k: k,
@@ -236,7 +257,7 @@ struct RunCommand: AsyncParsableCommand {
             // The baseline arm (F15): same evals, same judge + rubric (A1 — that IS the
             // comparison), `SkillSet.none` — nothing staged, isolation switch on, tripwire armed.
             let baselineResults: [EvalResult]? = if ab, let cases {
-                await Runner(adapter: backend.adapter, judge: backend.baselineJudge)
+                await Runner(adapter: backend.adapter, judge: backend.baselineJudge, evidencePolicy: backend.evidencePolicy)
                     .runBaseline(skill: skillRef, evals: cases, k: k, base: base, keepWorkspace: keepWorkspace)
             } else { nil }
             // The trigger axis (F14, §9.3): bare queries against whole-corpus frontmatter stubs,
@@ -258,7 +279,7 @@ struct RunCommand: AsyncParsableCommand {
             // Stamp the ACTUAL judge backend + executor version in records (not configured values) —
             // P3 review fix + M3 provenance: re-grade and harness-vs-skill attribution need the truth.
             let provenance = RunProvenance(
-                judgeProvider: backend.provider, judgeModel: backend.model,
+                judgeId: backend.id, judgeProvider: backend.provider, judgeModel: backend.model,
                 judgePromptVersion: backend.promptVersion,
                 executorBinaryVersion: harnessInfo.version.isEmpty ? "unknown" : harnessInfo.version
             )
@@ -371,14 +392,18 @@ struct RunCommand: AsyncParsableCommand {
     /// The replay path is exempt: no real judge is built there (canned verdicts, nothing spent).
     private func buildAdapterAndJudge(
         config: SkilletConfig?, judge judgeCfg: SkilletConfig.Judge, timeout: Duration, outputLimitBytes: Int, needsJudge: Bool = true
-    ) throws -> (adapter: any HarnessAdapter, judge: any Judge, baselineJudge: any Judge, provider: String, model: String, promptVersion: String) {
+    ) throws -> (adapter: any HarnessAdapter, judge: any Judge, baselineJudge: any Judge, id: String, provider: String, model: String, promptVersion: String, evidencePolicy: EvidencePolicy) {
+        // F16: the grounded grader captures produced-file contents; its policy is set from the --judge
+        // selection and applies even under --replay (so the capture path is exercised offline; grading
+        // stays canned). `judgeSelection` is the CLI value — distinct from `judgeCfg` (the config).
+        let policy: EvidencePolicy = (judgeSelection == GroundedJudge.id) ? .groundedDefault : .listingOnly
         if replay {
             // Arm-distinct canned verdicts (F15 A5): the baseline map defaults to fail-all, so a
             // replayed --ab shows a deterministic positive Δ; tests override either arm's map.
             return (ReplayAdapter(),
                     ReplayJudge(loadReplayMap(), defaultPass: replayMap == nil),
                     ReplayJudge(loadBaselineReplayMap(), defaultPass: false),
-                    "replay", "replay", "replay")
+                    "replay", "replay", "replay", "replay", policy)
         }
         // Trigger-only (F14): grading is deterministic — no judge is constructed or configured-for.
         // The sentinel provenance ("none") stamps records honestly; the behavioral judge block in a
@@ -386,7 +411,7 @@ struct RunCommand: AsyncParsableCommand {
         if !needsJudge {
             let claudePath = config?.harness?.claudeCode?.path
             let adapter = ClaudeCodeAdapter(configPath: claudePath, timeout: timeout, outputLimitBytes: outputLimitBytes)
-            return (adapter, UnjudgedAxisJudge(), UnjudgedAxisJudge(), "none", "none", "none")
+            return (adapter, UnjudgedAxisJudge(), UnjudgedAxisJudge(), "none", "none", "none", "none", .listingOnly)
         }
         guard judgeCfg.provider == "claude-code" else {
             throw EDDError.usage(
@@ -405,10 +430,14 @@ struct RunCommand: AsyncParsableCommand {
             throw EDDError.harnessNotFound(harness: "claude-code")
         }
         let adapter = ClaudeCodeAdapter(configPath: claudePath, timeout: timeout, outputLimitBytes: outputLimitBytes)
-        let judge = TextJudge(runner: ClaudeCLIJudgeRunner(binaryPath: resolved.path), model: model)
-        // Live --ab: the SAME judge grades both arms (F15 A1) — the comparison is the arms, never
-        // the grader.
-        return (adapter, judge, judge, "claude-code", model, TextJudge.promptVersion)
+        let cliRunner = ClaudeCLIJudgeRunner(binaryPath: resolved.path)
+        // F16: text (existence + claims) or grounded (reads produced-file contents). Same backend +
+        // required-explicit model; the split is prompt + evidence. Both arms share the grader (F15 A1).
+        let selected: any Judge = (judgeSelection == GroundedJudge.id)
+            ? GroundedJudge(runner: cliRunner, model: model)
+            : TextJudge(runner: cliRunner, model: model)
+        let promptVersion = (judgeSelection == GroundedJudge.id) ? GroundedJudge.promptVersion : TextJudge.promptVersion
+        return (adapter, selected, selected, judgeSelection, "claude-code", model, promptVersion, policy)
     }
 
     /// Validate that every declared eval fixture (`files[]`, resolved against the skill directory)

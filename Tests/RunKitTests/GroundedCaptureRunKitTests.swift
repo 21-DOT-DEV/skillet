@@ -228,6 +228,10 @@ struct GroundedCaptureRunKitTests {
         try "cannot read me".write(to: locked, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
         defer { try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: locked.path) }   // so teardown can remove it
+        // `chmod 000` only blocks NON-root. A root process (e.g. the Linux CI container) bypasses DAC
+        // and can still open the file, so the "unreadable" scenario isn't constructible there — skip
+        // rather than assert (same "scenario not constructible → early-out" pattern as the hardlink test).
+        guard !fm.isReadableFile(atPath: locked.path) else { return }
 
         let produced = wm.readProducedContents(ws, baseline: baseline, perFileCap: 1 << 16, totalCap: 1 << 20)
         let entry = find(produced, "locked.txt")

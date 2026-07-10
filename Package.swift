@@ -52,11 +52,15 @@ let package = Package(
         .target(name: "RenderKit", dependencies: ["EDDCore"]),
         // Free static-lint rule engine — pure (rules run over a parsed SkillSource), no I/O, no YAML.
         .target(name: "LintKit", dependencies: ["EDDCore"]),
+        // Free, model-free deterministic output scorers → SARIF (F17). Reads produced text via ProjectKit's
+        // SafeFile; emits EDDCore's SarifDocument / ScoreReport. No network, no subprocess.
+        .target(name: "ScoreKit", dependencies: ["EDDCore", "ProjectKit"]),
         .target(
             name: "HarnessKit",
             dependencies: [
                 "TraceKit",
                 "EDDCore",
+                "ProjectKit",   // SafeFile — shared confinement/hidden predicates (F17)
                 // Sole sanctioned launcher — for the real ProcessLauncher (probe; F7's run).
                 .product(name: "Subprocess", package: "swift-subprocess"),
                 .product(name: "SystemPackage", package: "swift-system")
@@ -68,7 +72,7 @@ let package = Package(
         .target(name: "JudgeKit", dependencies: ["EDDCore", "TraceKit"]),
         // The runner (F7): the per-trial sandbox lifecycle + the run/judge/aggregate loop. The
         // orchestrator that wires the harness adapter + judge over the pure pass^k core.
-        .target(name: "RunKit", dependencies: ["EDDCore", "TraceKit", "HarnessKit", "JudgeKit"]),
+        .target(name: "RunKit", dependencies: ["EDDCore", "TraceKit", "HarnessKit", "JudgeKit", "ProjectKit"]),
 
         // Isolated YAML config seam: swift-yaml + C++ interop live ONLY here. It exposes a pure-Swift
         // API (decodes into EDDCore's pure SkilletConfig), so consumers stay interop-free.
@@ -90,6 +94,7 @@ let package = Package(
                 "ProjectKit",
                 "RenderKit",
                 "LintKit",
+                "ScoreKit",
                 "TraceKit",
                 "HarnessKit",
                 "JudgeKit",
@@ -109,7 +114,8 @@ let package = Package(
         .testTarget(name: "LintKitTests", dependencies: ["LintKit"]),
         .testTarget(name: "HarnessKitTests", dependencies: ["HarnessKit"]),
         .testTarget(name: "JudgeKitTests", dependencies: ["JudgeKit"]),
-        .testTarget(name: "RunKitTests", dependencies: ["RunKit"]),
+        .testTarget(name: "RunKitTests", dependencies: ["RunKit", "ProjectKit"]),
+        .testTarget(name: "ScoreKitTests", dependencies: ["ScoreKit"]),
         // Consumer of ConfigYAML — must also enable C++ interop (it's viral to direct importers).
         .testTarget(name: "ConfigYAMLTests", dependencies: ["ConfigYAML"], swiftSettings: [.interoperabilityMode(.Cxx)]),
 

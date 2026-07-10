@@ -8,14 +8,16 @@ structured evidence, and ship a `SKILL.md` edit only after a previously-failing 
 > **Phase 2 IN PROGRESS — F3 (`skillet doctor`, the $0 preflight) and F14 (`skillet run --axis
 > trigger`, the deterministic description axis) shipped 2026-07-04; F15 (`skillet run --ab`, the
 > provably skill-free baseline arm with paired Δ) shipped 2026-07-07; F16 (`skillet run --judge
-> grounded-judge`, the file-contents grader) shipped 2026-07-08**
+> grounded-judge`, the file-contents grader) shipped 2026-07-08; F17 (`skillet score`, free
+> deterministic scorers over produced text → SARIF 2.1.0) shipped 2026-07-09**
 > ([Specs/008](Specs/008-doctor-preflight/plan.md), [Specs/009](Specs/009-trigger-axis/plan.md),
-> [Specs/010](Specs/010-ab-baseline/plan.md), [Specs/011](Specs/011-grounded-judge/plan.md)).
+> [Specs/010](Specs/010-ab-baseline/plan.md), [Specs/011](Specs/011-grounded-judge/plan.md),
+> [Specs/012](Specs/012-deterministic-scorers/plan.md)).
 > `Package.swift` plus `EDDCore`, `TraceKit`,
-> `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `JudgeKit`, `RunKit`, `ConfigYAML`, and the
+> `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `ScoreKit`, `JudgeKit`, `RunKit`, `ConfigYAML`, and the
 > `skillet` executable exist — the executable owns the full ArgumentParser command tree (no
-> `skilletCLI` library; `ProjectKit` is the discovery/config-IO home) — with 356 tests green
-> (`swift build && swift test`). Shipped commands: `init` · `doctor` · `lint` · `run` · `harness
+> `skilletCLI` library; `ProjectKit` is the discovery/config-IO home) — with 390 tests green
+> (`swift build && swift test`). Shipped commands: `init` · `doctor` · `lint` · `score` · `run` · `harness
 > list`/`info` — see *Commands* below. **Per-feature records live nearest the artifact**: each
 > feature's detailed capsule is its [`Specs/NNN` plan](Specs/README.md) status, with design-only
 > changes in [`skillet-design-changelog.md`](skillet-design-changelog.md); this banner stays a
@@ -44,11 +46,11 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 ## Commands (true now — Phase 1 / F1, F2, F4–F8)
 
 - `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`).
-- `swift test` — run the unit + integration suites (356 tests, all green). The integration suite drives
+- `swift test` — run the unit + integration suites (390 tests, all green). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
   `skillet init --json`, `skillet doctor [<skill>...] [--json]` (free $0 preflight; exit 3 + remedy on failure),
-  `skillet lint [--json]`, `skillet harness list`, `skillet harness info [--json]`,
+  `skillet lint [--json]`, `skillet score <path> [--format tty|json|sarif]` (free, model-free deterministic scorers over produced text → SARIF 2.1.0; a reporter, not a gate — exit 0 even with findings, exit 4 on a corrupt config), `skillet harness list`, `skillet harness info [--json]`,
   `skillet run [<skill>] [--axis behavior|trigger|all] [--ab] [--judge text-judge|grounded-judge] [--runs <k>] [--dry-run] [--yes] [--no-input] [--keep-workspace]` (paid: shells `claude`, resolved via `SKILLET_CLAUDE_CODE_BIN` env → `harness.claude-code.path` in `skillet.yaml` → `PATH` — behavioral trials add the judge; trigger trials are judge-free single calls; `--ab` doubles behavioral trials with a provably skill-free baseline arm, both arms judged; `--judge grounded-judge` reads produced-file contents to catch created-but-wrong, larger grading requests — gated by the combined spend estimate),
   `skillet --help`, `skillet --version`. Hidden test seams on `run`: `--replay` (offline adapter+judge),
   `--replay-map <json>` (with-arm canned verdicts), `--replay-baseline-map <json>` (baseline-arm canned

@@ -4,6 +4,7 @@ import EDDCore
 import TraceKit
 import HarnessKit
 import JudgeKit
+import ProjectKit   // SafeFile — the confinement helpers now live here (F17)
 @testable import RunKit
 
 @Suite("RunKit")
@@ -125,8 +126,8 @@ struct RunKitTests {
         let root = tempDir(); defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root.appendingPathComponent("real/sub"), withIntermediateDirectories: true)
         try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("link"), withDestinationURL: root.appendingPathComponent("real"))
-        #expect(WorkspaceManager.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("real/sub")) == nil)    // every component real
-        #expect(WorkspaceManager.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("link/sub")) != nil)    // crosses a symlink
+        #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("real/sub")) == nil)    // every component real
+        #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("link/sub")) != nil)    // crosses a symlink
     }
 
     @Test("fixtures/ falls back to evaluations/fixtures/ as the physical source, staged as fixtures/")
@@ -201,7 +202,7 @@ struct RunKitTests {
         let base = tempDir(); defer { try? FileManager.default.removeItem(at: base) }
         let ws = try WorkspaceManager().prepare(skill: SkillRef(name: "demo", path: skill.path), files: [], base: base, label: "t0")
         #expect(!FileManager.default.fileExists(atPath: ws.root.appendingPathComponent(".claude/skills/demo/secret").path))
-        #expect(WorkspaceManager.firstSymlink(in: skill) != nil)   // the helper detects it (preflight fails loud on it)
+        #expect(SafeFile.firstSymlink(in: skill) != nil)   // the helper detects it (preflight fails loud on it)
     }
 
     @Test("listing() returns produced files as ground truth, excluding the injected .claude tree")

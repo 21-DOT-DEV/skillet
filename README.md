@@ -13,8 +13,9 @@ skillet drafts and proves — **a human lands every write**.
 > F7 (`skillet run` — the neutral runner with `pass^k`) have landed, and Phase 2 is underway:
 > F3 (`skillet doctor` — the free $0 preflight), F14 (`skillet run --axis trigger` — the
 > description axis: does the skill *fire*?), F15 (`skillet run --ab` — the provably
-> skill-free baseline arm with paired Δ), and F16 (`skillet run --judge grounded-judge` — the
-> file-contents grader: did it write the *right* file?) shipped. The rest
+> skill-free baseline arm with paired Δ), F16 (`skillet run --judge grounded-judge` — the
+> file-contents grader: did it write the *right* file?), and F17 (`skillet score` — free,
+> model-free deterministic scorers over produced text → SARIF 2.1.0) shipped. The rest
 > of the loop lights up across later phases. See [ROADMAP.md](ROADMAP.md).
 
 ## How it works
@@ -69,6 +70,9 @@ skillet doctor [<skill>...] # free $0 preflight: config, harness, skill visibili
 skillet doctor --json       # machine-readable check rows (schema: skillet.doctor/1)
 skillet lint                # free static analysis of SKILL.md (exit 1 on error-tier findings)
 skillet lint --json         # machine-readable findings (schema: skillet.lint/1)
+skillet score <path>        # free, model-free scorers over produced text → SARIF 2.1.0 (reporter, not a gate; exit 0 with findings)
+skillet score <path> --format json   # machine-readable findings (schema: skillet.score/1)
+skillet score <path> --format sarif  # standard SARIF 2.1.0 on stdout
 skillet run <skill>         # run the skill's evals k×, judge, report pass^k (paid; spend-gated)
 skillet run <skill> -n      # dry-run: preview the trial-count estimate, spend nothing
 skillet run <skill> --axis trigger  # description axis: did it fire? (deterministic, judge-free)

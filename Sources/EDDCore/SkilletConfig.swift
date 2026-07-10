@@ -8,13 +8,15 @@ public struct SkilletConfig: Codable, Sendable, Equatable {
     public var lint: Lint?
     public var runs: Runs?
     public var judge: Judge?
+    public var scorers: Scorers?
 
-    public init(project: Project? = nil, harness: Harness? = nil, lint: Lint? = nil, runs: Runs? = nil, judge: Judge? = nil) {
+    public init(project: Project? = nil, harness: Harness? = nil, lint: Lint? = nil, runs: Runs? = nil, judge: Judge? = nil, scorers: Scorers? = nil) {
         self.project = project
         self.harness = harness
         self.lint = lint
         self.runs = runs
         self.judge = judge
+        self.scorers = scorers
     }
 
     public struct Project: Codable, Sendable, Equatable {
@@ -143,6 +145,49 @@ public struct SkilletConfig: Codable, Sendable, Equatable {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             provider = try container.decodeIfPresent(String.self, forKey: .provider) ?? "claude-code"
             model = try container.decodeIfPresent(String.self, forKey: .model)
+        }
+    }
+
+    /// The `scorers:` knobs (design §5.2), read by `skillet score` (F17). All lists default to `[]`, so a
+    /// partial — or absent — block is valid. `vendored_prefixes` = folder names to skip (gitignore-style
+    /// whole-segment, any depth). `vocab.exempt` = domain phrases removed from the slop word-list before
+    /// scoring (whole-entry, case-insensitive). `disable` = default-on rule ids to turn off; `enable` =
+    /// experimental/default-off rule ids (e.g. `SKILL-S006`) to turn on (`disable` wins over `enable`).
+    /// Built-in defaults are all `[]`; `skillet init`'s template pre-writes suggested `vendored_prefixes`.
+    public struct Scorers: Codable, Sendable, Equatable {
+        public var vendoredPrefixes: [String]
+        public var vocab: Vocab
+        public var disable: [String]
+        public var enable: [String]
+
+        public init(vendoredPrefixes: [String] = [], vocab: Vocab = Vocab(), disable: [String] = [], enable: [String] = []) {
+            self.vendoredPrefixes = vendoredPrefixes
+            self.vocab = vocab
+            self.disable = disable
+            self.enable = enable
+        }
+
+        enum CodingKeys: String, CodingKey {
+            case vendoredPrefixes = "vendored_prefixes"
+            case vocab, disable, enable
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            vendoredPrefixes = try container.decodeIfPresent([String].self, forKey: .vendoredPrefixes) ?? []
+            vocab = try container.decodeIfPresent(Vocab.self, forKey: .vocab) ?? Vocab()
+            disable = try container.decodeIfPresent([String].self, forKey: .disable) ?? []
+            enable = try container.decodeIfPresent([String].self, forKey: .enable) ?? []
+        }
+
+        public struct Vocab: Codable, Sendable, Equatable {
+            public var exempt: [String]
+            public init(exempt: [String] = []) { self.exempt = exempt }
+            enum CodingKeys: String, CodingKey { case exempt }
+            public init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                exempt = try container.decodeIfPresent([String].self, forKey: .exempt) ?? []
+            }
         }
     }
 }

@@ -44,8 +44,8 @@ them with `triage` — `next` names the single highest-value action — then **f
 with `suggest`/`iterate` in a throwaway worktree, and re-run. Free `lint` checks gate every paid
 `run`, and `skillet doctor` preflights the whole environment for $0 — config, harness, skill
 visibility — so a misconfig never costs money. Today `skillet init`, `skillet doctor`, `skillet lint`,
-and `skillet run` ship (plus `skillet harness info` for setup); the rest lands across the
-roadmap phases.
+`skillet run`, `skillet score`, and `skillet capture` ship (plus `skillet harness info` for setup); the
+rest lands across the roadmap phases.
 
 ## Install
 
@@ -80,6 +80,10 @@ skillet run <skill> --ab    # + a provably skill-free baseline arm; paired Δ ("
 skillet run <skill> --judge grounded-judge  # grade produced-file CONTENTS, not just existence (larger prompts)
 skillet run --json          # machine-readable result (schema: skillet.run/1)
 skillet run --json -n        # spend-free plan preview (schema: skillet.run-plan/1)
+skillet capture --skill <s> --slug <x>                  # discover: record the newest claude-code session as a secret-scrubbed, scored evidence bundle (fails closed if betterleaks can't run)
+skillet capture --skill <s> --slug <x> --session <ref>  # capture a specific session (uuid or .jsonl path) instead of the newest in the workspace
+skillet capture --skill <s> --slug <x> --fail-on-secret # exit 1 in CI if a secret was found (the bundle is still written scrubbed)
+skillet capture --json                                  # machine-readable result (schema: skillet.capture/1)
 skillet harness info        # harness adapters, capabilities, probe status
 skillet harness info --json # machine-readable (schema: skillet.harness-info/1)
 ```

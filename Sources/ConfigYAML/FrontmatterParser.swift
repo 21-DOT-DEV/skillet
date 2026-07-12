@@ -21,28 +21,23 @@ public enum FrontmatterParser {
     /// Parse the leading `---…---` block and return the decoded frontmatter plus the remaining body.
     /// Throws a typed ``FrontmatterError`` for malformed input — never an uncaught error.
     public static func parse(_ markdown: String) throws -> (frontmatter: SkillFrontmatter, body: String) {
-        // Normalize CRLF so frontmatter scalars and body lines never carry a stray `\r` (SKILL.md is
-        // conventionally LF, but a Windows checkout can be CRLF).
-        let lines = markdown.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
-        func isDelimiter(_ index: Int) -> Bool {
-            lines[index].trimmingCharacters(in: .whitespacesAndNewlines) == "---"
-        }
-        guard let first = lines.first, first.trimmingCharacters(in: .whitespacesAndNewlines) == "---" else {
+        // The CRLF-normalized delimiter scan is shared with `EvidenceFrontmatter` (``FrontmatterSplit``);
+        // this parser keeps its own `FrontmatterError` vocabulary and empty-block policy.
+        switch FrontmatterSplit.scan(markdown) {
+        case .noOpening:
             throw FrontmatterError.missing
-        }
-        guard let closeIndex = lines.indices.dropFirst().first(where: isDelimiter) else {
+        case .unterminated:
             throw FrontmatterError.unterminated
-        }
-        let yaml = lines[1..<closeIndex].joined(separator: "\n")
-        let body = closeIndex + 1 < lines.count ? lines[(closeIndex + 1)...].joined(separator: "\n") : ""
-        // An empty frontmatter block is valid (all fields nil); YAMLDecoder rejects an empty document.
-        guard !yaml.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return (SkillFrontmatter(), body)
-        }
-        do {
-            return (try YAMLDecoder().decode(SkillFrontmatter.self, from: yaml), body)
-        } catch {
-            throw FrontmatterError.undecodable("\(error)")
+        case let .split(yaml, body):
+            // An empty frontmatter block is valid (all fields nil); YAMLDecoder rejects an empty document.
+            guard !yaml.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return (SkillFrontmatter(), body)
+            }
+            do {
+                return (try YAMLDecoder().decode(SkillFrontmatter.self, from: yaml), body)
+            } catch {
+                throw FrontmatterError.undecodable("\(error)")
+            }
         }
     }
 }

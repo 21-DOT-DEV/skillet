@@ -16,7 +16,7 @@ structured evidence, and ship a `SKILL.md` edit only after a previously-failing 
 > `Package.swift` plus `EDDCore`, `TraceKit`,
 > `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `ScoreKit`, `JudgeKit`, `RunKit`, `ConfigYAML`, and the
 > `skillet` executable exist — the executable owns the full ArgumentParser command tree (no
-> `skilletCLI` library; `ProjectKit` is the discovery/config-IO home) — with 390 tests green
+> `skilletCLI` library; `ProjectKit` is the discovery/config-IO home) — with 511 tests green
 > (`swift build && swift test`). Shipped commands: `init` · `doctor` · `lint` · `score` · `run` · `harness
 > list`/`info` — see *Commands* below. **Per-feature records live nearest the artifact**: each
 > feature's detailed capsule is its [`Specs/NNN` plan](Specs/README.md) status, with design-only
@@ -46,7 +46,7 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 ## Commands (true now — Phase 1 / F1, F2, F4–F8)
 
 - `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`).
-- `swift test` — run the unit + integration suites (390 tests, all green). The integration suite drives
+- `swift test` — run the unit + integration suites (511 tests, all green). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
   `skillet init --json`, `skillet doctor [<skill>...] [--json]` (free $0 preflight; exit 3 + remedy on failure),
@@ -80,7 +80,7 @@ from the first commit.
   **resolved** from the `sanitize` config / `SKILLET_BETTERLEAKS_BIN` / `PATH` (per-platform
   `.artifactbundle` vendoring deferred — constitution v1.3.0). The cache MAY use system SQLite.
 - **Dependency notes (implementation reality):** `swift-yaml` has **no tagged release**, so it is
-  **pinned by revision** (`048f714f…`). Its `YAML` product needs **C++ interop**, which is **viral to
+  **pinned by revision** (`473252b…`). Its `YAML` product needs **C++ interop**, which is **viral to
   direct importers** — so it is confined to the isolated **`ConfigYAML`** target
   (`.interoperabilityMode(.Cxx)`), which exposes a pure-Swift API (decoding into `EDDCore.SkilletConfig`).
   Consequence (validated by the F6 spike): the `skillet` executable, as a direct importer, is a **`.Cxx`
@@ -89,7 +89,7 @@ from the first commit.
   input and never import `ConfigYAML`). `swift-subprocess` is now used by **`HarnessKit`** (the
   `ProcessLauncher` seam) as well as the integration-test harness; `swift-system` (`FilePath`) rides in
   with it. Known-good pins: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system`
-  1.5.0, `swift-yaml` rev `048f714f…`.
+  1.5.0, `swift-yaml` rev `473252b…`.
 - **`swift-subprocess` is the only sanctioned way to launch a process** — no `Foundation.Process`,
   no raw `posix_spawn`. All process execution lives in the effectful layers.
 - **`EDDCore` is pure and synchronous** — it spawns nothing and performs no I/O beyond its inputs.

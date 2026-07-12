@@ -58,6 +58,9 @@ struct DoctorCommand: AsyncParsableCommand {
             for adapter in adapters {
                 rows += await Self.harnessRows(for: adapter)
             }
+            // Capture's secret scanner (F32): a warning if betterleaks is unresolved, so its absence is
+            // known before a capture would fail closed at runtime — never a failure (redaction guards the write).
+            rows.append(await Self.secretScannerRow(config: config))
             for skillDir in selected {
                 let name = skillDir.lastPathComponent
                 // One filesystem audit per skill; every adapter's row reads the same result.
@@ -83,6 +86,48 @@ struct DoctorCommand: AsyncParsableCommand {
             Console.emit(renderer.renderError(error))
             throw SilentExit(code: error.exitCode.rawValue)
         }
+    }
+
+    /// The `capture.secret-scanner` preflight (F32): resolve `betterleaks` the way `capture` does
+    /// (env `SKILLET_BETTERLEAKS_BIN` › `sanitize.scanner_path` › `PATH`; doctor has no
+    /// `--secret-scanner-path` flag) and, when resolved, probe its version. A **warning** when absent —
+    /// `capture` fails closed at runtime, so early absence is informational, never a doctor failure.
+    static func secretScannerRow(
+        config: SkilletConfig?,
+        resolver: BinaryResolver = BinaryResolver(),
+        launcher: any ProcessLauncher = SubprocessLauncher()
+    ) async -> DoctorReport.Row {
+        guard let resolved = resolver.resolve(
+            flag: nil, envVar: "SKILLET_BETTERLEAKS_BIN",
+            configPath: config?.sanitize?.scannerPath, pathName: "betterleaks")
+        else {
+            return .warning(
+                check: DoctorReport.Check.secretScanner,
+                message: "betterleaks not found on env, config, or PATH — capture fails closed (it never writes an unscrubbed bundle)",
+                remedy: "install betterleaks, or set SKILLET_BETTERLEAKS_BIN or sanitize.scanner_path")
+        }
+        // A resolved path is not proof the binary *works*: an env/config override can point at a missing
+        // or broken file. Probe its version — if that fails, the scanner won't run, so warn (don't pass a
+        // capture that would fail closed). Only a binary that answers `version` is a green row.
+        guard let version = await Self.betterleaksVersion(resolved.path, launcher: launcher) else {
+            return .warning(
+                check: DoctorReport.Check.secretScanner,
+                subject: "betterleaks",
+                message: "betterleaks at \(resolved.path) (via \(resolved.source.rawValue)) did not run — capture would fail closed",
+                remedy: "check the binary exists and is executable, or fix SKILLET_BETTERLEAKS_BIN / sanitize.scanner_path")
+        }
+        return .pass(
+            check: DoctorReport.Check.secretScanner,
+            subject: "betterleaks",
+            message: "\(resolved.path) (via \(resolved.source.rawValue)) — \(version)")
+    }
+
+    private static func betterleaksVersion(_ path: String, launcher: any ProcessLauncher) async -> String? {
+        guard let out = try? await launcher.run(path, ["version"], workingDirectory: nil,
+                                                timeout: .seconds(10), environment: nil, outputLimitBytes: nil),
+              out.exitCode == 0 else { return nil }
+        let v = out.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        return v.isEmpty ? nil : v
     }
 
     /// Binary/version/auth rows from one non-strict probe. Probe *throws* only for hard stops

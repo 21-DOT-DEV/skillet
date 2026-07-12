@@ -27,12 +27,20 @@ public enum EDDError: Error, Sendable, Equatable {
     /// A committed artifact is corrupt/invalid against its schema (e.g. unparseable `evals.json`).
     /// Exit ``ExitCode/artifact``.
     case invalidArtifact(path: String, reason: String)
+    /// The secret scanner (`betterleaks`) could not be resolved or run, so `capture` cannot prove the
+    /// bundle was scrubbed — it fails closed rather than write an unsanitized bundle (constitution VI).
+    /// Exit ``ExitCode/environment``.
+    case sanitizerNotFound(reason: String)
+    /// One or more `capture` bundle files already exist and `--force` was not given. Exit ``ExitCode/environment``.
+    case captureDestinationExists(paths: [String])
+    /// `capture` found no native session for the workspace. Exit ``ExitCode/environment``.
+    case sessionNotFound(workspace: String)
 
     /// The stable exit code for this error.
     public var exitCode: ExitCode {
         switch self {
         case .usage: .usage
-        case .directoryNotFound, .pathNotFound, .projectNotFound, .harnessNotFound, .harnessBanned, .harnessUnauthenticated, .skillNotVisible, .baselineNotIsolable: .environment
+        case .directoryNotFound, .pathNotFound, .projectNotFound, .harnessNotFound, .harnessBanned, .harnessUnauthenticated, .skillNotVisible, .baselineNotIsolable, .sanitizerNotFound, .captureDestinationExists, .sessionNotFound: .environment
         case .invalidArtifact: .artifact
         }
     }
@@ -50,6 +58,9 @@ public enum EDDError: Error, Sendable, Equatable {
         case .skillNotVisible: "skill_not_visible"
         case .baselineNotIsolable: "baseline_not_isolable"
         case .invalidArtifact: "invalid_artifact"
+        case .sanitizerNotFound: "sanitizer_not_found"
+        case .captureDestinationExists: "capture_destination_exists"
+        case .sessionNotFound: "session_not_found"
         }
     }
 
@@ -76,6 +87,12 @@ public enum EDDError: Error, Sendable, Equatable {
             "the \(harness) harness cannot prove a skill-free baseline for --ab: \(reason)"
         case let .invalidArtifact(path, reason):
             "\(path) is invalid: \(reason)"
+        case let .sanitizerNotFound(reason):
+            "the secret scanner could not run, so capture will not write an unscrubbed bundle: \(reason)"
+        case let .captureDestinationExists(paths):
+            "capture destination already exists: \(paths.joined(separator: ", "))"
+        case let .sessionNotFound(workspace):
+            "no claude-code session found for \(workspace) — nothing to capture"
         }
     }
 
@@ -108,6 +125,12 @@ public enum EDDError: Error, Sendable, Equatable {
             "pin a \(harness) version that supports session-level skill disabling (SKILLET_\(Self.envID(harness))_BIN), or run without --ab"
         case .invalidArtifact:
             "fix or regenerate the file so it matches its schema (see skillet-design §7)"
+        case .sanitizerNotFound:
+            "install betterleaks, or set its path via --secret-scanner-path, SKILLET_BETTERLEAKS_BIN, or sanitize.scanner_path"
+        case .captureDestinationExists:
+            "re-run with --force to overwrite, or choose a different --slug"
+        case .sessionNotFound:
+            "run the work in that directory first, or pass --session <id>; check --target-dir points at the workspace"
         }
     }
 }

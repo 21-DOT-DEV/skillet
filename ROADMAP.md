@@ -1,6 +1,6 @@
 # Product Roadmap — skillet
 
-**Version:** v1.17.0
+**Version:** v1.18.0
 **Last Updated:** 2026-07-09
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
@@ -43,7 +43,7 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 |---|---|---|---|---|
 | Foundation | 1 | Walking Skeleton — prove the loop end-to-end | COMPLETE | [phase-1](Roadmap/phase-1-walking-skeleton.md) |
 | Now | 2 | Trustworthy Measurement & Static Gates | IN PROGRESS | [phase-2](Roadmap/phase-2-measurement-static-gates.md) |
-| Next | 3 | Discovery & Evidence Capture | PLANNED | [phase-3](Roadmap/phase-3-discovery-evidence.md) |
+| Next | 3 | Discovery & Evidence Capture | IN PROGRESS | [phase-3](Roadmap/phase-3-discovery-evidence.md) |
 | Next | 4 | Error Analysis — *Northstar gap #1* | PLANNED | [phase-4](Roadmap/phase-4-error-analysis.md) |
 | Next | 5 | The Computable Runbook — *differentiator #1* | PLANNED | [phase-5](Roadmap/phase-5-computable-runbook.md) |
 | Next | 6 | Fix Suggestion & Safe Iteration — *Northstar gap #2* | PLANNED | [phase-6](Roadmap/phase-6-fix-suggestion-iteration.md) |
@@ -196,14 +196,14 @@ process-assertions — decided 2026-07-06 via the Apple Evaluations cross-refere
 
 ## Change Log
 
-Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.16.6, latest first, one
+Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.18.0, latest first, one
 linkable heading per version (extracted 2026-07-04; historical entries are never rewritten).
 
-- **Latest — v1.16.6 (2026-07-08): PATCH** — F16 polish round 6 (4 observations; 2 acted, 2 tracked):
-  explicit `import TraceKit` in both judge files, and a dedicated `FileContent.omitted` flag so
-  `truncatedBytes` strictly means "a prefix was shown" (budget-omitted files no longer overload it);
-  bounded `snapshotStaged` reads and a `--judge` enum reaffirmed as tracked follow-ups. No grading
-  change; 356 green. (Prior: v1.16.5 — round 5; v1.16.0 — F16 shipped.)
+- **Latest — v1.18.0 (2026-07-11): MINOR** — **F26 + F32 SHIPPED: `skillet capture`** — records a
+  finished claude-code session as a secret-scrubbed, scored evidence bundle (redact-before-write,
+  fail-closed when the scanner can't run; new `CorpusKit` + `SanitizerKit`; `session-meta` schema 2).
+  Release-coupled — capture is exposure-gated on the real `betterleaks`. 440 green. (Prior: v1.17.0 —
+  F17 `score` shipped; v1.16.6 — F16 polish round 6.)
 - **v1.16.0 (2026-07-08): MINOR** — **F16 `skillet run --judge grounded-judge` SHIPPED**:
   the file-contents grader — reads the produced/changed set (before/after snapshot diff,
   symlink-confined, bounded 32 KiB/128 KiB + disclosed) to catch created-but-wrong; additive

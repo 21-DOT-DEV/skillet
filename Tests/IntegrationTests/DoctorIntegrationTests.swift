@@ -56,6 +56,32 @@ struct DoctorIntegrationTests {
         #expect(out.stdout.contains(#""check":"skill.lint""#))
     }
 
+    @Test("A capture.secret-scanner row is emitted (F32 preflight) — warning-tier, never fails doctor")
+    func secretScannerRow() async throws {
+        let root = try Fixture.makeLintRepo(description: "a fine description")
+        defer { Fixture.remove(root) }
+        let shim = try makeShim(dir: root)
+        let out = try await SkilletHarness().run(
+            ["doctor", "--json", "-C", root.path],
+            environment: ["SKILLET_CLAUDE_CODE_BIN": shim])
+        #expect(out.exitCode == 0)                                          // pass or warning — never a failure
+        #expect(out.stdout.contains(#""check":"capture.secret-scanner""#))  // row present either way
+    }
+
+    @Test("doctor WARNS (not a false ✓) when the scanner override points at a missing/broken binary")
+    func secretScannerBrokenOverrideWarns() async throws {
+        let root = try Fixture.makeLintRepo(description: "a fine description")
+        defer { Fixture.remove(root) }
+        let shim = try makeShim(dir: root)
+        let out = try await SkilletHarness().run(
+            ["doctor", "-C", root.path],
+            environment: ["SKILLET_CLAUDE_CODE_BIN": shim,
+                          "SKILLET_BETTERLEAKS_BIN": "/nonexistent/definitely-not/betterleaks"])
+        #expect(out.exitCode == 0)                            // warning-tier, still doesn't fail doctor
+        #expect(out.stdout.contains("capture.secret-scanner"))
+        #expect(out.stdout.contains("did not run"))           // the warning path — a resolved-but-broken binary
+    }
+
     @Test("Unauthenticated is a warning, never a failure (run owns the refusal)")
     func unauthenticatedWarns() async throws {
         let root = try Fixture.makeLintRepo(description: "a fine description")

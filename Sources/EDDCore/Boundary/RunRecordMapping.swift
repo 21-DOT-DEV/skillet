@@ -292,6 +292,17 @@ public extension BenchmarkFile {
             triggerSummary = priorSummary?["trigger"]
         }
 
+        let newJudge = JSONValue.object([
+            "id": .string(provenance.judgeId),   // additive (F16): the grader's stable id
+            "provider": .string(provenance.judgeProvider),
+            "model": .string(provenance.judgeModel),
+            "prompt_version": .string(provenance.judgePromptVersion)
+        ])
+        let judgeEntry: JSONValue =
+            if behavioral != nil { newJudge }
+            else if let carried = prior?.metadata?["judge"] { carried }
+            else { newJudge }
+
         var metadata: [String: JSONValue] = [
             // Always the caller's explicit name — a trigger-only first run must never commit
             // "unknown" and poison the offline recompute (review round 1, finding 2).
@@ -310,14 +321,7 @@ public extension BenchmarkFile {
             // describes the *behavioral* verdicts, so a judge-free trigger-only run carries the prior
             // record's judge rather than overwriting it with the "none" sentinel.
             "executor_binary_version": .string(provenance.executorBinaryVersion),
-            "judge": behavioral != nil || prior?.metadata?["judge"] == nil
-                ? .object([
-                    "id": .string(provenance.judgeId),   // additive (F16): the grader's stable id
-                    "provider": .string(provenance.judgeProvider),
-                    "model": .string(provenance.judgeModel),
-                    "prompt_version": .string(provenance.judgePromptVersion)
-                ])
-                : prior!.metadata!["judge"]!
+            "judge": judgeEntry
         ]
         if let trigger {
             metadata["trigger_cases_run"] = .array(trigger.map { .string($0.evalId) })   // additive (F14)

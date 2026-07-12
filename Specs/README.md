@@ -25,3 +25,5 @@ roadmap re-phasing.
 | 010 | The A/B baseline arm — paired with/without-skill Δ (`skillet run --ab`) | 2 · F15 | Implemented | [plan.md](010-ab-baseline/plan.md) |
 | 011 | The grounded judge — file-contents grading (`skillet run --judge grounded-judge`) | 2 · F16 | Implemented | [plan.md](011-grounded-judge/plan.md) |
 | 012 | Deterministic scorers → SARIF (`skillet score`) | 2 · F17 | Implemented | [plan.md](012-deterministic-scorers/plan.md) |
+| 013 | Capture a session as evidence (`skillet capture`) | 3 · F26 | Implemented | [plan.md](013-capture-session-evidence/plan.md) |
+| 014 | Capture secret-sanitization (`skillet capture` redact-by-default) | 3 · F32 | Implemented | [plan.md](014-capture-secret-sanitization/plan.md) |

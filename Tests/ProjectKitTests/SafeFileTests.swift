@@ -60,6 +60,17 @@ struct SafeFileTests {
         #expect(SafeFile.boundedRead(dir.appendingPathComponent("nope.txt"), cap: 10) == nil)
     }
 
+    @Test("boundedRead: EOF (empty file) is empty Data + fullSize 0; a read error (a directory) is nil")
+    func boundedReadEdges() throws {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let empty = dir.appendingPathComponent("empty.txt"); try Data().write(to: empty)
+        let e = SafeFile.boundedRead(empty, cap: 10)
+        #expect(e?.data == Data() && e?.fullSize == 0)      // EOF is a real, empty read — not "unreadable"
+        // A directory opens but `read()` throws (EISDIR) — the fix must return nil, not an empty-but-
+        // "successful" Data that would let a caller store/score "" for an unreadable path.
+        #expect(SafeFile.boundedRead(dir, cap: 10) == nil)
+    }
+
     // MARK: predicates
 
     @Test("isSymlink is lstat semantics; isHidden is a leading dot")
@@ -100,6 +111,26 @@ struct SafeFileTests {
         #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("link/sub")) != nil)   // crosses a symlink
         let outside = URL(fileURLWithPath: "/etc/hosts")
         #expect(SafeFile.firstSymlinkOnPath(from: root, to: outside) == outside)                               // escape ⇒ returns target
+    }
+
+    @Test("firstSymlinkOnPath catches a symlink even with a `..` AFTER it (no standardize-away traversal)")
+    func firstSymlinkOnPathDotDotAfterSymlink() throws {
+        let root = tempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("real"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("link"),
+                                                   withDestinationURL: root.appendingPathComponent("real"))
+        // `root/link/../real` standardizes to `root/real` (under root) but routes THROUGH the `link`
+        // symlink — must still be flagged, or a `skills_root: link/../real` escapes via the link target.
+        #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("link/../real")) != nil)
+        // A benign `..` (no symlink in the way) stays confined → nil.
+        #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("real/../real")) == nil)
+    }
+
+    @Test("firstSymlinkOnPath handles the filesystem-root base (/) — a child is confined, not an escape")
+    func firstSymlinkOnPathRootBase() {
+        let slash = URL(fileURLWithPath: "/")
+        #expect(SafeFile.firstSymlinkOnPath(from: slash, to: slash) == nil)                                    // base == target
+        #expect(SafeFile.firstSymlinkOnPath(from: slash, to: URL(fileURLWithPath: "/usr")) == nil)             // /usr is a real dir under / (not "//"-escaped)
     }
 
     @Test("noSymlink is false when any component is a symlink, true when the subtree is clean")

@@ -19,6 +19,18 @@ public enum SafeFile {
         name.hasPrefix(".")
     }
 
+    /// Whether `url` is a **regular** file (from its metadata). A non-regular special file (FIFO / socket
+    /// / device) must never be opened with a `FileHandle` — the read blocks forever. `false` if unreadable.
+    public static func isRegularFile(_ url: URL) -> Bool {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path)[.type]) as? FileAttributeType) == .typeRegular
+    }
+
+    /// The hard-link count (`.referenceCount`), defaulting to 1. `> 1` means another directory entry
+    /// points at the same inode — possibly a host file outside the sandbox (a same-fs hard link).
+    public static func linkCount(_ url: URL) -> Int {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path)[.referenceCount]) as? Int) ?? 1
+    }
+
     /// True iff no component from `base` down to `url` is a symlink, and `url` nests none.
     public static func noSymlink(at url: URL, under base: URL) -> Bool {
         var walk = base
@@ -42,10 +54,19 @@ public enum SafeFile {
     /// `base` at all (an escape), so callers treat "not confined" like "blocked".
     public static func firstSymlinkOnPath(from base: URL, to target: URL) -> URL? {
         let basePath = base.standardizedFileURL.path
-        let targetPath = target.standardizedFileURL.path
-        guard targetPath == basePath || targetPath.hasPrefix(basePath + "/") else { return target }   // not under base → escape
+        let targetStd = target.standardizedFileURL.path
+        let prefix = basePath.hasSuffix("/") ? basePath : basePath + "/"   // root "/" stays "/", not "//"
+        guard targetStd == basePath || targetStd.hasPrefix(prefix) else { return target }   // not under base → escape
+        // Walk the **non-standardized** suffix so a `..` *after* a symlink is still visited. Standardizing
+        // first (as the escape guard above does) collapses `link/..`, hiding the `link` symlink — a
+        // path-traversal bypass: `skills_root: link/../real` would create/read *through* `link` while both
+        // the lexical guard and a standardized walk see only `.../real`. Each component is lstat-checked in
+        // order, so a symlink is caught before its trailing `..` is ever reached.
+        let rawTarget = target.path
+        let suffix = rawTarget.hasPrefix(basePath) ? String(rawTarget.dropFirst(basePath.count))
+                                                   : String(targetStd.dropFirst(basePath.count))
         var walk = base.standardizedFileURL
-        for component in targetPath.dropFirst(basePath.count).split(separator: "/") {
+        for component in suffix.split(separator: "/") where component != "." {
             walk.appendPathComponent(String(component))
             if isSymlink(walk) { return walk }
         }
@@ -57,8 +78,18 @@ public enum SafeFile {
     public static func boundedRead(_ url: URL, cap: Int) -> (data: Data, fullSize: Int)? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
-        let data = (try? handle.read(upToCount: max(cap, 0))) ?? Data()
-        let fullSize = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int).flatMap { $0 } ?? data.count
+        // `read(upToCount:)` returns nil ONLY at EOF; it *throws* on a genuine I/O error (EIO/EINTR/EBADF).
+        // A `try?` would flatten both into `Data()`, so an unreadable file would look like an empty one —
+        // callers (extractBodies, ScoreRunner's SKILL-S000) could then store/score "" instead of skipping
+        // or reporting it. Coalesce only EOF; surface a real error as `nil`.
+        let data: Data
+        do { data = try handle.read(upToCount: max(cap, 0)) ?? Data() }
+        catch { return nil }
+        // True byte size (for truncation disclosure). `.size` is an NSNumber — read it as UInt64 and
+        // *clamp* into Int, so a size > Int.max reports as `Int.max` (⇒ flagged oversized) rather than
+        // falling back to the capped `data.count` and slipping past a caller's oversized-file guard.
+        let sizeAttr = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size]
+        let fullSize = (sizeAttr as? UInt64).map { Int(clamping: $0) } ?? (sizeAttr as? Int) ?? data.count
         return (data, fullSize)
     }
 

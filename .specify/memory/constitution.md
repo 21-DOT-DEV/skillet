@@ -1,14 +1,12 @@
 <!--
 Sync Impact Report:
-- Version: 1.2.0 → 1.2.1 (Phase-1 audit M4 — factual syncs; no principle changed)
-- Change Type: PATCH — three factual corrections from the Phase-1 completed-items audit
-  (Roadmap/phase-1-review.md §5, M4): (1) Technology Stack: swift-system is a transitive
-  *production* dependency (HarnessKit's ProcessLauncher seam, via swift-subprocess's API surface),
-  not a test-only dep — the note now matches Package.swift; it rides in with the already-sanctioned
-  swift-subprocess, so the Principle VI sanctioned list is unchanged. (2) Package Architecture:
-  RenderKit restored to the layer-3 row (matches design §11 and the shipped DAG). (3) Principle VI:
-  the out-of-domain "onion/control credentials" phrase removed from the secrets rule (a copy-in
-  artifact); the MUST NOT is otherwise unchanged.
+- Version: 1.2.1 → 1.3.0 (Principle VI — secret-scanner delivery amended; MINOR)
+- Change Type: MINOR — Principle VI's sanctioned `betterleaks` companion changes from *per-platform
+  vendored* to *resolved from config/env/PATH*, with per-platform `.artifactbundle` vendoring
+  **deferred** (packaging infrastructure not yet available; tracked as a roadmap item). **Delivery
+  only:** the redact-before-write / fail-closed / detection-only-offline MUSTs are **unchanged** —
+  `capture` fails closed when `betterleaks` is unresolvable and records the resolved scanner version
+  in bundle provenance. Ripples design §6.1/§11/§13, AGENTS.md, Roadmap/phase-3, Specs/013–014.
   No principle added, removed, or reweighted.
 - Scope: skillet repository (/Users/csjones/Developer/skillet) — the SKILL.md Evaluation Toolkit, a public, open-source, multi-harness Swift CLI for eval-driven development (EDD) of agent skills
 - Orientation: This constitution governs HOW WE DEVELOP skillet (engineering process and
@@ -250,7 +248,7 @@ single sanctioned way to launch processes keep the supply-chain and execution ri
   markers; the raw secret never enters the repo.
 - **MUST** fail closed: if the secret scanner cannot run, capture refuses to write rather than
   emitting an unsanitized bundle, and offers a remedy.
-- **MUST** run the bundled secret scanner detection-only and fully offline; its network validation
+- **MUST** run the secret scanner detection-only and fully offline; its network validation
   step MUST stay disabled.
 - **MUST NOT** emit, log, or commit secrets, private keys, or tokens — not in output, error
   messages, or the corpus.
@@ -264,9 +262,18 @@ single sanctioned way to launch processes keep the supply-chain and execution ri
   nothing.
 - **MUST NOT** auto-probe other applications' private caches or binaries (the harness ban policy).
 - **MUST NOT** add a new runtime or development dependency without a constitutional amendment and
-  explicit justification. The sanctioned runtime/build deps are `swift-argument-parser`,
-  `swift-yaml`, `swift-subprocess`, the standard library, and the per-platform vendored
-  `betterleaks` companion; the cache MAY use the system SQLite library.
+  explicit justification. The sanctioned build/runtime **library** deps are `swift-argument-parser`,
+  `swift-yaml`, `swift-subprocess`, and the standard library; and `betterleaks` (MIT) is the
+  sanctioned **runtime binary** — a *resolved external executable*, not a SwiftPM build dep — for the
+  secret scanner, **resolved** from an explicit `[sanitize].scanner_path` / `SKILLET_BETTERLEAKS_BIN` /
+  `PATH` (detection-only, offline; skillet never invokes its network validation). Per-platform
+  vendoring via a SwiftPM `.artifactbundle` binary target is the intended delivery and is
+  **deferred** pending that packaging infrastructure (tracked as a roadmap item — secret-scanner
+  vendoring); until it lands, a resolvable `betterleaks` is a hard prerequisite for `capture`,
+  which **fails closed** without it, and the resolved version is recorded in each bundle's
+  `sanitization` provenance. The cache MAY use the system SQLite library.
+  *(Amended 2026-07-10 — delivery only; the redact-before-write / fail-closed / detection-only-offline
+  MUSTs above are unchanged. Rationale: `.artifactbundle` packaging not yet available.)*
 - **SHOULD** estimate paid trials up front and confirm before spending (TTY) or require `--yes`
   (scripts) — spend is visible and consented.
 - **SHOULD** record redaction provenance (scanner, version, count) in bundle metadata.
@@ -375,7 +382,7 @@ binds them (e.g., the sanctioned-dependency list in Principle VI).
   seam) and used by the `IntegrationTests` harness. Sanctioned as part of the `swift-subprocess`
   adoption — no separate supply-chain entry, so the Principle VI list is unchanged
 - **JSON / SARIF / frozen formats**: Foundation `Codable` (no added dependency)
-- **Secret scanning**: vendored `betterleaks` (MIT), per platform/arch, offline detection-only
+- **Secret scanning**: `betterleaks` (MIT), offline detection-only — **resolved** from config/env/`PATH` (per-platform `.artifactbundle` vendoring deferred; see Principle VI)
 - **Cache**: system SQLite (cache only)
 - **Testing**: Swift Testing / unit + property tests; golden fixtures; `HarnessReplay` fixtures.
   One unit-test target per kit (each kit testable in isolation); an `IntegrationTests` target drives
@@ -475,11 +482,18 @@ constitution is the development-principle layer. They are kept in sync, not dupl
 
 ## Version History
 
-**Version**: 1.2.1
+**Version**: 1.3.0
 **Ratified**: 2026-06-18
-**Last Amended**: 2026-07-01
+**Last Amended**: 2026-07-10
 
 **Changelog**:
+- **1.3.0** (2026-07-10): MINOR amendment (Principle VI, secret-scanner **delivery only**) — the sanctioned
+  `betterleaks` companion changes from *per-platform vendored* to **resolved from config/env/`PATH`**, with
+  per-platform `.artifactbundle` vendoring **deferred** pending SwiftPM binary-artifact packaging (tracked as a
+  roadmap item). The redact-before-write / fail-closed / detection-only-offline MUSTs are **unchanged**;
+  `capture` fails closed when `betterleaks` is unresolvable, and records the resolved scanner version in bundle
+  provenance. Rationale: `.artifactbundle` infrastructure not yet available; ships the security control now
+  (secure-by-default) rather than deferring `capture`. Ripples design §6.1/§13 (Specs/013, Specs/014).
 - **1.2.1** (2026-07-01): PATCH amendment — factual syncs from the Phase-1 completed-items audit
   (M4, Roadmap/phase-1-review.md §5): the Technology Stack note now records `swift-system` as a
   transitive *production* dependency (HarnessKit's `ProcessLauncher` seam, via the sanctioned

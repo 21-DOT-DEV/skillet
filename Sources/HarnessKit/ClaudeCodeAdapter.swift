@@ -228,11 +228,105 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
     }
 
     public func locateSessions(_ query: SessionQuery) async throws -> [NativeSessionRef] {
-        throw HarnessError.notImplemented("session capture lands in Phase 3")
+        let workspace = query.workspace ?? URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+        let root = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".claude/projects", isDirectory: true)
+        return Self.locate(projectsRoot: root, workspace: workspace, environment: environment)
     }
 
     public func exportSession(_ ref: NativeSessionRef) async throws -> RawTrace {
-        throw HarnessError.notImplemented("session capture lands in Phase 3")
+        let url = URL(fileURLWithPath: ref.path)
+        // Read only a plain, safe session file: never follow a symlink (it could redirect to an arbitrary
+        // host file), never open a special file (a FIFO/socket read via `FileHandle` blocks forever), never
+        // read a hard link (another inode — possibly a host file). A bounded read caps a pathological file.
+        // (Confinement of a user-supplied `--session` path is the command's job; `--last` reads the trusted store.)
+        guard !Self.isSymlink(url), Self.isRegularFile(url), Self.linkCount(url) == 1 else {
+            throw HarnessError.executionFailed(harness: "claude-code", exitCode: -1,
+                stderr: "refusing to read native session at \(ref.path): not a plain regular file (symlink/special/hard link)")
+        }
+        // Refuse a session LARGER than the read cap rather than silently truncating it: `parse` is lenient
+        // and would drop the malformed last line, yielding an incomplete Trace/transcript with no error —
+        // capture would then write + score a truncated bundle. Sessions are modest; this is a safety bound.
+        let cap = 64 << 20
+        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
+        let size = (attrs?[.size] as? UInt64).map { Int(clamping: $0) } ?? (attrs?[.size] as? Int) ?? 0
+        guard size <= cap else {
+            throw HarnessError.executionFailed(harness: "claude-code", exitCode: -1,
+                stderr: "native session at \(ref.path) is \(size) bytes — exceeds the \(cap / (1 << 20)) MiB cap; refusing to capture a truncated bundle")
+        }
+        guard let data = Self.boundedRead(url, cap: cap), let raw = String(data: data, encoding: .utf8) else {
+            throw HarnessError.executionFailed(harness: "claude-code", exitCode: -1,
+                stderr: "could not read native session at \(ref.path)")
+        }
+        return RawTrace(harness: id, raw: raw)
+    }
+
+    // MARK: - Safe session-file reads (self-contained — HarnessKit doesn't depend on ProjectKit; mirrors
+    // the run stager's symlink → regular → hard-link ordering).
+    static func isSymlink(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+    }
+    static func isRegularFile(_ url: URL) -> Bool {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path)[.type]) as? FileAttributeType) == .typeRegular
+    }
+    static func linkCount(_ url: URL) -> Int {
+        ((try? FileManager.default.attributesOfItem(atPath: url.path)[.referenceCount]) as? Int) ?? 1
+    }
+    static func boundedRead(_ url: URL, cap: Int) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        // `read` returns nil only at EOF; it *throws* on a real I/O error. Coalesce EOF to empty; surface
+        // a genuine error as nil (don't let a failed read masquerade as an empty session).
+        do { return try handle.read(upToCount: max(cap, 0)) ?? Data() }
+        catch { return nil }
+    }
+
+    /// claude-code keys its per-project session store by the workspace path via `replace(/[^a-zA-Z0-9]/g,
+    /// "-")` — **every** character that isn't ASCII `[A-Za-z0-9]` becomes `-` (spaces + punctuation, not
+    /// just `/._`; case and runs of dashes are preserved). Verified against claude-code 2.1.195's encoder
+    /// and the live store (`/Users/x/Developer/skillet` → `-Users-x-Developer-skillet`; `/.skillet` →
+    /// `--skillet`; `/Users/x/My App` → `-Users-x-My-App`). We must reproduce it exactly or `--last` /
+    /// store lookup silently fails to resolve a real session under a space/punctuation path.
+    ///
+    /// Limitation: claude truncates an encoding longer than 200 chars and appends a private hash we can't
+    /// reproduce; a workspace whose encoded path exceeds 200 chars won't resolve via the store and must use
+    /// `--session <path>` (the longest live store dir is ~117 chars, so this is deep-nesting-only).
+    static func claudeProjectDirName(for workspace: URL) -> String {
+        String(workspace.standardizedFileURL.path.map { c in
+            c.isASCII && (c.isLetter || c.isNumber) ? c : "-"
+        })
+    }
+
+    /// The locate logic, over an injectable `projectsRoot` (so tests point it at a temp store). Returns
+    /// the workspace's session files **newest-first**, excluding skillet's own in-flight session when the
+    /// harness exported its id/file (`$CLAUDE_SESSION_ID` / `$CLAUDE_SESSION_FILE`). An absent store dir
+    /// yields `[]` (the command surfaces "no session found"); the command takes the newest pick +
+    /// confirm-if-ambiguous (§3.2).
+    static func locate(
+        projectsRoot: URL, workspace: URL, environment: [String: String], fileManager: FileManager = .default
+    ) -> [NativeSessionRef] {
+        let storeDir = projectsRoot.appendingPathComponent(claudeProjectDirName(for: workspace), isDirectory: true)
+        // Refuse a symlinked store dir (it could redirect the whole lookup elsewhere), then keep only plain
+        // regular, non-hard-linked `*.jsonl` below (a symlinked/hard-linked entry could point
+        // `exportSession` at an arbitrary host file).
+        guard !isSymlink(storeDir), let entries = try? fileManager.contentsOfDirectory(
+            at: storeDir, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])
+        else { return [] }
+
+        let excludedStems = Set([environment["CLAUDE_SESSION_ID"]].compactMap { $0 })
+        let excludedPaths = Set([environment["CLAUDE_SESSION_FILE"]].compactMap {
+            $0.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        })
+        func mtime(_ u: URL) -> Date {
+            (try? u.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+        }
+        return entries
+            .filter { $0.pathExtension == "jsonl" }
+            .filter { !isSymlink($0) && isRegularFile($0) && linkCount($0) == 1 }   // safe files only
+            .filter { !excludedStems.contains($0.deletingPathExtension().lastPathComponent) }
+            .filter { !excludedPaths.contains($0.standardizedFileURL.path) }
+            .sorted { mtime($0) > mtime($1) }
+            .map { NativeSessionRef(id: $0.deletingPathExtension().lastPathComponent, path: $0.standardizedFileURL.path) }
     }
 
     // MARK: - Parsing (native session JSONL → Trace)

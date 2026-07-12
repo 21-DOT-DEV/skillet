@@ -55,6 +55,10 @@ let package = Package(
         // Free, model-free deterministic output scorers → SARIF (F17). Reads produced text via ProjectKit's
         // SafeFile; emits EDDCore's SarifDocument / ScoreReport. No network, no subprocess.
         .target(name: "ScoreKit", dependencies: ["EDDCore", "ProjectKit"]),
+        // Session-bundle write/read owner (F26): the `BundleText` value (carries the structured Trace),
+        // the async `Sanitizer` seam + no-op test double, the `Redactable` recursive-scrub protocol, and
+        // the bundle writer (enforced-path: requires a scan report). Pure + ProjectKit filesystem.
+        .target(name: "CorpusKit", dependencies: ["EDDCore", "TraceKit", "ProjectKit"]),
         .target(
             name: "HarnessKit",
             dependencies: [
@@ -73,6 +77,10 @@ let package = Package(
         // The runner (F7): the per-trial sandbox lifecycle + the run/judge/aggregate loop. The
         // orchestrator that wires the harness adapter + judge over the pure pass^k core.
         .target(name: "RunKit", dependencies: ["EDDCore", "TraceKit", "HarnessKit", "JudgeKit", "ProjectKit"]),
+        // Secret-scanning sanitizer (F26/F32): runs `betterleaks` over gathered text via HarnessKit's
+        // sanctioned launcher (stdin, in-memory — raw secrets never touch disk), parses its PascalCase
+        // JSON report, and value-redacts (span-merge). Parser + redactor are library-testable in isolation.
+        .target(name: "SanitizerKit", dependencies: ["EDDCore", "HarnessKit", "CorpusKit"]),
 
         // Isolated YAML config seam: swift-yaml + C++ interop live ONLY here. It exposes a pure-Swift
         // API (decodes into EDDCore's pure SkilletConfig), so consumers stay interop-free.
@@ -99,6 +107,8 @@ let package = Package(
                 "HarnessKit",
                 "JudgeKit",
                 "RunKit",
+                "CorpusKit",      // F26: bundle writer, transcript render, scrub seam
+                "SanitizerKit",   // F32: the real BetterleaksSanitizer (capture is exposure-gated on it)
                 // Config loading. Importing ConfigYAML pulls in C++ interop (viral to direct
                 // importers), so this leaf target is .Cxx too; the kits + pure core stay interop-free.
                 "ConfigYAML"
@@ -116,6 +126,8 @@ let package = Package(
         .testTarget(name: "JudgeKitTests", dependencies: ["JudgeKit"]),
         .testTarget(name: "RunKitTests", dependencies: ["RunKit", "ProjectKit"]),
         .testTarget(name: "ScoreKitTests", dependencies: ["ScoreKit"]),
+        .testTarget(name: "SanitizerKitTests", dependencies: ["SanitizerKit"]),
+        .testTarget(name: "CorpusKitTests", dependencies: ["CorpusKit"]),
         // Consumer of ConfigYAML — must also enable C++ interop (it's viral to direct importers).
         .testTarget(name: "ConfigYAMLTests", dependencies: ["ConfigYAML"], swiftSettings: [.interoperabilityMode(.Cxx)]),
 

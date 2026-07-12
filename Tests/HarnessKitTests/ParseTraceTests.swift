@@ -38,6 +38,15 @@ struct ParseTraceTests {
         #expect(trace.startedAt < trace.endedAt)
     }
 
+    @Test("Each turn carries ITS OWN line timestamp, not the session's final one (per-turn `at`)")
+    func perTurnTimestamps() throws {
+        let trace = try parsed()
+        let ats = trace.turns.map(\.at)
+        #expect(zip(ats, ats.dropFirst()).allSatisfy { $0 < $1 })   // strictly increasing — not all == endedAt
+        #expect(trace.turns.first?.at == trace.startedAt)           // first turn == session start (00:00:00)
+        #expect(trace.turns.last!.at < trace.endedAt)               // last turn (00:00:20) precedes the final tool-result stamp (00:00:21)
+    }
+
     @Test("Multiple text blocks in one turn are joined with a newline")
     func joinsTextBlocks() throws {
         #expect(try parsed().turns[0].text == "add a greeting\nplease")

@@ -52,6 +52,7 @@ Contributing, security disclosure, and code of conduct are handled at the org le
   `skillet init --json`, `skillet doctor [<skill>...] [--json]` (free $0 preflight; exit 3 + remedy on failure),
   `skillet lint [--json]`, `skillet score <path> [--format tty|json|sarif]` (free, model-free deterministic scorers over produced text → SARIF 2.1.0; a reporter, not a gate — exit 0 even with findings, exit 4 on a corrupt config), `skillet harness list`, `skillet harness info [--json]`,
   `skillet run [<skill>] [--axis behavior|trigger|all] [--ab] [--judge text-judge|grounded-judge] [--runs <k>] [--dry-run] [--yes] [--no-input] [--keep-workspace]` (paid: shells `claude`, resolved via `SKILLET_CLAUDE_CODE_BIN` env → `harness.claude-code.path` in `skillet.yaml` → `PATH` — behavioral trials add the judge; trigger trials are judge-free single calls; `--ab` doubles behavioral trials with a provably skill-free baseline arm, both arms judged; `--judge grounded-judge` reads produced-file contents to catch created-but-wrong, larger grading requests — gated by the combined spend estimate),
+  `skillet capture --skill <s> --slug <x> [--session <ref>] [--target-dir <path>] [--date <YYYY-MM-DD>] [--force] [--fail-on-secret] [--secret-scanner-path <p>]` (records the newest claude-code session — or `--session` — as a **secret-scrubbed**, scored evidence bundle under `<skills_root>/<skill>/evaluations/sessions/`; **always redacts** — there is no `--no-sanitize` — and **fails closed** if `betterleaks` can't run; `--fail-on-secret` exits 1 for CI, the bundle still written scrubbed),
   `skillet --help`, `skillet --version`. Hidden test seams on `run`: `--replay` (offline adapter+judge),
   `--replay-map <json>` (with-arm canned verdicts), `--replay-baseline-map <json>` (baseline-arm canned
   verdicts; defaults to fail-all so a replayed `--ab` shows a deterministic positive Δ).
@@ -63,7 +64,7 @@ Contributing, security disclosure, and code of conduct are handled at the org le
   Historical note: the 2026-06 macOS-only CI failures were an upstream Swift C++-interop bug, fixed
   in swift-yaml (diagnosis + repro live in its `Projects/`); no Swift-version floor beyond Swift 6.
 
-`init`, `doctor`, `lint`, `run`, `harness list`/`info`, and the claude-code adapter (parse + resolution + probe + live `run`) are built; `capture`/`next`/… are not yet — see Planned.
+`init`, `doctor`, `lint`, `score`, `run`, `harness list`/`info`, `capture` (scrubbed, scored session bundles — F26/F32), and the claude-code adapter (parse + resolution + probe + live `run` + session capture) are built; `friction`/`next`/… are not yet — see Planned.
 
 ## Binding conventions
 
@@ -75,8 +76,9 @@ from the first commit.
 - **Sanctioned dependencies only** (adding any other requires a constitutional amendment):
   `swift-argument-parser`, `swift-yaml` (YAML 1.2 — config + evidence frontmatter; *not* Yams, and
   there is **no TOML dependency**), `swift-subprocess`, plus the standard library. JSON/SARIF/frozen
-  formats use Foundation `Codable` (no added dependency). Secret scanning uses a vendored
-  `betterleaks` (MIT) companion. The cache MAY use system SQLite.
+  formats use Foundation `Codable` (no added dependency). Secret scanning uses `betterleaks` (MIT),
+  **resolved** from the `sanitize` config / `SKILLET_BETTERLEAKS_BIN` / `PATH` (per-platform
+  `.artifactbundle` vendoring deferred — constitution v1.3.0). The cache MAY use system SQLite.
 - **Dependency notes (implementation reality):** `swift-yaml` has **no tagged release**, so it is
   **pinned by revision** (`048f714f…`). Its `YAML` product needs **C++ interop**, which is **viral to
   direct importers** — so it is confined to the isolated **`ConfigYAML`** target
@@ -120,8 +122,13 @@ from the first commit.
   modified is the explicit, opt-in `suggest --apply` content-anchored path, which refuses a dirty
   tree and stops short of the commit. `iterate` operates only in throwaway worktrees.
 - **Never emit, log, or commit secrets** (credentials, tokens, keys) — not in output, errors, or
-  the corpus. `capture` redacts before writing and **fails closed** if the scanner can't run. Run
-  the scanner offline/detection-only; never enable its network validation.
+  the corpus. `capture` **always** redacts before writing (there is **no `--no-sanitize`** opt-out —
+  silence a false-positive *file* with `sanitize.exempt_paths` (a glob/whole-segment list; drops findings
+  whose path matches), or a false-positive *value* that recurs across artifacts (the diff, trace) with
+  betterleaks' own allowlist in `.betterleaks.toml`) and **fails closed** if the scanner can't run. Resolve the scanner via `--secret-scanner-path` /
+  `SKILLET_BETTERLEAKS_BIN` / `sanitize.scanner_path` / `PATH`; `--fail-on-secret` exits 1 for CI
+  (the bundle is still written scrubbed). Run the scanner offline/detection-only; never enable its
+  network validation.
 - **No telemetry; no network calls** except to providers the user explicitly configured.
 - **Do not add a dependency** (runtime or dev) without a constitutional amendment.
 - **Do not break a frozen format, bundle field, exit code, or `--json` schema** without a major
@@ -136,9 +143,10 @@ Treat everything in this section as a target to build toward, not as existing fu
 **except** what Phase 1 already shipped (now COMPLETE): the `EDDCore`, `TraceKit`, `HarnessKit`,
 `LintKit`, `JudgeKit`, `RunKit`, `ProjectKit`, `RenderKit`, and `ConfigYAML` kits + the `skillet`
 executable with `init`/`doctor`/`lint`/`run`/`harness` (see the status banner + Commands above; `doctor`
-is Phase 2's first shipped feature). The kits and commands still *planned* are the remaining Phase 2+
-ones — `ScoreKit`/`CorpusKit`/`AnalysisKit`/`IterateKit`
-and `capture`/`friction`/`triage`/`next`/`suggest`/`iterate`/`baseline`/`report`/… .
+is Phase 2's first shipped feature). Phase 2 also shipped `ScoreKit` + `score`; Phase 3 has shipped
+`CorpusKit` + `SanitizerKit` + `capture` (F26/F32). The kits and commands still *planned* are the
+remaining Phase 3+ ones — `AnalysisKit`/`IterateKit`
+and `friction`/`triage`/`next`/`suggest`/`iterate`/`baseline`/`report`/… .
 
 ### Package architecture (design §11)
 
@@ -147,9 +155,9 @@ skillet (Package.swift, Swift 6, strict concurrency)
 EDDCore (pure)
   → TraceKit
   → { HarnessKit, JudgeKit, ScoreKit, LintKit, CorpusKit, ProjectKit }
-  → AnalysisKit / RunKit / IterateKit / RenderKit
-  → skillet (executable)   (swift-argument-parser; ALL commands + wiring, ~≤50 lines
-                            each; NO separate skilletCLI library target)
+  → AnalysisKit / RunKit / IterateKit / RenderKit / SanitizerKit  (SanitizerKit → CorpusKit + HarnessKit)
+  → skillet (executable)   (swift-argument-parser; ALL commands + wiring — thin adapters
+                            that delegate to the kits; NO separate skilletCLI library target)
 ```
 
 `EDDCore` (domain types · gates engine · scorer↔judge contradiction join · pass^k aggregation ·
@@ -157,7 +165,10 @@ golden-tested boundary codecs) is pure/synchronous; effectful kits sit above it.
 executable is the top wiring layer (no `skilletCLI` library); `ProjectKit` is the filesystem-effect
 home for discovery / config I/O / `init` scaffolding, kept out of the executable so it stays
 unit-testable. Business logic lives in the kits (one unit-test target each); the CLI surface is
-tested via an `IntegrationTests` target that runs the built binary. CorpusKit is a Phase-3 kit.
+tested via an `IntegrationTests` target that runs the built binary. Commands are wiring, not a fixed
+line budget — orchestration-heavy ones (`run`, `capture`, `doctor`) are the largest, and the reusable
+logic they call is extracted into kits (e.g. `GitDiffProvider`, `BodyExtractor`) so it's unit-tested there. `CorpusKit` (bundle assembly +
+frozen writer) and `SanitizerKit` (betterleaks-backed secret redaction) are the Phase-3 evidence kits.
 
 ### Command surface (design §6) — lights up across phases
 

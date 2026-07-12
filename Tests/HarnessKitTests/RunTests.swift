@@ -110,6 +110,13 @@ struct SubprocessLauncherTests {
         #expect(out.exitCode == 0)
     }
 
+    @Test("A bare executable name resolves via PATH (a SKILLET_*_BIN / config bare name must exec)")
+    func bareNameResolvesViaPath() async throws {
+        // `echo` (no `/`) must be found on PATH, not treated as the relative path `./echo`.
+        let out = try await SubprocessLauncher().run("echo", ["hi"], workingDirectory: nil, timeout: nil, environment: nil, outputLimitBytes: nil)
+        #expect(out.stdout == "hi\n" && out.exitCode == 0)
+    }
+
     @Test("workingDirectory sets the child's cwd")
     func setsWorkingDirectory() async throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -137,6 +144,19 @@ struct SubprocessLauncherTests {
         await #expect(throws: ProcessError.self) {
             try await SubprocessLauncher().run("/bin/sleep", ["3"], workingDirectory: nil, timeout: .milliseconds(200), environment: nil, outputLimitBytes: nil)
         }
+    }
+
+    // F26/F32 walking-skeleton: prove `input:` actually pipes stdin to the child. `cat` echoes stdin →
+    // stdout, so a round-trip proves the buffer reached the process (the mile the isolated spike showed
+    // and this bakes into the suite). A secret-shaped payload also confirms no truncation/encoding loss.
+    @Test("input: pipes stdin to the child (round-trips through cat)")
+    func pipesStdin() async throws {
+        let payload = "github_token = ghp_skilletSyntheticCanaryDoNotUse123456\nsecond line\n"
+        let out = try await SubprocessLauncher().run(
+            "/bin/cat", [], input: Data(payload.utf8),
+            workingDirectory: nil, timeout: .seconds(10), environment: nil, outputLimitBytes: nil)
+        #expect(out.stdout == payload)
+        #expect(out.exitCode == 0)
     }
 
     @Test("Small output still captures normally under a generous default limit")

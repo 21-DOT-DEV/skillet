@@ -37,9 +37,32 @@ public protocol ProcessLauncher: Sendable {
         environment: [String: String]?,
         outputLimitBytes: Int?
     ) async throws -> ProcessOutput
+
+    /// Pipe `input` to the child's stdin — F26/F32 feed `betterleaks` this way so raw session text
+    /// never touches disk (spike-verified: swift-subprocess `input: .data(...)`). A default impl below
+    /// forwards to the no-input `run` (ignoring `input`), so existing conformers/fakes need no change;
+    /// only `SubprocessLauncher` overrides it to actually write stdin.
+    func run(
+        _ executable: String,
+        _ arguments: [String],
+        input: Data?,
+        workingDirectory: String?,
+        timeout: Duration?,
+        environment: [String: String]?,
+        outputLimitBytes: Int?
+    ) async throws -> ProcessOutput
 }
 
 public extension ProcessLauncher {
+    /// Default: ignore `input`, forward to the no-input `run` (for launchers/fakes without stdin support).
+    func run(
+        _ executable: String, _ arguments: [String], input: Data?,
+        workingDirectory: String?, timeout: Duration?, environment: [String: String]?, outputLimitBytes: Int?
+    ) async throws -> ProcessOutput {
+        try await run(executable, arguments, workingDirectory: workingDirectory, timeout: timeout,
+                      environment: environment, outputLimitBytes: outputLimitBytes)
+    }
+
     /// Convenience for no-frills call sites (e.g. probe's `--version`): inherit cwd + env, no watchdog,
     /// default output limit.
     func run(_ executable: String, _ arguments: [String]) async throws -> ProcessOutput {
@@ -64,15 +87,28 @@ public struct SubprocessLauncher: ProcessLauncher {
         environment: [String: String]?,
         outputLimitBytes: Int?
     ) async throws -> ProcessOutput {
+        try await run(executable, arguments, input: nil, workingDirectory: workingDirectory,
+                      timeout: timeout, environment: environment, outputLimitBytes: outputLimitBytes)
+    }
+
+    public func run(
+        _ executable: String,
+        _ arguments: [String],
+        input: Data?,
+        workingDirectory: String?,
+        timeout: Duration?,
+        environment: [String: String]?,
+        outputLimitBytes: Int?
+    ) async throws -> ProcessOutput {
         let limit = outputLimitBytes ?? Self.defaultOutputLimit
         // No watchdog → run directly.
         guard let timeout else {
-            return try await Self.runOnce(executable, arguments, workingDirectory, environment, limit)
+            return try await Self.runOnce(executable, arguments, input, workingDirectory, environment, limit)
         }
         // Watchdog: race the child against a sleeper. Whichever finishes first wins; exiting the group
         // cancels the loser — cancelling the child task makes swift-subprocess terminate the process.
         return try await withThrowingTaskGroup(of: ProcessOutput?.self) { group in
-            group.addTask { try await Self.runOnce(executable, arguments, workingDirectory, environment, limit) }
+            group.addTask { try await Self.runOnce(executable, arguments, input, workingDirectory, environment, limit) }
             group.addTask { try await Task.sleep(for: timeout); return nil }   // nil sentinel = timed out
             defer { group.cancelAll() }
             let first = try await group.next() ?? nil
@@ -85,6 +121,7 @@ public struct SubprocessLauncher: ProcessLauncher {
     private static func runOnce(
         _ executable: String,
         _ arguments: [String],
+        _ input: Data?,
         _ workingDirectory: String?,
         _ environment: [String: String]?,
         _ outputLimit: Int
@@ -96,20 +133,30 @@ public struct SubprocessLauncher: ProcessLauncher {
                 (Environment.Key(stringLiteral: $0.key), Optional($0.value))
             }))
         } ?? .inherit
-        let result = try await Subprocess.run(
-            .path(FilePath(executable)),
-            arguments: .init(arguments),
-            environment: env,
-            workingDirectory: workingDirectory.map { FilePath($0) },
-            output: .string(limit: outputLimit),
-            error: .string(limit: outputLimit)
-        )
-        let exitCode: Int32
-        if case .exited(let code) = result.terminationStatus {
-            exitCode = code
+        // A bare name (no `/`) resolves via PATH (`.name`); an absolute/relative path is used directly
+        // (`.path`). The seam is documented as `executable: String` (a name OR a path), and
+        // `SKILLET_*_BIN`/config may be a bare name (`betterleaks`, `git`, `claude`) — treating everything
+        // as a path would fail to exec those even when PATH has them.
+        let exe: Executable = executable.contains("/") ? .path(FilePath(executable)) : .name(executable)
+        let args = Arguments(arguments)
+        let cwd = workingDirectory.map { FilePath($0) }
+        // Branch on stdin: `.data(...)` pipes the buffer to the child (spike-verified with betterleaks);
+        // no input keeps the default (no stdin). Both collect stdout/stderr as bounded strings.
+        if let input {
+            let result = try await Subprocess.run(exe, arguments: args, environment: env, workingDirectory: cwd,
+                                                  input: .data(input),
+                                                  output: .string(limit: outputLimit), error: .string(limit: outputLimit))
+            return Self.output(result.terminationStatus, result.standardOutput, result.standardError)
         } else {
-            exitCode = -1
+            let result = try await Subprocess.run(exe, arguments: args, environment: env, workingDirectory: cwd,
+                                                  output: .string(limit: outputLimit), error: .string(limit: outputLimit))
+            return Self.output(result.terminationStatus, result.standardOutput, result.standardError)
         }
-        return ProcessOutput(stdout: result.standardOutput ?? "", stderr: result.standardError ?? "", exitCode: exitCode)
+    }
+
+    private static func output(_ status: TerminationStatus, _ stdout: String?, _ stderr: String?) -> ProcessOutput {
+        let exitCode: Int32
+        if case .exited(let code) = status { exitCode = code } else { exitCode = -1 }
+        return ProcessOutput(stdout: stdout ?? "", stderr: stderr ?? "", exitCode: exitCode)
     }
 }

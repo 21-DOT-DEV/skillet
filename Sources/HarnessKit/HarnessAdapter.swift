@@ -85,17 +85,24 @@ public struct RawTrace: Sendable {
     public init(harness: HarnessID, raw: String) { self.harness = harness; self.raw = raw }
 }
 
-/// A reference to a native session in the harness's own store (capture side).
+/// A reference to a native session in the harness's own store (capture side). `id` is the session's
+/// native identifier (its filename stem); `path` is the absolute file `exportSession` reads.
 public struct NativeSessionRef: Sendable, Equatable {
     public var id: String
-    public init(id: String) { self.id = id }
+    public var path: String
+    public init(id: String, path: String = "") { self.id = id; self.path = path }
 }
 
-/// A query for locating native sessions to capture. Minimal placeholder.
+/// A query for locating native sessions to capture. `workspace` is the directory the session ran in
+/// (`--target-dir`, default cwd) — claude-code keys its store by that path, so newest-session resolution
+/// must use it, not the cwd where `skillet` was launched (R4-3).
 public struct SessionQuery: Sendable {
     public var skill: String?
-    public var last: Bool
-    public init(skill: String? = nil, last: Bool = false) { self.skill = skill; self.last = last }
+    public var workspace: URL?
+    public init(skill: String? = nil, workspace: URL? = nil) {
+        self.skill = skill
+        self.workspace = workspace
+    }
 }
 
 // MARK: - Errors

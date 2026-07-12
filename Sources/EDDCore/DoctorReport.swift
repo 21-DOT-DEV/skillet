@@ -21,6 +21,9 @@ public struct DoctorReport: SchemaIdentified, Sendable, Equatable {
         /// The trigger-test file's health (added F14 review round 4 — additive): absent/usable pass,
         /// empty warns (the runner skips it), invalid/symlinked fails (the runner refuses it).
         public static let skillTriggerEvals = "skill.trigger-evals"
+        /// The `capture` secret scanner (F32): does `betterleaks` resolve (+ version)? A **warning** when
+        /// absent — `capture` fails closed at runtime, so this only surfaces the gap early, never fails.
+        public static let secretScanner = "capture.secret-scanner"
     }
 
     /// One check result. `subject` names what was examined (a skill, a harness, a skill×harness

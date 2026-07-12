@@ -9,14 +9,16 @@ public struct SkilletConfig: Codable, Sendable, Equatable {
     public var runs: Runs?
     public var judge: Judge?
     public var scorers: Scorers?
+    public var sanitize: Sanitize?
 
-    public init(project: Project? = nil, harness: Harness? = nil, lint: Lint? = nil, runs: Runs? = nil, judge: Judge? = nil, scorers: Scorers? = nil) {
+    public init(project: Project? = nil, harness: Harness? = nil, lint: Lint? = nil, runs: Runs? = nil, judge: Judge? = nil, scorers: Scorers? = nil, sanitize: Sanitize? = nil) {
         self.project = project
         self.harness = harness
         self.lint = lint
         self.runs = runs
         self.judge = judge
         self.scorers = scorers
+        self.sanitize = sanitize
     }
 
     public struct Project: Codable, Sendable, Equatable {
@@ -188,6 +190,28 @@ public struct SkilletConfig: Codable, Sendable, Equatable {
                 let container = try decoder.container(keyedBy: CodingKeys.self)
                 exempt = try container.decodeIfPresent([String].self, forKey: .exempt) ?? []
             }
+        }
+    }
+
+    /// The `sanitize:` knobs (design §6.1): the scanner-binary path override and false-positive path
+    /// exemptions. There is **no `enabled` toggle** (R5) — capture always scrubs; a false positive is
+    /// silenced surgically. Absent keys default to empty, so a partial (or absent) block is valid.
+    public struct Sanitize: Codable, Sendable, Equatable {
+        public var scannerPath: String?
+        public var exemptPaths: [String]
+
+        public init(scannerPath: String? = nil, exemptPaths: [String] = []) {
+            self.scannerPath = scannerPath
+            self.exemptPaths = exemptPaths
+        }
+        enum CodingKeys: String, CodingKey {
+            case scannerPath = "scanner_path"
+            case exemptPaths = "exempt_paths"
+        }
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            scannerPath = try c.decodeIfPresent(String.self, forKey: .scannerPath)
+            exemptPaths = try c.decodeIfPresent([String].self, forKey: .exemptPaths) ?? []
         }
     }
 }

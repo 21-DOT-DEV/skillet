@@ -8,7 +8,7 @@ import EDDCore
 ///
 /// `skillet.trace/1` is designed now (D4) but treated as a **greenfield internal schema**, not a
 /// frozen boundary format (§7.2) — later features may add *optional* fields additively.
-public struct Trace: SchemaIdentified, Decodable, Sendable, Equatable {
+public struct Trace: SchemaIdentified, Codable, Sendable, Equatable {
     public static let schema = "skillet.trace/1"
 
     public var harness: HarnessID

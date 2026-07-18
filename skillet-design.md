@@ -3,12 +3,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.51 — for review |
+| **Status** | Draft v0.52 — for review |
 | **Name** | `skillet` (settled — SKILL · E · T, the *SKILL.md Evaluation Toolkit*); EDD remains the methodology's name |
 | **Deliverable** | Public, open-source, multi-harness Swift CLI |
 | **Supersedes** | The repo-private `swift-skill-eval` tool + the Python trigger harness |
 | **Decision provenance** | §2 — every load-bearing choice here was settled in the design Q&A |
-| **Revision log** | Extracted to [skillet-design-changelog.md](skillet-design-changelog.md) (v0.1 → v0.51, latest first, one linkable heading per version; historical entries never rewritten). Latest — v0.51 (2026-07-11): **F26 + F32 SHIPPED** — `skillet capture` records a secret-scrubbed, scored session bundle (`CorpusKit` + `SanitizerKit` now real; `session-meta` schema 2; release-coupled, exposure-gated on `betterleaks`); as part of finalizing, the §6.1 synopsis dropped the `--last` flag (newest is the implicit default; `--session` overrides). (v0.50: secret-scanner delivery *bundled → resolved*, `SanitizerKit` added.) (Specs/013–014.) |
+| **Revision log** | Extracted to [skillet-design-changelog.md](skillet-design-changelog.md) (v0.1 → v0.52, latest first, one linkable heading per version; historical entries never rewritten). Latest — v0.52 (2026-07-17): **F29 SHIPPED** — structured `skillet.friction/1` + `skillet.finding/1` evidence formats + a typed lifecycle enforced by a centralized `EDDCore` validator; the `ConfigYAML` `EvidenceFrontmatter` seam with native duplicate-key rejection (`swift-yaml` pin bumped); library layer only (the `friction` commands are F30); §7.3 + §7.6 rippled. (v0.51: **F26 + F32 SHIPPED** — `skillet capture` records a secret-scrubbed, scored session bundle.) (Specs/015.) |
 
 ---
 
@@ -690,7 +690,7 @@ skill: docc-articles
 domain: secp256k1                  # distinct-domain de-dupe key
 lever: eval                        # eval|benchmark|lint|skill_md|reference|config
 state: held                        # logged|watch|candidate|held|codified|proven|closed
-held_reason: "single-domain; only strong lever is compile-eval infra"
+state_reason: "single-domain; only strong lever is compile-eval infra"   # required when state ∈ {held, watch, closed}
 root_cause: "SKILL.md:214 — snippets must compile"
 sessions: [2026-06-01-secp-sign-article, 2026-06-04-secp-verify-article]
 skill_version: "1.3.0"             # sourced from the linked sessions' meta; "unknown" sentinel allowed
@@ -702,11 +702,32 @@ Manual fix: replaced pseudo-API calls with the real secp256k1 API surface…
 Notes: a third occurrence outside secp would justify the fixture investment.
 ```
 
-**Finding** — `findings/2026-06-05-rule-of-three-density.md`: same shape plus `source: scorer|code_feedback|judge`, `confidence: high|medium|low`, `cluster`, and `signal` (the scorer/judge detail). Findings and friction events are both **evidence**; the gates engine consumes them uniformly, de-duplicating on shared sessions.
+**Finding** — `findings/2026-06-05-rule-of-three-density.md` — the machine-mined sibling (the same `EvidenceHeader`, plus how the miner surfaced it):
+
+```markdown
+---
+schema: skillet.finding/1
+id: 2026-06-05-rule-of-three-density
+skill: docc-articles
+domain: secp256k1
+lever: skill_md
+state: logged
+sessions: [2026-06-05-secp-ecdh-article]
+skill_version: "1.4.0"             # from the linked session's meta
+model: claude-opus-4-8
+source: scorer                     # scorer|judge|code_feedback — who mined it
+confidence: high                   # high|medium|low
+cluster: rule-of-three             # groups re-detections of the same signal
+signal: "density-below-threshold: 2 examples where the rubric wants ≥3"
+---
+Scorer flagged example density below the rule-of-three threshold in the ECDH walkthrough.
+```
+
+Findings and friction events are both **evidence** — the gates engine consumes them uniformly, de-duplicating on shared sessions. `state_reason` is **required whenever `state ∈ {held, watch, closed}`** (a human-set state must carry its rationale; §6.1's `set-state … --reason`) and optional on the pipeline states — the reader rejects a `held`/`watch`/`closed` file that omits it.
 
 **Proposal** *(format changed in v0.2)* — the output of `suggest`, the input of `iterate`: a JSON set with `id`, `skill`, `motivation: <evidence ids>`, `expected: <eval ids that should flip>`, and per-edit `EditProposal`s carrying `skill_md_lines`, `rationale`, `current_excerpt`, `proposed_text`, `addresses`. Application is **content-anchored**: each `current_excerpt` must match exactly once (refuse-on-ambiguity, fail-loud on drift). This deliberately replaces the v0.1 unified-diff body — line-anchored hunk offsets rot the moment a human applies any earlier edit by hand, while content anchors survive reordering; strictly safer than `git apply`. Drafted by `skillet suggest` or by hand — the format doesn't care.
 
-**Evidence lifecycle.** `logged → candidate → codified → proven → closed`, with `watch`/`held` as human-set side states. Engine-readable, command-written: `friction add` creates `logged`; gate clearance makes `next` *propose* candidacy; `eval new --from-friction` sets `codified`; `iterate --mark` sets `proven`; the human closes. No transition ever happens implicitly (D6).
+**Evidence lifecycle.** `logged → candidate → codified → proven → closed`, with `watch`/`held` as human-set side states. Engine-readable, command-written: `friction add` creates `logged`; gate clearance makes `next` *propose* candidacy; `eval new --from-friction` sets `codified`; `iterate --mark` sets `proven`; the human closes. No transition ever happens implicitly (D6). **F29** ships this as a typed `LifecycleState` enum plus a centralized legal-moves table + pure transition validator in `EDDCore` (illegal *and* self-transitions rejected; the one backward edge is the constrained `closed → logged` reopen, so a recurring friction / re-detected finding re-enters the pipeline instead of spawning a duplicate) — so "never implicit" is a **unit-tested property of the core**, not a per-command convention.
 
 ### 7.4 Migration & backfill
 
@@ -772,8 +793,10 @@ embedded one.
 | Gate-engine flow · adapter capabilities · boundary codecs · exit codes | **Swift** | trust, determinism, typed contracts — never data |
 
 **Operational hygiene** (config, frontmatter, and any rule files are all YAML):
-every YAML file is JSON-Schema-validated on read with duplicate keys rejected;
-`swift-yaml`'s YAML 1.2 base sidesteps the `yes/no/on/off` and octal traps;
+every YAML file is JSON-Schema-validated on read with **duplicate keys rejected natively** —
+`swift-yaml`'s `DuplicateKeyStrategy.reject` (an event-driven scan reporting the key + line/column;
+F29's evidence reader uses it, and the config + `SKILL.md` frontmatter readers can adopt it too,
+retiring any hand-rolled pre-scan); `swift-yaml`'s YAML 1.2 base sidesteps the `yes/no/on/off` and octal traps;
 version strings are quoted; and `skillet lint` lints its own rule files.
 
 ---

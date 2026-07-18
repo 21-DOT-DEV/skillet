@@ -27,3 +27,4 @@ roadmap re-phasing.
 | 012 | Deterministic scorers → SARIF (`skillet score`) | 2 · F17 | Implemented | [plan.md](012-deterministic-scorers/plan.md) |
 | 013 | Capture a session as evidence (`skillet capture`) | 3 · F26 | Implemented | [plan.md](013-capture-session-evidence/plan.md) |
 | 014 | Capture secret-sanitization (`skillet capture` redact-by-default) | 3 · F32 | Implemented | [plan.md](014-capture-secret-sanitization/plan.md) |
+| 015 | Structured friction & finding evidence + lifecycle (`skillet.friction/1` / `skillet.finding/1`) | 3 · F29 | Implemented (2026-07-17) | [plan.md](015-friction-finding-evidence/plan.md) |

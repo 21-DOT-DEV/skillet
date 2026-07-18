@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.18.0
-**Last Updated:** 2026-07-09
+**Version:** v1.19.0
+**Last Updated:** 2026-07-17
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is
@@ -196,14 +196,15 @@ process-assertions — decided 2026-07-06 via the Apple Evaluations cross-refere
 
 ## Change Log
 
-Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.18.0, latest first, one
+Full history: [ROADMAP-changelog.md](ROADMAP-changelog.md) — v1.0.0 → v1.19.0, latest first, one
 linkable heading per version (extracted 2026-07-04; historical entries are never rewritten).
 
-- **Latest — v1.18.0 (2026-07-11): MINOR** — **F26 + F32 SHIPPED: `skillet capture`** — records a
-  finished claude-code session as a secret-scrubbed, scored evidence bundle (redact-before-write,
-  fail-closed when the scanner can't run; new `CorpusKit` + `SanitizerKit`; `session-meta` schema 2).
-  Release-coupled — capture is exposure-gated on the real `betterleaks`. 440 green. (Prior: v1.17.0 —
-  F17 `score` shipped; v1.16.6 — F16 polish round 6.)
+- **Latest — v1.19.0 (2026-07-17): MINOR** — **F29 SHIPPED: structured friction & finding evidence
+  + lifecycle** — the `skillet.friction/1` + `skillet.finding/1` file formats, a typed
+  `EvidenceHeader`/`FrictionEvent`/`Finding` core with a centralized lifecycle validator, and the
+  `ConfigYAML` read/validate/create-encode seam (native duplicate-key rejection; `swift-yaml` pin
+  bumped). Library layer only — the `friction`/`set-state` commands are F30. 511 green. (Prior:
+  v1.18.0 — F26 + F32 `capture` shipped; v1.17.0 — F17 `score` shipped.)
 - **v1.16.0 (2026-07-08): MINOR** — **F16 `skillet run --judge grounded-judge` SHIPPED**:
   the file-contents grader — reads the produced/changed set (before/after snapshot diff,
   symlink-confined, bounded 32 KiB/128 KiB + disclosed) to catch created-but-wrong; additive

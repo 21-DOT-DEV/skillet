@@ -257,6 +257,11 @@ struct CaptureCommand: AsyncParsableCommand {
             try FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
             for (path, text) in bodies {
                 let dest = tmp.appendingPathComponent(path)
+                // Invariant (T6): `bodies` keys are relative workspace paths already confined by
+                // `BodyExtractor`'s escape guard (`firstSymlinkOnPath`), so `dest` stays under `tmp`.
+                // Re-assert it at the write — this is a fresh destination tree, and a future caller
+                // feeding unconfined keys must not be able to write outside `tmp`.
+                guard SafeFile.firstSymlinkOnPath(from: tmp, to: dest) == nil else { continue }
                 try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try Data(text.utf8).write(to: dest)
             }
@@ -346,20 +351,7 @@ struct CaptureCommand: AsyncParsableCommand {
         !s.isEmpty && s != "." && s != ".." && !s.contains("/") && !s.unicodeScalars.contains("\0")
     }
 
-    static func isValidDate(_ s: String) -> Bool {
-        let c = Array(s)
-        guard c.count == 10 else { return false }
-        func digit(_ i: Int) -> Bool { c[i] >= "0" && c[i] <= "9" }
-        // Exact `YYYY-MM-DD` shape...
-        guard digit(0) && digit(1) && digit(2) && digit(3) && c[4] == "-"
-            && digit(5) && digit(6) && c[7] == "-" && digit(8) && digit(9) else { return false }
-        // ...AND a real calendar date — the shape check alone lets `2026-99-99` / `2026-02-30` become a
-        // bundle stem + id. `isLenient = false` + a POSIX/UTC formatter rejects impossible dates.
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"; f.isLenient = false
-        f.timeZone = TimeZone(identifier: "UTC"); f.locale = Locale(identifier: "en_US_POSIX")
-        return f.date(from: s) != nil
-    }
+    static func isValidDate(_ s: String) -> Bool { DateShape.isValidISODate(s) }   // shared validator (T11)
 
     /// `url`'s path relative to `base`, or `nil` if `url` is not under `base`.
     static func relativePath(of url: URL, under base: URL) -> String? {

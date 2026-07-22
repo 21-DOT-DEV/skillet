@@ -547,13 +547,18 @@ struct RunCommand: AsyncParsableCommand {
         }
     }
 
+    // Operator-supplied replay-map paths (hidden test seam) read through the one sanctioned untrusted
+    // reader (T2): bounds a pathological file and refuses a symlink / special / hard-linked path, matching
+    // every other file read. A refusal falls back to the empty map exactly as an unreadable path did.
     private func loadReplayMap() -> [String: Bool] {
-        guard let path = replayMap, let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return [:] }
+        guard let path = replayMap,
+              case let .success(data) = SafeFile.readPlainData(URL(fileURLWithPath: path), cap: 1 << 20) else { return [:] }
         return (try? JSONDecoder().decode([String: Bool].self, from: data)) ?? [:]
     }
 
     private func loadBaselineReplayMap() -> [String: Bool] {
-        guard let path = replayBaselineMap, let data = try? Data(contentsOf: URL(fileURLWithPath: path)) else { return [:] }
+        guard let path = replayBaselineMap,
+              case let .success(data) = SafeFile.readPlainData(URL(fileURLWithPath: path), cap: 1 << 20) else { return [:] }
         return (try? JSONDecoder().decode([String: Bool].self, from: data)) ?? [:]
     }
 

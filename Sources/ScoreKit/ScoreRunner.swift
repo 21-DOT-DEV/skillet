@@ -41,15 +41,23 @@ public struct ScoreRunner: Sendable {
         let toScore = candidates(under: path, config: config)
         onStart?(toScore.count)
         for (rel, url) in toScore {
-            guard let (data, fullSize) = SafeFile.boundedRead(url, cap: Self.sizeCap) else {
-                findings.append(disclosure(rel, "Not scored: unreadable (permissions)")); unreadable += 1
+            // The one sanctioned untrusted read (round 17): folds in the symlink / regular-file / hard-link
+            // guards that `candidates` couldn't apply to a directly-named single-file path, and re-checks
+            // them at read time — closing T1, where a hard-linked input's content (another inode, possibly
+            // outside the scored tree) was previously decoded and scored. `.oversized` keeps its distinct
+            // S000 message; every other refusal is a not-scored S000 carrying the shared reason.
+            let data: Data
+            switch SafeFile.readPlainData(url, cap: Self.sizeCap) {
+            case let .success(bytes):
+                data = bytes
+            case .failure(.oversized):
+                findings.append(disclosure(rel, "Not scored: exceeds 1 MiB")); unreadable += 1
+                bump(&perRule, "SKILL-S000"); continue
+            case let .failure(refusal):
+                findings.append(disclosure(rel, "Not scored: \(refusal.reason)")); unreadable += 1
                 bump(&perRule, "SKILL-S000"); continue
             }
             let isSarif = rel.hasSuffix(".sarif") || rel.hasSuffix(".sarif.json")
-            if fullSize > Self.sizeCap {                              // oversized ⇒ S000, never decoded
-                findings.append(disclosure(rel, "Not scored: exceeds 1 MiB")); unreadable += 1
-                bump(&perRule, "SKILL-S000"); continue
-            }
             guard let text = SafeFile.decodeText(data, truncated: false) else {   // binary / non-UTF-8
                 if isSarif {
                     findings.append(sarifInvalid(rel, "not UTF-8")); scored += 1; bump(&perRule, "SKILL-S007")

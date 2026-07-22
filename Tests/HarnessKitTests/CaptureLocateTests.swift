@@ -86,6 +86,17 @@ struct CaptureLocateTests {
         }
     }
 
+    @Test("exportSession refuses a hard-linked session file (linkCount > 1 — no read of another inode) — T10")
+    func exportRefusesHardLink() async throws {
+        let (root, ws) = try makeStore(); defer { try? FileManager.default.removeItem(at: root) }
+        let real = try session(root, ws, stem: "real", contents: "{}", mtime: Date(timeIntervalSince1970: 1))
+        let hard = root.appendingPathComponent(ClaudeCodeAdapter.claudeProjectDirName(for: ws)).appendingPathComponent("hard.jsonl")
+        guard (try? FileManager.default.linkItem(at: real, to: hard)) != nil else { return }   // same-fs hard link
+        await #expect(throws: HarnessError.self) {
+            _ = try await ClaudeCodeAdapter().exportSession(NativeSessionRef(id: "hard", path: hard.path))
+        }
+    }
+
     @Test("locate skips symlinked *.jsonl entries (a redirect must not become a capture target)")
     func locateSkipsSymlinks() throws {
         let (root, ws) = try makeStore(); defer { try? FileManager.default.removeItem(at: root) }

@@ -13,11 +13,13 @@ structured evidence, and ship a `SKILL.md` edit only after a previously-failing 
 > ([Specs/008](Specs/008-doctor-preflight/plan.md), [Specs/009](Specs/009-trigger-axis/plan.md),
 > [Specs/010](Specs/010-ab-baseline/plan.md), [Specs/011](Specs/011-grounded-judge/plan.md),
 > [Specs/012](Specs/012-deterministic-scorers/plan.md)).
+> **Phase 3 — F26+F32 (`skillet capture`, scrubbed + scored session bundles) shipped; Phase 4 — F33
+> (`skillet triage`, the free corpus failure taxonomy) shipped** ([Specs/013](Specs/013-capture-session-evidence/plan.md)–[Specs/016](Specs/016-corpus-triage/plan.md)).
 > `Package.swift` plus `EDDCore`, `TraceKit`,
-> `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `ScoreKit`, `JudgeKit`, `RunKit`, `ConfigYAML`, and the
+> `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `ScoreKit`, `JudgeKit`, `RunKit`, `CorpusKit`, `SanitizerKit`, `AnalysisKit`, `ConfigYAML`, and the
 > `skillet` executable exist — the executable owns the full ArgumentParser command tree (no
-> `skilletCLI` library; `ProjectKit` is the discovery/config-IO home) — with 511 tests green
-> (`swift build && swift test`). Shipped commands: `init` · `doctor` · `lint` · `score` · `run` · `harness
+> `skilletCLI` library; `ProjectKit` is the discovery/config-IO home) — with the full suite green
+> (`swift build && swift test`). Shipped commands: `init` · `doctor` · `lint` · `score` · `run` · `capture` · `triage` · `harness
 > list`/`info` — see *Commands* below. **Per-feature records live nearest the artifact**: each
 > feature's detailed capsule is its [`Specs/NNN` plan](Specs/README.md) status, with design-only
 > changes in [`skillet-design-changelog.md`](skillet-design-changelog.md); this banner stays a
@@ -46,7 +48,7 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 ## Commands (true now — Phase 1 / F1, F2, F4–F8)
 
 - `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`).
-- `swift test` — run the unit + integration suites (511 tests, all green). The integration suite drives
+- `swift test` — run the unit + integration suites (all green in CI; the count lives in the run output, not here). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
   `skillet init --json`, `skillet doctor [<skill>...] [--json]` (free $0 preflight; exit 3 + remedy on failure),
@@ -64,7 +66,7 @@ Contributing, security disclosure, and code of conduct are handled at the org le
   Historical note: the 2026-06 macOS-only CI failures were an upstream Swift C++-interop bug, fixed
   in swift-yaml (diagnosis + repro live in its `Projects/`); no Swift-version floor beyond Swift 6.
 
-`init`, `doctor`, `lint`, `score`, `run`, `harness list`/`info`, `capture` (scrubbed, scored session bundles — F26/F32), and the claude-code adapter (parse + resolution + probe + live `run` + session capture) are built; `friction`/`next`/… are not yet — see Planned.
+`init`, `doctor`, `lint`, `score`, `run`, `harness list`/`info`, `capture` (scrubbed, scored session bundles — F26/F32), `triage` (free corpus failure taxonomy — F33), and the claude-code adapter (parse + resolution + probe + live `run` + session capture) are built; `friction`/`next`/… are not yet — see Planned.
 
 ## Binding conventions
 
@@ -144,9 +146,9 @@ Treat everything in this section as a target to build toward, not as existing fu
 `LintKit`, `JudgeKit`, `RunKit`, `ProjectKit`, `RenderKit`, and `ConfigYAML` kits + the `skillet`
 executable with `init`/`doctor`/`lint`/`run`/`harness` (see the status banner + Commands above; `doctor`
 is Phase 2's first shipped feature). Phase 2 also shipped `ScoreKit` + `score`; Phase 3 has shipped
-`CorpusKit` + `SanitizerKit` + `capture` (F26/F32). The kits and commands still *planned* are the
-remaining Phase 3+ ones — `AnalysisKit`/`IterateKit`
-and `friction`/`triage`/`next`/`suggest`/`iterate`/`baseline`/`report`/… .
+`CorpusKit` + `SanitizerKit` + `capture` (F26/F32); Phase 4 has shipped `AnalysisKit` + `triage` (F33).
+The kits and commands still *planned* are the remaining Phase 3+ ones — `IterateKit`
+and `friction`/`next`/`suggest`/`iterate`/`baseline`/`report`/… .
 
 ### Package architecture (design §11)
 

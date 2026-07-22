@@ -14,15 +14,14 @@ public enum BodyExtractor {
     ///   - is a **regular** file with link count 1 — skip FIFO/socket/device (a `FileHandle` read blocks
     ///     forever) and hard links (another inode, possibly a host file outside the workspace);
     ///   - is ≤ 1 MiB and decodes as text — binary / oversized / undecodable content is dropped.
-    /// The ordering mirrors the run stager: symlink → regular → hard-link → bounded read.
+    /// The whole policy is the shared `SafeFile.readConfinedRegularText` helper (round 17): confinement
+    /// below `workspace` + the guard order the run stager uses (symlink → regular → hard-link → bounded
+    /// → decode), so this reader can't drift out of sync with the other untrusted-read sites.
     public static func extract(touched: Set<String>, workspace: URL) -> [String: String] {
         var out: [String: String] = [:]
         for path in touched.sorted() {
             let url = workspace.appendingPathComponent(path)
-            guard SafeFile.firstSymlinkOnPath(from: workspace, to: url) == nil else { continue }
-            guard SafeFile.isRegularFile(url), SafeFile.linkCount(url) == 1 else { continue }
-            guard let (data, fullSize) = SafeFile.boundedRead(url, cap: 1 << 20), fullSize <= (1 << 20),
-                  let text = SafeFile.decodeText(data, truncated: false) else { continue }
+            guard case let .success(text) = SafeFile.readConfinedRegularText(url, base: workspace, cap: 1 << 20) else { continue }
             out[path] = text
         }
         return out

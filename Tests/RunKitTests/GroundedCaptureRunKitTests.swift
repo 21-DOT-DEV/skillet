@@ -50,6 +50,25 @@ struct GroundedCaptureRunKitTests {
         #expect(find(produced, "keep.txt") == nil)   // untouched input never graded as output
     }
 
+    @Test("T7: an over-cap staged file is bounded (bytes not held) and, if unchanged, reported as changed — never skipped")
+    func overCapStagedFailsSafe() throws {
+        let wm = WorkspaceManager()
+        let ws = try tempWorkspace(); defer { try? wm.destroy(ws) }
+        // A staged input larger than the snapshot cap: its bytes must NOT be held (the memory bound), only
+        // its size. `Data(repeating:)` is one allocation — no double buffer.
+        let bigURL = ws.root.appendingPathComponent("big-input.txt")
+        try Data(repeating: 0x61, count: WorkspaceManager.stagedSnapshotCap + 1024).write(to: bigURL)
+        let baseline = wm.snapshotStaged(ws)
+        let snap = try #require(baseline["big-input.txt"])
+        #expect(snap.bytes == nil)                                          // over-cap ⇒ no bytes held (the bound)
+        #expect(snap.size == WorkspaceManager.stagedSnapshotCap + 1024)     // true size always kept
+        // The file is left UNCHANGED, yet — equality can't be proven without the bytes — it must be
+        // reported as changed (fail safe), never silently skipped as an untouched input.
+        let produced = wm.readProducedContents(ws, baseline: baseline, perFileCap: 1 << 16, totalCap: 1 << 20)
+        #expect(find(produced, "big-input.txt") != nil)                     // NOT skipped
+        #expect(find(produced, "big-input.txt")?.change == .modified)
+    }
+
     @Test("Per-file cut: a file over the per-file cap is a disclosed prefix")
     func perFileCut() throws {
         let wm = WorkspaceManager()

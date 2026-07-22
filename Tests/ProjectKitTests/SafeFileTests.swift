@@ -1,6 +1,11 @@
 import Testing
 import Foundation
 @testable import ProjectKit
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 /// Direct unit tests for the shared filesystem primitive extracted in F17. The suite covers the two
 /// fiddly parts — the UTF-8-vs-binary decode heuristic and the size-capped read — plus the symlink /
@@ -124,6 +129,60 @@ struct SafeFileTests {
         #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("link/../real")) != nil)
         // A benign `..` (no symlink in the way) stays confined → nil.
         #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("real/../real")) == nil)
+    }
+
+    @Test("firstSymlinkOnPath is sound for a NONEXISTENT tail: confined stays nil, a symlink-escape is caught (T9)")
+    func firstSymlinkOnPathNonexistentTail() throws {
+        let root = tempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("real"), withIntermediateDirectories: true)
+        // A not-yet-created file under a real dir stays confined — the realpath-of-existing-ancestor +
+        // lexical-tail canonicalization must not misjudge a missing tail as an escape.
+        #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("real/newfile.txt")) == nil)
+        // A not-yet-created file UNDER a symlink pointing outside root → escape, caught though the tail
+        // doesn't exist (realpath resolves the existing symlinked ancestor to outside root).
+        let outside = root.deletingLastPathComponent().appendingPathComponent("outside-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("esc"), withDestinationURL: outside)
+        #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("esc/newfile.txt")) != nil)
+    }
+
+    @Test("confinementCanonical resolves the existing ancestor's real path and keeps the missing tail as text (T9)")
+    func confinementCanonicalExistingAncestorPlusTail() throws {
+        let root = tempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        let dir = root.appendingPathComponent("d")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let resolvedRoot = SafeFile.confinementCanonical(root)
+        #expect(SafeFile.confinementCanonical(dir).hasPrefix(resolvedRoot))                                   // existing → realpath under resolved root
+        #expect(SafeFile.confinementCanonical(dir.appendingPathComponent("nope/x")).hasSuffix("/d/nope/x"))   // missing tail kept verbatim
+    }
+
+    @Test("boundedRead refuses a special file via the post-open descriptor check (fstat), never read-as-empty",
+          .timeLimit(.minutes(1)))
+    func boundedReadRefusesSpecialFile() throws {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let fifo = dir.appendingPathComponent("pipe")
+        #expect(mkfifo(fifo.path, 0o644) == 0)
+        // A named pipe opens (O_NONBLOCK) but isn't a regular file — `fstat` on the descriptor refuses it,
+        // so a special file swapped in after the caller's pre-check can't be read as an empty file. The
+        // time limit turns a hang regression into a failure rather than a stuck suite.
+        #expect(SafeFile.boundedRead(fifo, cap: 1 << 20) == nil)
+    }
+
+    @Test("noSymlink is confinement- and boundary-safe: rejects a sibling-prefix path, catches a path symlink (Unknown 2)")
+    func noSymlinkConfinementAndBoundary() throws {
+        let root = tempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        let dir = root.appendingPathComponent("dir")
+        try FileManager.default.createDirectory(at: dir.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        #expect(SafeFile.noSymlink(at: dir.appendingPathComponent("sub"), under: dir) == true)     // clean subpath
+        // A sibling that merely shares a string prefix ("dir" vs "dirlike") must NOT count as under `dir`
+        // — the old raw `dropFirst(count)` split misparsed exactly this (partial path traversal).
+        let sibling = root.appendingPathComponent("dirlike")
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+        #expect(SafeFile.noSymlink(at: sibling.appendingPathComponent("f"), under: dir) == false)  // not under dir → refused
+        // A symlink on the path is still caught.
+        try FileManager.default.createSymbolicLink(at: dir.appendingPathComponent("link"), withDestinationURL: root)
+        #expect(SafeFile.noSymlink(at: dir.appendingPathComponent("link/x"), under: dir) == false)
     }
 
     @Test("boundedRead refuses a symlink at the open — O_NOFOLLOW closes the check-then-open race (round 16)")

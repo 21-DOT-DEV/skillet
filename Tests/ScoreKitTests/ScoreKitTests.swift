@@ -164,4 +164,25 @@ struct ScoreKitTests {
         let r3 = SarifRegionCompute.region(for: crlf.range(of: "delve")!, in: crlf)
         #expect(r3.startLine == 2 && r3.startColumn == 1)
     }
+
+    @Test("A hard-linked input is refused with an S000 disclosure, never scored — closes T1 (round 17)")
+    func hardLinkedInputIsRefusedNotScored() throws {
+        // Sloppy content that WOULD fire S001 if a hard link's inode reached a density scorer.
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("score-out-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        let secret = outside.appendingPathComponent("secret.md")
+        try Data("This delve into the intricate tapestry is a crucial testament indeed.".utf8).write(to: secret)
+
+        let scoreDir = FileManager.default.temporaryDirectory.appendingPathComponent("score-in-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: scoreDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: scoreDir) }
+        try FileManager.default.linkItem(at: secret, to: scoreDir.appendingPathComponent("hard.md"))   // hard link across the boundary
+
+        let out = ScoreRunner(toolVersion: "0.0.0").run(path: scoreDir, config: SkilletConfig.Scorers())
+        // T1: the hard-linked inode's content must NOT influence the score…
+        #expect(!out.report.findings.contains { $0.ruleId == "SKILL-S001" })
+        // …it is disclosed as not-scored (S000) with the shared hard-link reason.
+        #expect(out.report.findings.contains { $0.ruleId == "SKILL-S000" && $0.message.contains("hard link") })
+    }
 }

@@ -216,6 +216,27 @@ struct TriageIntegrationTests {
         #expect(out.stdout.contains("records were not counted"))                   // consequence spelled out
     }
 
+    @Test("A present-but-unreadable evidence directory is disclosed, never treated as empty (round 17)")
+    func unreadableEvidenceDirectoryIsDisclosed() async throws {
+        let version = try await Self.currentVersion()
+        let root = try Self.makeTriageRepo(bundles: [("2026-06-01-a", version, [("SKILL-S001", "warning", "m")])])
+        defer { Fixture.remove(root) }
+        let findingsDir = root.appendingPathComponent("skills/demo/evaluations/findings")
+        try FileManager.default.createDirectory(at: findingsDir, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: findingsDir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: findingsDir.path) }
+
+        let out = try await SkilletHarness().run(["-C", root.path, "triage"])
+        #expect(out.exitCode == 0)   // a reporter surfaces the problem, it does not fail on it
+        // chmod 000 only blocks a NON-root reader; if this process (some CI runs as root) can still list
+        // the directory, the scenario doesn't apply — the subprocess runs as the same user, so gate on it.
+        let stillListable = (try? FileManager.default.contentsOfDirectory(atPath: findingsDir.path)) != nil
+        if !stillListable {
+            #expect(out.stdout.contains("findings"))
+            #expect(out.stdout.contains("directory unreadable"))
+        }
+    }
+
     @Test("Multi-skill footer targets the skill that produced results, not whichever sorted first (round 12)")
     func multiSkillFooterTargetsTheProductiveSkill() async throws {
         let version = try await Self.currentVersion()

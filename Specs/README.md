@@ -28,3 +28,5 @@ roadmap re-phasing.
 | 013 | Capture a session as evidence (`skillet capture`) | 3 · F26 | Implemented | [plan.md](013-capture-session-evidence/plan.md) |
 | 014 | Capture secret-sanitization (`skillet capture` redact-by-default) | 3 · F32 | Implemented | [plan.md](014-capture-secret-sanitization/plan.md) |
 | 015 | Structured friction & finding evidence + lifecycle (`skillet.friction/1` / `skillet.finding/1`) | 3 · F29 | Implemented (2026-07-17) | [plan.md](015-friction-finding-evidence/plan.md) |
+| 016 | Corpus triage — Track A failure taxonomy (`skillet triage`) | 4 · F33 | Implemented (2026-07-19) | [plan.md](016-corpus-triage/plan.md) |
+| 017 | Security hardening — untrusted file-I/O audit (evidence table + tracked follow-ups) | cross-cutting | Audit complete (2026-07-21); T1–T11 tracked | [plan.md](017-security-hardening/plan.md) |

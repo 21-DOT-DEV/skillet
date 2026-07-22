@@ -126,6 +126,30 @@ struct SafeFileTests {
         #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("real/../real")) == nil)
     }
 
+    @Test("boundedRead refuses a symlink at the open — O_NOFOLLOW closes the check-then-open race (round 16)")
+    func boundedReadRefusesSymlinkAtOpen() throws {
+        let dir = tempDir(); defer { try? FileManager.default.removeItem(at: dir) }
+        let real = dir.appendingPathComponent("real.txt")
+        try Data("hi".utf8).write(to: real)
+        let link = dir.appendingPathComponent("link.txt")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: real)
+        #expect(SafeFile.boundedRead(link, cap: 1 << 20) == nil)                   // O_NOFOLLOW → open fails
+        #expect(SafeFile.boundedRead(real, cap: 1 << 20)?.data == Data("hi".utf8)) // a real file still reads
+    }
+
+    @Test("firstSymlinkOnPath resolves `..` lexically (round 14): deep benign `..` confined; a `..` above base escapes; a symlink in a popped branch still caught")
+    func firstSymlinkOnPathLexicalDotDot() throws {
+        let root = tempDir(); defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("a/b"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("c"), withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("s"),
+                                                   withDestinationURL: root.appendingPathComponent("c"))
+        // `a/b/../../c` pops back to root, then into real `c` → confined (deterministic, no OS `..` reliance).
+        #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("a/b/../../c")) == nil)
+        // `s/../c` — the symlink `s` is visited (and caught) BEFORE the `..` pops it.
+        #expect(SafeFile.firstSymlinkOnPath(from: root, to: root.appendingPathComponent("s/../c")) != nil)
+    }
+
     @Test("firstSymlinkOnPath handles the filesystem-root base (/) — a child is confined, not an escape")
     func firstSymlinkOnPathRootBase() {
         let slash = URL(fileURLWithPath: "/")

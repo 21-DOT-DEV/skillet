@@ -4,6 +4,11 @@ import EDDCore
 import HarnessKit
 import JudgeKit
 import RunKit
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 @Suite("Trigger axis — stub staging + deterministic loop (F14)")
 struct TriggerAxisRunKitTests {
@@ -63,6 +68,25 @@ struct TriggerAxisRunKitTests {
         let alphaStub = try String(contentsOf: staging.workspace.root.appendingPathComponent(".claude/skills/alpha/SKILL.md"), encoding: .utf8)
         #expect(alphaStub.contains("description: does alpha things"))
         #expect(!alphaStub.contains("secret body content"))   // bodies withheld (§9.2)
+    }
+
+    @Test("A FIFO SKILL.md is skipped instantly, never read (round 11 — the per-trial TOCTOU window)")
+    func fifoSkillMDSkipped() throws {
+        // Staging runs per trial, AFTER the once-per-run safe-read preflight — a SKILL.md swapped for
+        // a FIFO in that window hung the old unguarded read forever. The safe reader refuses on a
+        // pre-open stat, so this test HANGS if the guard ordering ever regresses.
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("skillet-trig-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: base) }
+        let good = try makeSkill("alpha", in: base)
+        let trap = try makeSkill("trap", in: base)
+        let trapMD = URL(fileURLWithPath: trap.path).appendingPathComponent("SKILL.md")
+        try FileManager.default.removeItem(at: trapMD)
+        #expect(mkfifo(trapMD.path, 0o644) == 0)
+
+        let staging = try WorkspaceManager().prepareTrigger(corpus: [good, trap], base: base, label: "ws-fifo")
+        defer { try? WorkspaceManager().destroy(staging.workspace) }
+        #expect(staging.staged == ["alpha"])
+        #expect(staging.skipped == ["trap"])
     }
 
     @Test("A symlinked sibling skill FOLDER is skipped, never staged from outside the repo")

@@ -311,8 +311,12 @@ struct CaptureCommand: AsyncParsableCommand {
 
     private func textSummary(_ artifacts: SessionBundleWriter.Artifacts, report: SanitizationReport, corrective: [CorrectiveTurn]) -> String {
         var lines = ["captured \(artifacts.bundleStem).* (\(artifacts.written.count) files, \(report.redactions ?? 0) redactions)"]
+        let registered = Set(SkilletCommand.configuration.subcommands.compactMap { $0.configuration.commandName })
+        // F33: the captured bundle is triage's raw material — suggest the Interpret step (guarded).
+        if registered.contains("triage") {
+            lines.append("→ mine the corpus for recurring failures: skillet triage \(skill)")
+        }
         if !corrective.isEmpty {
-            let registered = Set(SkilletCommand.configuration.subcommands.compactMap { $0.configuration.commandName })
             if registered.contains("friction") {
                 lines.append("→ looks like you hand-fixed something: skillet friction add --skill \(skill) --sessions \(artifacts.bundleStem)")
             } else {

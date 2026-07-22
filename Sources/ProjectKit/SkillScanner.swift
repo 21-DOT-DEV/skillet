@@ -10,7 +10,13 @@ public struct SkillScanner: Sendable {
 
     /// Skills found as immediate subdirectories of `skillsRoot`, sorted for deterministic output.
     public func scan(skillsRoot: URL) -> [URL] {
-        probe.subdirectories(of: skillsRoot)
+        // Never follow a **symlinked skills-root** (round 14): discovery runs before any per-command
+        // confinement check, and a `skills -> /elsewhere` symlink would let `contentsOfDirectory`
+        // enumerate directory names outside the project *on platforms where it follows dir symlinks*
+        // (macOS returns [] here, but that's Foundation-version behavior, not a contract — Linux may
+        // differ). Refuse it deterministically on every platform: no skills, no enumeration.
+        guard !SafeFile.isSymlink(skillsRoot) else { return [] }
+        return probe.subdirectories(of: skillsRoot)
             .filter { probe.exists(named: "SKILL.md", in: $0) }
             .sorted { $0.path < $1.path }
     }

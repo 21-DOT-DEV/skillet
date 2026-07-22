@@ -12,10 +12,8 @@ public enum ConfigLoader {
         try YAMLDecoder().decode(SkilletConfig.self, from: yaml)
     }
 
-    /// Load `<root>/skillet.yaml` if present; `nil` when absent.
-    public static func load(from root: URL) throws -> SkilletConfig? {
-        let url = root.appendingPathComponent("skillet.yaml")
-        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try decode(String(contentsOf: url, encoding: .utf8))
-    }
+    // NOTE (F33 security pass): the file-reading `load(from:)` was removed — its unguarded, unbounded
+    // `String(contentsOf:)` let a FIFO named `skillet.yaml` hang every command at config load. The sole
+    // caller (`ConfigSupport.loadConfigWithOrigin`) now reads via `SafeFile.readPlainText` and feeds
+    // `decode`; this seam stays pure text → `SkilletConfig`.
 }

@@ -69,7 +69,16 @@ struct DoctorCommand: AsyncParsableCommand {
                     rows += Self.visibilityRows(skill: name, audit: audit, adapter: adapter)
                 }
                 rows.append(Self.triggerEvalsRow(skill: name, directory: skillDir))
-                rows += try Self.lintRows(skill: name, directory: skillDir, config: config?.lint ?? .init())
+                do {
+                    rows += try Self.lintRows(skill: name, directory: skillDir, config: config?.lint ?? .init())
+                } catch let error as EDDError {
+                    // One-pass doctor (this command's own contract: never fix-one-rerun-discover-next):
+                    // a refused lint-input read — a symlinked/special/hard-linked SKILL.md under the F33
+                    // safe-read guards — becomes a failure ROW beside the visibility findings, not a
+                    // whole-command abort that would hide every other check.
+                    rows.append(.failure(check: DoctorReport.Check.skillLint, subject: name,
+                                         message: error.message, remedy: error.remedy))
+                }
             }
 
             let report = DoctorReport(rows: rows)

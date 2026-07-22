@@ -12,6 +12,43 @@ public struct SarifLog: RawJSONObject {
     public var version: String? { fields["version"]?.stringValue }
     public var schemaURI: String? { fields["$schema"]?.stringValue }
     public var runs: [JSONValue] { fields["runs"]?.arrayValue ?? [] }
+
+    // MARK: Read accessors (F33 triage)
+
+    /// The first run's `tool.driver.version` — the scorer version recorded at capture time, which
+    /// triage compares against the running version for its staleness note (Specs/016 D1). Tolerant
+    /// raw traversal (this type's whole posture): any missing link yields `nil`, never a throw.
+    public var toolVersion: String? {
+        runs.first?.objectValue?["tool"]?.objectValue?["driver"]?.objectValue?["version"]?.stringValue
+    }
+
+    /// Every run's `results[]`, sliced to the fields triage clusters on. Tolerant: a result missing a
+    /// field slices to `nil`s (the consumer decides how to disclose it); a foreign tool's bare-string
+    /// `message` (nonstandard but seen in the wild) is accepted alongside the spec's `{text:}` object.
+    public var resultSlices: [SarifResultSlice] {
+        runs.flatMap { run -> [SarifResultSlice] in
+            (run.objectValue?["results"]?.arrayValue ?? []).map { result in
+                let object = result.objectValue
+                let message = object?["message"]?.objectValue?["text"]?.stringValue
+                    ?? object?["message"]?.stringValue
+                return SarifResultSlice(
+                    ruleId: object?["ruleId"]?.stringValue,
+                    level: object?["level"]?.stringValue,
+                    message: message)
+            }
+        }
+    }
+}
+
+/// One SARIF result reduced to the triage-relevant fields (F33). `level` stays a raw string — an
+/// unrecognized future level survives to the report rather than hard-failing an enum (tolerant reader).
+public struct SarifResultSlice: Sendable, Equatable {
+    public let ruleId: String?
+    public let level: String?
+    public let message: String?
+    public init(ruleId: String?, level: String?, message: String?) {
+        self.ruleId = ruleId; self.level = level; self.message = message
+    }
 }
 
 /// The role a captured SARIF file plays in the A/B audit (design §9.4) — carried in the file *name*

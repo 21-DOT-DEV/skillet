@@ -207,7 +207,11 @@ public struct WorkspaceManager: Sendable {
             // symlinks when staging", at every level.
             guard !SkillBundleRules.isSymlink(skillDir),
                   !SkillBundleRules.isSymlink(source),
-                  let markdown = try? String(contentsOf: source, encoding: .utf8),
+                  // Safe read (round 11): this runs PER TRIAL, after the once-per-run preflight — a
+                  // SKILL.md swapped for a FIFO in that window hung the old unguarded
+                  // `String(contentsOf:)` mid-run (the TOCTOU variant of the F33 hang class). A
+                  // refusal skips the stub exactly like a missing frontmatter fence.
+                  case let .success(markdown) = SafeFile.readPlainText(source, cap: 1 << 20),
                   let stub = Self.frontmatterStub(markdown: markdown) else {
                 skipped.append(skill.name)
                 continue

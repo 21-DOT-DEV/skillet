@@ -96,6 +96,18 @@ public struct Renderer: Sendable {
         }
     }
 
+    /// `skillet triage`'s output (F33): per skill — staleness/coverage notes, the ranked cluster
+    /// table with routing hypotheses, friction joins, disclosures — or the `skillet.triage/1`
+    /// payload (json). A reporter: the renderer never decides an exit code.
+    public func renderTriage(_ report: TriageReport, nextSteps: [String] = []) throws -> Rendering {
+        switch mode {
+        case .json:
+            return Rendering(stdout: try SkilletJSON.encode(report) + "\n")
+        case .human:
+            return Rendering(stdout: humanTriage(report, nextSteps: nextSteps))
+        }
+    }
+
     /// A generic aligned table for plumbing/listing output (e.g. `harness info`). Column widths come
     /// from the widest cell; the last column is left unpadded to avoid trailing whitespace.
     public func renderTable(_ headers: [String], _ rows: [[String]]) -> Rendering {
@@ -231,6 +243,79 @@ public struct Renderer: Sendable {
             if let remedy = row.remedy {
                 out += "      fix: \(remedy)\n"
             }
+        }
+        if !nextSteps.isEmpty {
+            out += "\(bold("→ next:")) \(nextSteps.joined(separator: " · "))\n"
+        }
+        return out
+    }
+
+    private func humanTriage(_ report: TriageReport, nextSteps: [String]) -> String {
+        var out = ""
+        if report.skills.isEmpty {
+            out += "no skills found — nothing to triage\n"
+        }
+        for skillReport in report.skills {
+            out += bold("triage — \(skillReport.skill)") + "\n"
+            if skillReport.totalRecordings == 0 {
+                // Distinguish "nothing captured yet" from "candidates found but none usable": the
+                // latter must surface every skipped input (the dead-letter channel — round 5). A
+                // bare "no recordings" would hide an unreadable sessions dir or all-corrupt bundles.
+                if skillReport.disclosures.isEmpty {
+                    out += "  no recordings yet — capture a session to give triage a corpus\n"
+                } else {
+                    out += "  no usable recordings — every candidate was skipped:\n"
+                    for disclosure in skillReport.disclosures {
+                        out += "  ! \(disclosure.subject): \(disclosure.reason)\n"
+                    }
+                }
+                continue
+            }
+            // Corpus-health notes first (staleness D1, coverage A7) — before any cluster claims.
+            if skillReport.staleRecordings > 0 {
+                out += "  ! \(skillReport.staleRecordings) of \(skillReport.totalRecordings) recording(s) scored by a different skillet version — re-capture (or a future --rescore) to refresh\n"
+            }
+            if skillReport.unreadableHits > 0 {
+                out += "  note: \(skillReport.unreadableHits) unreadable-file disclosure(s) in the cached scores (coverage, not a failure cluster)\n"
+            }
+            if skillReport.clusters.isEmpty {
+                out += "  ✓ no failure clusters — cached scorer findings are clean\n"
+            } else {
+                let rows = skillReport.clusters.map { cluster -> [String] in
+                    let status: String
+                    // The FILE column reads the finalized outcome straight from `fileStatus` (round 15):
+                    // no inference, and a write error is never mislabeled "a file exists".
+                    let path = "findings/\(cluster.findingId).md"
+                    switch cluster.fileStatus {
+                    case "new": status = "new: \(path)"                                   // --dry-run preview (would write)
+                    case "written": status = "written: \(path)"
+                    case "blocked-exists": status = "blocked — \(path) already exists (see note)"
+                    case "write-failed": status = "write failed — \(path) (see note)"
+                    case "closed-still-firing": status = "closed — still firing; reopen if it's back"
+                    default: status = "exists (\(cluster.state?.rawValue ?? "?"))"
+                    }
+                    return [cluster.cluster, "\(cluster.hits)",
+                            "\(cluster.recordings.count)/\(cluster.totalRecordings)",
+                            cluster.worstLevel, "\(cluster.lever.rawValue) (hypothesis)",
+                            cluster.confidence.rawValue, status]
+                }
+                out += renderTable(["CLUSTER", "HITS", "RECS", "WORST", "LEVER", "CONF", "FILE"], rows).stdout
+                for cluster in skillReport.clusters where !cluster.linkedFriction.isEmpty {
+                    out += "  ↳ \(cluster.cluster) shares session(s) with friction: \(cluster.linkedFriction.joined(separator: ", "))\n"
+                }
+                out += "  routing is a hypothesis, not a verdict — edit a finding's `lever` to re-route\n"
+            }
+            for disclosure in skillReport.disclosures {
+                out += "  ! \(disclosure.subject): \(disclosure.reason)\n"
+            }
+            if !report.dryRun, !skillReport.written.isEmpty {
+                out += "  wrote \(skillReport.written.count) finding file(s): \(skillReport.written.joined(separator: ", "))\n"
+            }
+        }
+        // Run-level, once (round 4: inside the loop it repeated per skill on multi-skill runs —
+        // dry-run is a property of the invocation, not of a skill).
+        if report.dryRun {
+            out += "(dry-run: no files written)\n"
         }
         if !nextSteps.isEmpty {
             out += "\(bold("→ next:")) \(nextSteps.joined(separator: " · "))\n"

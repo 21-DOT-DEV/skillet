@@ -71,8 +71,11 @@ struct CaptureIntegrationTests {
         let root = try Fixture.makeTempDirectory(); defer { Fixture.remove(root) }
         try "project:\n  skills_root: \"../../..\"\n".write(
             to: root.appendingPathComponent("skillet.yaml"), atomically: true, encoding: .utf8)
+        // F33 security pass: the shared config seam now rejects a hostile skills_root for EVERY command
+        // (accept-known-good at the trust boundary), so this fails as a config-ARTIFACT error (exit 4)
+        // before capture's own deeper guard — which stays in place as layered defense.
         let out = try await SkilletHarness().run(["capture", "--skill", "demo", "--slug", "x"], workingDirectory: root)
-        #expect(out.exitCode == 2)
-        #expect(out.stderr.contains("outside the project") && out.stderr.contains("escapes"))
+        #expect(out.exitCode == 4)
+        #expect(out.stderr.contains("skills_root") && out.stderr.contains("'..'"))
     }
 }

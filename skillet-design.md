@@ -3,12 +3,12 @@
 
 | | |
 |---|---|
-| **Status** | Draft v0.52 — for review |
+| **Status** | Draft v0.54 — for review |
 | **Name** | `skillet` (settled — SKILL · E · T, the *SKILL.md Evaluation Toolkit*); EDD remains the methodology's name |
 | **Deliverable** | Public, open-source, multi-harness Swift CLI |
 | **Supersedes** | The repo-private `swift-skill-eval` tool + the Python trigger harness |
 | **Decision provenance** | §2 — every load-bearing choice here was settled in the design Q&A |
-| **Revision log** | Extracted to [skillet-design-changelog.md](skillet-design-changelog.md) (v0.1 → v0.52, latest first, one linkable heading per version; historical entries never rewritten). Latest — v0.52 (2026-07-17): **F29 SHIPPED** — structured `skillet.friction/1` + `skillet.finding/1` evidence formats + a typed lifecycle enforced by a centralized `EDDCore` validator; the `ConfigYAML` `EvidenceFrontmatter` seam with native duplicate-key rejection (`swift-yaml` pin bumped); library layer only (the `friction` commands are F30); §7.3 + §7.6 rippled. (v0.51: **F26 + F32 SHIPPED** — `skillet capture` records a secret-scrubbed, scored session bundle.) (Specs/015.) |
+| **Revision log** | Extracted to [skillet-design-changelog.md](skillet-design-changelog.md) (v0.1 → v0.54, latest first, one linkable heading per version; historical entries never rewritten). Latest — v0.54 (2026-07-21): **§6.1 `triage` shipping-slice annotation** (capture's v0.51 precedent) — F33 ships Track A only; `--code-feedback`/Track B stays the designed end-state (Phase 8) and the contradictions banner is F34's, its slot reserved; the synopsis itself is unchanged (the design doc documents the end state; the annotation marks what's real today). (v0.53: `--write` dropped, write semantics settled. v0.52: **F29 SHIPPED**.) (Specs/016, Specs/015.) |
 
 ---
 
@@ -461,7 +461,7 @@ ID                                   DOMAIN      LEVER     EVIDENCE  STATE
 #### `skillet triage`
 
 ```
-skillet triage [<skill>] [--code-feedback] [--since <date>] [--write|--dry-run]
+skillet triage [<skill>] [--code-feedback] [--since <date>] [--dry-run]
 ```
 
 The Interpret step: error analysis across the whole session corpus, not a pass-rate.
@@ -469,9 +469,13 @@ The Interpret step: error analysis across the whole session corpus, not a pass-r
 - **Track A** (free, deterministic): scorers over every bundle, clustered by signal; baseline drift (§6.1 `baseline`) feeds producer-skill candidates in here
 - **Track B** (`--code-feedback`, paid): the Judge axially codes corrective turns from normalized traces — *what did the human have to fix?* (it groups observed corrections; it never invents failures)
 
+*(Shipping slice: **F33 ships Track A only** — clustering each bundle's cached scorer SARIF into routed `skillet.finding/1` files; the `--code-feedback` flag is not registered until Track B lands (Phase 8, §13). The scorer↔judge **contradictions** banner below arrives with **F34** — its print-first slot is reserved in the output order. Specs/016.)*
+
 Scorer↔judge **contradictions print first**, above the taxonomy — "⚠ contradictions (N): triage before trusting the verdict" — because a disagreement between a deterministic scorer and the judge on the same expectation is the calibration alarm that silently inflates or deflates every pass rate (§8).
 
 Output is a failure taxonomy; each cluster becomes a **finding** file (§7.3) routed to its cheapest lever, auto-linked to friction events that share sessions. Routing prints with its standing caveat — *a hypothesis, not a verdict* — and the table ends with `skillet next`, where findings and friction jointly feed the gates.
+
+**Write semantics (settled at F33 planning, Specs/016 D3):** findings write **by default** — producing them is the command's job — with `--dry-run` as the preview (no `--write` flag: a flag restating the default is the no-op-default anti-pattern removed once already, `capture --last`, v0.51). A re-run only *adds* missing clusters: an existing finding file is never modified, and a still-firing cluster whose finding a human closed is reported, never auto-reopened (the code-scanning dismissal model; D6 — no implicit transitions).
 
 The two tracks run over the corpus and merge into routed findings — contradictions surfaced first:
 

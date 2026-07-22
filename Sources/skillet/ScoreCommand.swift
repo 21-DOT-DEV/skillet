@@ -79,9 +79,10 @@ struct ScoreCommand: AsyncParsableCommand {
     }
 
     /// Suggest the next loop steps that exist today (registration-filtered, like `LintCommand`).
+    /// `triage` joins the list with F33 — score's findings feed it (design §6.1: score "feeds triage/§8").
     static func nextSteps() -> [String] {
         let registered = Set(SkilletCommand.configuration.subcommands.compactMap { $0.configuration.commandName })
-        let available = ["lint", "run"].filter { registered.contains($0) }.map { "skillet \($0)" }
+        let available = ["lint", "run", "triage"].filter { registered.contains($0) }.map { "skillet \($0)" }
         return available.isEmpty ? ["skillet --help"] : available
     }
 }

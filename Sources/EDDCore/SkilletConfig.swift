@@ -25,6 +25,20 @@ public struct SkilletConfig: Codable, Sendable, Equatable {
         public var skillsRoot: String?
         public init(skillsRoot: String? = nil) { self.skillsRoot = skillsRoot }
         enum CodingKeys: String, CodingKey { case skillsRoot = "skills_root" }
+
+        /// Accept-known-good rule for `skills_root` (F33 security pass; T8 fixed): the value names a
+        /// folder **inside** the project, so it must be a plain relative subpath — an absolute path or
+        /// any `..` segment would make every command's skill discovery enumerate directories *outside*
+        /// the project before per-command confinement kicks in (CWE-22; OWASP: validate external
+        /// config at the boundary with an allowlist rule, keep deeper guards as layers). Segment-wise:
+        /// a folder legitimately named `my..skills` passes; a lone or embedded `..` segment does not.
+        /// Returns the violation to report, or `nil` when the value is safe.
+        public static func skillsRootViolation(_ value: String) -> String? {
+            if value.isEmpty { return "is empty" }
+            if value.hasPrefix("/") { return "is an absolute path" }
+            if value.split(separator: "/").contains("..") { return "contains a '..' path segment" }
+            return nil
+        }
     }
 
     /// The `harness:` mapping — modeled keys only (`default`, `matrix`, and the per-harness entries we

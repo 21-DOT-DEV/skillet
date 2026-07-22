@@ -126,7 +126,14 @@ struct RunCommand: AsyncParsableCommand {
             if triggerCases != nil {
                 // The trigger axis stages a frontmatter-only stub of the target — verify the fence
                 // extracts BEFORE any spend, or every trial would be an unmeasured staging failure.
-                let markdown = (try? String(contentsOf: skillDir.appendingPathComponent("SKILL.md"), encoding: .utf8)) ?? ""
+                // Safe read (F33 security pass): the previous unguarded `String(contentsOf:)` meant a
+                // FIFO SKILL.md hung here pre-spend (and a refused read mislabeled as "no fence").
+                let markdown: String
+                switch SafeFile.readPlainText(skillDir.appendingPathComponent("SKILL.md"), cap: 1 << 20) {
+                case let .success(text): markdown = text
+                case let .failure(refusal):
+                    throw EDDError.invalidArtifact(path: "\(skillName)/SKILL.md", reason: "SKILL.md \(refusal.reason)")
+                }
                 guard WorkspaceManager.frontmatterStub(markdown: markdown) != nil else {
                     throw EDDError.invalidArtifact(
                         path: "\(skillName)/SKILL.md",
@@ -584,22 +591,26 @@ struct RunCommand: AsyncParsableCommand {
         // carried from the previously committed file, so a --axis trigger run can't destroy the
         // behavioral record (or vice versa). An unreadable prior is treated as absent, never fatal.
         let benchmarkURL = evalDir.appendingPathComponent("benchmark.json")
-        let prior = (try? Data(contentsOf: benchmarkURL)).flatMap { try? JSONDecoder().decode(BenchmarkFile.self, from: $0) }
+        // Safe read (F33 security pass): the prior is repo-controlled; a planted FIFO benchmark.json
+        // previously hung the record-writer AFTER spend. A refusal reads as absent — the atomic write
+        // below then REPLACES the planted entry (rename, never opened): the self-healing path.
+        let priorData: Data? = { if case let .success(d) = SafeFile.readPlainData(benchmarkURL, cap: 8 << 20) { return d } else { return nil } }()
+        let prior = priorData.flatMap { try? JSONDecoder().decode(BenchmarkFile.self, from: $0) }
         try encoder.encode(BenchmarkFile(
             skill: report.skill,
             behavioral: behavioral.map { (report: report, evals: $0.evals) },
             baseline: baseline,
             trigger: trigger, harness: harness, k: k, provenance: provenance, preserving: prior
-        )).write(to: benchmarkURL)
+        )).write(to: benchmarkURL, options: [.atomic])   // atomic: rename over a planted entry, never open it (F33)
         // grading.json is judge output — written only when the behavioral axis ran (a trigger-only
         // run has no verdicts and must not blank the committed grading record).
         if let behavioral {
             try encoder.encode(GradingFile(evals: behavioral.evals, provenance: provenance))
-                .write(to: evalDir.appendingPathComponent("grading.json"))
+                .write(to: evalDir.appendingPathComponent("grading.json"), options: [.atomic])
         }
         if let runJSON = try? SkilletJSON.encode(report) {
             try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-            try? Data(runJSON.utf8).write(to: base.appendingPathComponent("run.json"))
+            try? Data(runJSON.utf8).write(to: base.appendingPathComponent("run.json"), options: [.atomic])
         }
     }
 

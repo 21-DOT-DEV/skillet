@@ -4,6 +4,20 @@ import EDDCore
 
 @Suite("Run + judge config")
 struct RunConfigTests {
+    @Test("skills_root accept-known-good rule: plain relative subpaths only (F33 security pass)")
+    func skillsRootValidation() {
+        // Safe: plain relative subpaths — including a folder whose NAME contains dots (segment-wise rule).
+        for ok in ["skills", "nested/skills", "my..skills", "a/b/c", "./skills"] {
+            #expect(SkilletConfig.Project.skillsRootViolation(ok) == nil, "expected '\(ok)' to pass")
+        }
+        // Rejected: escapes and absolutes — the enumeration-outside-the-project vectors.
+        #expect(SkilletConfig.Project.skillsRootViolation("..") == "contains a '..' path segment")
+        #expect(SkilletConfig.Project.skillsRootViolation("../../..") == "contains a '..' path segment")
+        #expect(SkilletConfig.Project.skillsRootViolation("skills/../..") == "contains a '..' path segment")
+        #expect(SkilletConfig.Project.skillsRootViolation("/etc") == "is an absolute path")
+        #expect(SkilletConfig.Project.skillsRootViolation("") == "is empty")
+    }
+
     // Decoded via JSON (EDDCore is YAML-free); the real YAML decode of the template is in ConfigYAMLTests.
     @Test("Runs: an absent block uses the shipped defaults")
     func runsDefaults() throws {

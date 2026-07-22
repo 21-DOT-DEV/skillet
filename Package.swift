@@ -55,6 +55,10 @@ let package = Package(
         // Free, model-free deterministic output scorers → SARIF (F17). Reads produced text via ProjectKit's
         // SafeFile; emits EDDCore's SarifDocument / ScoreReport. No network, no subprocess.
         .target(name: "ScoreKit", dependencies: ["EDDCore", "ProjectKit"]),
+        // The design §11 "Interpret" kit (F33 ships its first slice: failure taxonomy + lever routing).
+        // Functional-core/imperative-shell split: the pure TriageEngine clusters already-decoded inputs;
+        // the effectful CorpusLoader enumerates + decodes bundles (symlink-guarded via ProjectKit).
+        .target(name: "AnalysisKit", dependencies: ["EDDCore", "ProjectKit"]),
         // Session-bundle write/read owner (F26): the `BundleText` value (carries the structured Trace),
         // the async `Sanitizer` seam + no-op test double, the `Redactable` recursive-scrub protocol, and
         // the bundle writer (enforced-path: requires a scan report). Pure + ProjectKit filesystem.
@@ -109,6 +113,7 @@ let package = Package(
                 "RunKit",
                 "CorpusKit",      // F26: bundle writer, transcript render, scrub seam
                 "SanitizerKit",   // F32: the real BetterleaksSanitizer (capture is exposure-gated on it)
+                "AnalysisKit",    // F33: triage engine + corpus loader (Interpret step)
                 // Config loading. Importing ConfigYAML pulls in C++ interop (viral to direct
                 // importers), so this leaf target is .Cxx too; the kits + pure core stay interop-free.
                 "ConfigYAML"
@@ -126,6 +131,7 @@ let package = Package(
         .testTarget(name: "JudgeKitTests", dependencies: ["JudgeKit"]),
         .testTarget(name: "RunKitTests", dependencies: ["RunKit", "ProjectKit"]),
         .testTarget(name: "ScoreKitTests", dependencies: ["ScoreKit"]),
+        .testTarget(name: "AnalysisKitTests", dependencies: ["AnalysisKit"]),
         .testTarget(name: "SanitizerKitTests", dependencies: ["SanitizerKit"]),
         .testTarget(name: "CorpusKitTests", dependencies: ["CorpusKit"]),
         // Consumer of ConfigYAML — must also enable C++ interop (it's viral to direct importers).

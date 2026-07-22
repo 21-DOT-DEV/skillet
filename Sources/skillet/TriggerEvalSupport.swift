@@ -1,6 +1,7 @@
 import Foundation
 import EDDCore
 import HarnessKit
+import ProjectKit
 
 /// The one shared answer to "can this skill's trigger-test file actually run?" — used by **both**
 /// `run` (to load cases) and `doctor` (to predict `run`), so the two can never disagree again.
@@ -30,8 +31,14 @@ func loadTriggerEvals(skillDir: URL) -> TriggerEvalsLoad {
         return .invalid(reason: "evaluations/ or trigger-eval.json is a symlink (not allowed)")
     }
     guard FileManager.default.fileExists(atPath: url.path) else { return .absent }
-    guard let data = try? Data(contentsOf: url),
-          let file = try? JSONDecoder().decode(TriggerEvalFile.self, from: data) else {
+    // Safe read (F33 security pass): `doctor` runs this on its default path — the previous unguarded
+    // `Data(contentsOf:)` meant a FIFO named trigger-eval.json hung the whole preflight.
+    let data: Data
+    switch SafeFile.readPlainData(url, cap: 4 << 20) {
+    case let .success(bytes): data = bytes
+    case let .failure(refusal): return .invalid(reason: "trigger-eval.json \(refusal.reason)")
+    }
+    guard let file = try? JSONDecoder().decode(TriggerEvalFile.self, from: data) else {
         return .invalid(reason: "not valid trigger-eval.json (a JSON array of {query, should_trigger})")
     }
     // Validate the RAW array, not the codec's `cases` accessor: the frozen codec deliberately

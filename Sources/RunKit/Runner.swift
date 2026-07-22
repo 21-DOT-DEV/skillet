@@ -98,7 +98,7 @@ public struct Runner {
         // F16: hash the staged inputs BEFORE the run, so post-run we can capture only what the skill
         // *produced or changed* (created + modified), not leftover inputs — the snapshot-diff (D-6).
         // Only under the grounded policy; the text path skips this entirely (no cost).
-        let stagedBaseline: [String: Data] = { if case .withContents = evidencePolicy { return workspaces.snapshotStaged(workspace) } else { return [:] } }()
+        let stagedBaseline: [String: StagedSnapshot] = { if case .withContents = evidencePolicy { return workspaces.snapshotStaged(workspace) } else { return [:] } }()
         // Capture the produced/changed contents under the grounded policy — a pure filesystem snapshot
         // diff (no trace needed), so it works on failure paths too; `nil` under the text policy. An
         // **empty** produced set is itself evidence (a "wrote file X" criterion that wrote nothing), so
@@ -259,16 +259,16 @@ public struct Runner {
         try? fm.createDirectory(at: trialDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
-        if let raw { try? Data(raw.utf8).write(to: trialDir.appendingPathComponent("raw.jsonl")) }
+        if let raw { try? Data(raw.utf8).write(to: trialDir.appendingPathComponent("raw.jsonl"), options: .atomic) }
         if let trace, let json = try? SkilletJSON.encode(trace) {
-            try? Data(json.utf8).write(to: trialDir.appendingPathComponent("trace.json"))
+            try? Data(json.utf8).write(to: trialDir.appendingPathComponent("trace.json"), options: .atomic)
         }
         if let data = try? encoder.encode(TriggerMeta(
             evalId: triggerCase.id, query: triggerCase.query, shouldTrigger: triggerCase.shouldTrigger,
             exit: result.exit, firedTarget: result.firedTarget, firedOther: result.firedOther,
             skippedStubs: skipped
         )) {
-            try? data.write(to: trialDir.appendingPathComponent("trigger.json"))
+            try? data.write(to: trialDir.appendingPathComponent("trigger.json"), options: .atomic)
         }
     }
 
@@ -281,26 +281,30 @@ public struct Runner {
     /// `fileContents` (F16, grounded policy) is persisted as `file_contents.json` so the exact evidence
     /// the grounded judge saw is auditable and re-gradable (F19/F25) after the workspace is destroyed —
     /// making the plan's "captured contents ride along for --record/re-grade" real.
+    /// Writes are **atomic** (T4: temp + rename — a planted destination entry is *replaced*, never opened,
+    /// mirroring the record writes' S6 fix). Path-injection is otherwise already precluded: the cache root
+    /// is `<timestamp>-<random-uuid>` (unguessable, so a hostile repo can't pre-plant an entry) and its
+    /// `.skillet/runs` prefix is symlink-verified up front by `assertCacheNotSymlinked`.
     private func writeForensics(trialDir: URL, evalId: String, raw: String?, trace: Trace?, verdicts: [Verdict], exit: TrialExit, fileContents: [FileContent]? = nil) {
         let fm = FileManager.default
         try? fm.createDirectory(at: trialDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
-        if let raw { try? Data(raw.utf8).write(to: trialDir.appendingPathComponent("raw.jsonl")) }
+        if let raw { try? Data(raw.utf8).write(to: trialDir.appendingPathComponent("raw.jsonl"), options: .atomic) }
         if let trace, let json = try? SkilletJSON.encode(trace) {
-            try? Data(json.utf8).write(to: trialDir.appendingPathComponent("trace.json"))
+            try? Data(json.utf8).write(to: trialDir.appendingPathComponent("trace.json"), options: .atomic)
         }
         if !verdicts.isEmpty, let data = try? encoder.encode(verdicts) {
-            try? data.write(to: trialDir.appendingPathComponent("verdicts.json"))
+            try? data.write(to: trialDir.appendingPathComponent("verdicts.json"), options: .atomic)
         }
         // Write whenever contents were captured (grounded policy), **including an empty `[]`** — an
         // empty produced set is meaningful evidence and must be distinguishable from "not captured"
         // (text policy / old cache) after teardown. `nil` (text policy) writes nothing.
         if let fileContents, let data = try? encoder.encode(fileContents) {
-            try? data.write(to: trialDir.appendingPathComponent("file_contents.json"))
+            try? data.write(to: trialDir.appendingPathComponent("file_contents.json"), options: .atomic)
         }
         if let data = try? encoder.encode(TrialMeta(evalId: evalId, exit: exit, verdicts: verdicts.count)) {
-            try? data.write(to: trialDir.appendingPathComponent("metadata.json"))
+            try? data.write(to: trialDir.appendingPathComponent("metadata.json"), options: .atomic)
         }
     }
 

@@ -44,8 +44,8 @@ them with `triage` — `next` names the single highest-value action — then **f
 with `suggest`/`iterate` in a throwaway worktree, and re-run. Free `lint` checks gate every paid
 `run`, and `skillet doctor` preflights the whole environment for $0 — config, harness, skill
 visibility — so a misconfig never costs money. Today `skillet init`, `skillet doctor`, `skillet lint`,
-`skillet run`, `skillet score`, and `skillet capture` ship (plus `skillet harness info` for setup); the
-rest lands across the roadmap phases.
+`skillet run`, `skillet score`, `skillet capture`, and `skillet triage` ship (plus `skillet harness info`
+for setup); the rest lands across the roadmap phases.
 
 ## Install
 
@@ -84,6 +84,10 @@ skillet capture --skill <s> --slug <x>                  # discover: record the n
 skillet capture --skill <s> --slug <x> --session <ref>  # capture a specific session (uuid or .jsonl path) instead of the newest in the workspace
 skillet capture --skill <s> --slug <x> --fail-on-secret # exit 1 in CI if a secret was found (the bundle is still written scrubbed)
 skillet capture --json                                  # machine-readable result (schema: skillet.capture/1)
+skillet triage [<skill>]             # interpret: cluster a skill's captured failures by scorer rule → finding files (reporter, not a gate; exit 0)
+skillet triage --since <date>        # only fold in recordings on/after <date> (YYYY-MM-DD)
+skillet triage --dry-run             # preview the taxonomy + would-write findings; write nothing
+skillet triage --json                # machine-readable taxonomy (schema: skillet.triage/1)
 skillet harness info        # harness adapters, capabilities, probe status
 skillet harness info --json # machine-readable (schema: skillet.harness-info/1)
 ```

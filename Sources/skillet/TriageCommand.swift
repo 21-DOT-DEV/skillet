@@ -221,7 +221,20 @@ struct TriageCommand: AsyncParsableCommand {
 
     static func scanEvidence(_ dir: URL, into disclosures: inout [DisclosedInput]) -> [any Evidence] {
         let fm = FileManager.default
-        guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else { return [] }
+        // Tell an ABSENT directory (no findings/friction recorded yet — legitimate, stays silent) from a
+        // PRESENT but unreadable one (permissions): the latter must be disclosed, or triage reads "no
+        // existing findings" here and a re-run can write a DUPLICATE for the same rule under a new date.
+        // Mirrors CorpusLoader's missing-vs-unreadable split; a file-where-a-directory-belongs is caught
+        // upstream by the folder-shape check (round 15).
+        var isDir: ObjCBool = false
+        let present = fm.fileExists(atPath: dir.path, isDirectory: &isDir)
+        guard let entries = try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
+            if present && isDir.boolValue {
+                disclosures.append(DisclosedInput(subject: dir.lastPathComponent,
+                                                  reason: "directory unreadable — existing evidence not read (a re-run may re-create it)"))
+            }
+            return []
+        }
         var out: [any Evidence] = []
         for url in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
             let name = url.lastPathComponent
@@ -300,15 +313,8 @@ struct TriageCommand: AsyncParsableCommand {
     }
 
     /// Syntactic **and** semantic (round 2: the shape check alone accepted `0000-99-99`, which then
-    /// lexically matched no stems — a silent-empty-result footgun). Non-lenient parse + round-trip,
-    /// so a real-but-overflowed date (`2026-02-30`) can't slip through formatter coercion either.
-    static func isValidDate(_ s: String) -> Bool {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
-        formatter.dateFormat = "yyyy-MM-dd"
-        formatter.isLenient = false
-        guard let date = formatter.date(from: s) else { return false }
-        return formatter.string(from: date) == s
-    }
+    /// lexically matched no stems — a silent-empty-result footgun). Delegates to `DateShape.isValidISODate`
+    /// (T11): an exact `YYYY-MM-DD` character-shape check plus a non-lenient POSIX/UTC parse, so a
+    /// real-but-overflowed date (`2026-02-30`) is rejected outright — no round-trip needed.
+    static func isValidDate(_ s: String) -> Bool { DateShape.isValidISODate(s) }   // shared validator (T11)
 }

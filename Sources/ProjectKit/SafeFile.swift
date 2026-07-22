@@ -36,14 +36,13 @@ public enum SafeFile {
         ((try? FileManager.default.attributesOfItem(atPath: url.path)[.referenceCount]) as? Int) ?? 1
     }
 
-    /// True iff no component from `base` down to `url` is a symlink, and `url` nests none.
+    /// True iff `url` is confined under `base`, no component from `base` down to `url` is a symlink, and
+    /// `url` nests none. Confinement + the path-symlink walk are delegated to ``firstSymlinkOnPath`` (T9:
+    /// realpath-canonical, so a *sibling-prefix* like `dir` vs `database` can't be confused — the old raw
+    /// `dropFirst(base.path.count)` split lacked a folder-boundary check, the classic partial-path-traversal
+    /// bug, [CodeQL java/partial-path-traversal]); the subtree scan stays here. One escape-check, not two.
     public static func noSymlink(at url: URL, under base: URL) -> Bool {
-        var walk = base
-        for component in url.path.dropFirst(base.path.count).split(separator: "/") {
-            walk.appendPathComponent(String(component))
-            if isSymlink(walk) { return false }
-        }
-        return firstSymlink(in: url) == nil
+        firstSymlinkOnPath(from: base, to: url) == nil && firstSymlink(in: url) == nil
     }
 
     /// The first symlink at or under `url` (recursively), or `nil` if the subtree is symlink-free.
@@ -61,23 +60,26 @@ public enum SafeFile {
     /// **lexically** (round 14), never via `URL.appendPathComponent`'s implementation-defined `..`
     /// handling; any symlink is still caught before a later `..` could pop it.
     public static func firstSymlinkOnPath(from base: URL, to target: URL) -> URL? {
-        let basePath = base.standardizedFileURL.path
-        let targetStd = target.standardizedFileURL.path
-        let prefix = basePath.hasSuffix("/") ? basePath : basePath + "/"   // root "/" stays "/", not "//"
-        guard targetStd == basePath || targetStd.hasPrefix(prefix) else { return target }   // not under base → escape
-        // Walk the **non-standardized** suffix so a `..` *after* a symlink is still visited. Standardizing
-        // first (as the escape guard above does) collapses `link/..`, hiding the `link` symlink — a
-        // path-traversal bypass: `skills_root: link/../real` would create/read *through* `link` while both
-        // the lexical guard and a standardized walk see only `.../real`. Each component is lstat-checked in
-        // order, so a symlink is caught before its trailing `..` is ever reached.
-        let rawTarget = target.path
-        let suffix = rawTarget.hasPrefix(basePath) ? String(rawTarget.dropFirst(basePath.count))
-                                                   : String(targetStd.dropFirst(basePath.count))
-        // Resolve `.`/`..` **lexically** (round 14) so behavior never depends on
-        // `URL.appendPathComponent`'s implementation-defined `..` handling (it appends `..` literally,
-        // leaving resolution to the OS). A `..` pops the accumulated descent — any symlink already
-        // visited was lstat-checked when it was pushed, so a symlink BEFORE the `..` is still caught; a
-        // `..` that would pop above `base` is an escape → blocked.
+        // ESCAPE CHECK (T9): compare in **confinement-canonical** form — the OS-resolved real path of the
+        // longest existing ancestor plus the not-yet-created tail as text — instead of
+        // `standardizedFileURL`, whose `/private`-style symlink stripping is *existence-dependent* on
+        // Darwin, so a real base and a not-yet-created target could be compared in mismatched forms and a
+        // real escape slip through. Canonicalize-then-confine done right for a missing tail (CERT FIO02-C);
+        // because `realpath` follows every link, this also catches a suffix symlink that resolves OUTSIDE
+        // base. Both sides go through the same routine, so the prefix test is sound on every platform.
+        let baseCanon = confinementCanonical(base)
+        let targetCanon = confinementCanonical(target)
+        let canonPrefix = baseCanon.hasSuffix("/") ? baseCanon : baseCanon + "/"   // root "/" stays "/", not "//"
+        guard targetCanon == baseCanon || targetCanon.hasPrefix(canonPrefix) else { return target }   // escapes base
+        // SYMLINK WALK: still walk the **raw, non-standardized** components between base and target,
+        // lstat-checking each in order. This flags ANY symlink component — even one that stays under base
+        // (which the escape check passes) — and, by walking the raw suffix, catches a `..` placed *after* a
+        // symlink (`link/../real` routes through `link` though it lexically collapses to `real`). `.`/`..`
+        // resolve lexically (round 14). Target is `base + relative` for every caller, so `base.path` is a
+        // genuine raw prefix; if it somehow isn't, the escape check already proved confinement, so skip.
+        let basePath = base.path
+        guard target.path.hasPrefix(basePath) else { return nil }
+        let suffix = String(target.path.dropFirst(basePath.count))
         var components: [String] = []
         for raw in suffix.split(separator: "/") {
             let component = String(raw)
@@ -88,10 +90,36 @@ public enum SafeFile {
                 continue
             }
             components.append(component)
-            let walk = components.reduce(base.standardizedFileURL) { $0.appendingPathComponent($1) }
+            let walk = components.reduce(base) { $0.appendingPathComponent($1) }
             if isSymlink(walk) { return walk }
         }
         return nil
+    }
+
+    /// The confinement-canonical form of `url` (T9): the OS-resolved real path (`realpath` — every symlink
+    /// followed) of its longest EXISTING ancestor, with the not-yet-created remainder re-attached as plain
+    /// text. `realpath` alone fails on a missing tail; `standardizedFileURL` resolves `/private`-style
+    /// links only for existing paths — so neither is a sound canonical form for a path being *created*.
+    /// This is the pair fed to both sides of a confinement prefix test (CERT FIO02-C canonicalize-then-confine).
+    static func confinementCanonical(_ url: URL) -> String {
+        var existing = url.standardizedFileURL   // resolve ./.. lexically first (no filesystem)
+        var trailing: [String] = []
+        while !FileManager.default.fileExists(atPath: existing.path) {
+            let parent = existing.deletingLastPathComponent()
+            if parent.path == existing.path { break }   // reached the filesystem root
+            trailing.insert(existing.lastPathComponent, at: 0)
+            existing = parent
+        }
+        var result = realpathString(existing.path) ?? existing.path
+        for component in trailing { result += result.hasSuffix("/") ? component : "/" + component }
+        return result
+    }
+
+    /// `realpath(3)` as a String, or `nil` if it fails (e.g. a permission error on an ancestor).
+    static func realpathString(_ path: String) -> String? {
+        guard let resolved = realpath(path, nil) else { return nil }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 
     /// Why one plain-file read was refused — each case carries the human phrase the caller's
@@ -101,6 +129,7 @@ public enum SafeFile {
         case symlink
         case notRegularFile
         case hardLink
+        case unconfined
         case unreadable
         case oversized(size: Int, cap: Int)
         case binary
@@ -111,6 +140,7 @@ public enum SafeFile {
             case .symlink: "is a symlink — not followed"
             case .notRegularFile: "is not a regular file (directory/FIFO/socket/device) — not read"
             case .hardLink: "is a hard link (linked inode) — not read"
+            case .unconfined: "escapes its base directory (a symlink on the path, or a `..` escape) — not read"
             case .unreadable: "unreadable (permissions or I/O error)"
             case let .oversized(size, cap): "is \(size) bytes — exceeds the \(cap >> 20) MiB read cap"
             case .binary: "is not UTF-8 text"
@@ -144,6 +174,17 @@ public enum SafeFile {
         }
     }
 
+    /// ``readPlainText(_:cap:)`` **plus path-confinement below `base`**: refuses the read if any
+    /// component from `base` down to `url` is a symlink, or if the path escapes `base` at all (via
+    /// `firstSymlinkOnPath`), before any bytes are read. This is the one call for "read an untrusted file
+    /// at a path an outsider influenced **and** prove it stays inside a directory I control" — it folds
+    /// the pre-read confinement the evidence-body reader (`BodyExtractor`) used to hand-roll ahead of the
+    /// plain read into the same sanctioned path, so that reader can't drift out of sync with the others.
+    public static func readConfinedRegularText(_ url: URL, base: URL, cap: Int) -> Result<String, SafeReadRefusal> {
+        guard firstSymlinkOnPath(from: base, to: url) == nil else { return .failure(.unconfined) }
+        return readPlainText(url, cap: cap)
+    }
+
     /// Read up to `cap` bytes without slurping a huge file whole; also returns the file's full byte
     /// size (from metadata) so truncation can be disclosed precisely. `nil` if unreadable.
     public static func boundedRead(_ url: URL, cap: Int) -> (data: Data, fullSize: Int)? {
@@ -157,6 +198,13 @@ public enum SafeFile {
         let fd = open(url.path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW)
         guard fd >= 0 else { return nil }
         defer { close(fd) }
+        // Verify the **open descriptor itself** is a regular file (CERT FIO45-C): a special file
+        // (FIFO/socket/device) swapped in during the caller's pre-check → open gap is refused here —
+        // `fstat` refers to exactly what was opened, not the path, so O_NONBLOCK letting the open succeed
+        // can't turn a swapped-in pipe into an "empty file". Closes the special-file TOCTOU by construction;
+        // the regular-file-for-regular-file swap stays the accepted floor (round 16).
+        var st = stat()
+        guard fstat(fd, &st) == 0, (UInt32(st.st_mode) & UInt32(S_IFMT)) == UInt32(S_IFREG) else { return nil }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: false)
         // `read(upToCount:)` returns nil ONLY at EOF; it *throws* on a genuine I/O error (EIO/EINTR/EBADF).
         // A `try?` would flatten both into `Data()`, so an unreadable file would look like an empty one —

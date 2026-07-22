@@ -1,6 +1,7 @@
 import Foundation
 import EDDCore
 import TraceKit
+import ProjectKit
 
 /// The claude-code harness adapter. Parses claude-code's native session JSONL → `Trace`, resolves +
 /// vets its binary (`probe`), enforces skill-visibility, and (F7) executes a task one-shot. Every path
@@ -236,49 +237,31 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
 
     public func exportSession(_ ref: NativeSessionRef) async throws -> RawTrace {
         let url = URL(fileURLWithPath: ref.path)
-        // Read only a plain, safe session file: never follow a symlink (it could redirect to an arbitrary
-        // host file), never open a special file (a FIFO/socket read via `FileHandle` blocks forever), never
-        // read a hard link (another inode — possibly a host file). A bounded read caps a pathological file.
-        // (Confinement of a user-supplied `--session` path is the command's job; `--last` reads the trusted store.)
-        guard !Self.isSymlink(url), Self.isRegularFile(url), Self.linkCount(url) == 1 else {
-            throw HarnessError.executionFailed(harness: "claude-code", exitCode: -1,
-                stderr: "refusing to read native session at \(ref.path): not a plain regular file (symlink/special/hard link)")
-        }
-        // Refuse a session LARGER than the read cap rather than silently truncating it: `parse` is lenient
-        // and would drop the malformed last line, yielding an incomplete Trace/transcript with no error —
-        // capture would then write + score a truncated bundle. Sessions are modest; this is a safety bound.
+        // Read the session through the one sanctioned untrusted reader (T10 — this was a private copy of
+        // the same guards): never follow a symlink (could redirect to an arbitrary host file), never open a
+        // special file (a FIFO/socket read blocks forever), never read a hard link (another inode). Refuse
+        // an OVERSIZED session rather than silently truncating it — `parse` is lenient and would drop the
+        // malformed last line, yielding an incomplete Trace with no error, so capture would write + score a
+        // truncated bundle. (Confining a user-supplied `--session` path is the command's job; `--last`
+        // reads the trusted store.)
         let cap = 64 << 20
-        let attrs = try? FileManager.default.attributesOfItem(atPath: url.path)
-        let size = (attrs?[.size] as? UInt64).map { Int(clamping: $0) } ?? (attrs?[.size] as? Int) ?? 0
-        guard size <= cap else {
+        switch SafeFile.readPlainData(url, cap: cap) {
+        case let .success(data):
+            guard let raw = String(data: data, encoding: .utf8) else {
+                throw HarnessError.executionFailed(harness: "claude-code", exitCode: -1,
+                    stderr: "could not read native session at \(ref.path)")
+            }
+            return RawTrace(harness: id, raw: raw)
+        case let .failure(.oversized(size, _)):
             throw HarnessError.executionFailed(harness: "claude-code", exitCode: -1,
                 stderr: "native session at \(ref.path) is \(size) bytes — exceeds the \(cap / (1 << 20)) MiB cap; refusing to capture a truncated bundle")
-        }
-        guard let data = Self.boundedRead(url, cap: cap), let raw = String(data: data, encoding: .utf8) else {
+        case .failure(.symlink), .failure(.notRegularFile), .failure(.hardLink):
+            throw HarnessError.executionFailed(harness: "claude-code", exitCode: -1,
+                stderr: "refusing to read native session at \(ref.path): not a plain regular file (symlink/special/hard link)")
+        case .failure:   // notFound / unreadable — `readPlainData`'s only other refusals
             throw HarnessError.executionFailed(harness: "claude-code", exitCode: -1,
                 stderr: "could not read native session at \(ref.path)")
         }
-        return RawTrace(harness: id, raw: raw)
-    }
-
-    // MARK: - Safe session-file reads (self-contained — HarnessKit doesn't depend on ProjectKit; mirrors
-    // the run stager's symlink → regular → hard-link ordering).
-    static func isSymlink(_ url: URL) -> Bool {
-        (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
-    }
-    static func isRegularFile(_ url: URL) -> Bool {
-        ((try? FileManager.default.attributesOfItem(atPath: url.path)[.type]) as? FileAttributeType) == .typeRegular
-    }
-    static func linkCount(_ url: URL) -> Int {
-        ((try? FileManager.default.attributesOfItem(atPath: url.path)[.referenceCount]) as? Int) ?? 1
-    }
-    static func boundedRead(_ url: URL, cap: Int) -> Data? {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        // `read` returns nil only at EOF; it *throws* on a real I/O error. Coalesce EOF to empty; surface
-        // a genuine error as nil (don't let a failed read masquerade as an empty session).
-        do { return try handle.read(upToCount: max(cap, 0)) ?? Data() }
-        catch { return nil }
     }
 
     /// claude-code keys its per-project session store by the workspace path via `replace(/[^a-zA-Z0-9]/g,
@@ -309,7 +292,7 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         // Refuse a symlinked store dir (it could redirect the whole lookup elsewhere), then keep only plain
         // regular, non-hard-linked `*.jsonl` below (a symlinked/hard-linked entry could point
         // `exportSession` at an arbitrary host file).
-        guard !isSymlink(storeDir), let entries = try? fileManager.contentsOfDirectory(
+        guard !SafeFile.isSymlink(storeDir), let entries = try? fileManager.contentsOfDirectory(
             at: storeDir, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles])
         else { return [] }
 
@@ -322,7 +305,7 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         }
         return entries
             .filter { $0.pathExtension == "jsonl" }
-            .filter { !isSymlink($0) && isRegularFile($0) && linkCount($0) == 1 }   // safe files only
+            .filter { !SafeFile.isSymlink($0) && SafeFile.isRegularFile($0) && SafeFile.linkCount($0) == 1 }   // safe files only
             .filter { !excludedStems.contains($0.deletingPathExtension().lastPathComponent) }
             .filter { !excludedPaths.contains($0.standardizedFileURL.path) }
             .sorted { mtime($0) > mtime($1) }

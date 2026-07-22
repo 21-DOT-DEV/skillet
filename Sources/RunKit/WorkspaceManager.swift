@@ -3,6 +3,16 @@ import HarnessKit
 import JudgeKit
 import ProjectKit   // SafeFile — the shared confinement/safe-read primitives (F17)
 
+/// A staged file's before-picture for the produced/changed diff (T7). `size` is always recorded (cheap
+/// metadata, any size); `bytes` are held only up to `WorkspaceManager.stagedSnapshotCap`, so a hostile
+/// huge staged file can't exhaust memory. `bytes == nil` marks an over-cap file — `unchanged` then can't
+/// prove byte-equality and fails safe: the file is reported as changed, never a silently-skipped input.
+public struct StagedSnapshot: Sendable, Equatable {
+    public let size: Int
+    public let bytes: Data?
+    public init(size: Int, bytes: Data?) { self.size = size; self.bytes = bytes }
+}
+
 /// Creates and tears down the per-trial sandbox a run executes in, and lists its post-run contents as
 /// ground truth for the judge. Staging copies the skill (`SKILL.md` + `references/` + `scripts/` +
 /// `assets/` and any other top-level entries) into the harness discovery path
@@ -235,17 +245,22 @@ public struct WorkspaceManager: Sendable {
     // MARK: - Grounded-judge content capture (F16)
 
     /// Raw bytes of the files staged into the workspace before the run — the baseline for the
+    /// Bytes past this are not held in the staged before-picture (T7). Generous for real input fixtures
+    /// (text/config/sample docs); its only job is to stop a hostile staged file from exhausting memory.
+    static let stagedSnapshotCap = 16 << 20   // 16 MiB
+
     /// produced/changed snapshot diff (plan D-6). Non-`.claude`, non-symlink regular files only
-    /// (staged input fixtures; the skill lives under `.claude/` and is never graded as output).
-    /// Staged inputs are small by nature, so holding their bytes for the post-run comparison is cheap.
-    public func snapshotStaged(_ workspace: Workspace) -> [String: Data] {
-        var out: [String: Data] = [:]
+    /// (staged input fixtures; the skill lives under `.claude/` and is never graded as output). The read
+    /// is **bounded** (T7): hold bytes up to `stagedSnapshotCap`, always keep the true size, and record no
+    /// bytes for an over-cap file so the post-run comparison fails safe (see `StagedSnapshot`/`unchanged`).
+    public func snapshotStaged(_ workspace: Workspace) -> [String: StagedSnapshot] {
+        var out: [String: StagedSnapshot] = [:]
         for rel in producedWalk(workspace) {
             let url = workspace.root.appendingPathComponent(rel)
             // Regular files only — never open a FIFO/socket (would block), never follow a symlink.
             guard Self.noSymlink(at: url, under: workspace.root), fileType(url) == .typeRegular,
-                  let data = try? Data(contentsOf: url) else { continue }
-            out[rel] = data
+                  let (data, fullSize) = boundedRead(url, cap: Self.stagedSnapshotCap) else { continue }
+            out[rel] = StagedSnapshot(size: fullSize, bytes: fullSize <= Self.stagedSnapshotCap ? data : nil)
         }
         return out
     }
@@ -257,7 +272,7 @@ public struct WorkspaceManager: Sendable {
     /// read, so a `out.txt → /etc/passwd` can't funnel host contents into the judge (plan-review P1).
     /// Deterministic (path-sorted) for byte-reproducible `--replay` re-grades. Reads are size-bounded
     /// (a huge output is not slurped whole).
-    public func readProducedContents(_ workspace: Workspace, baseline: [String: Data], perFileCap: Int, totalCap: Int) -> [FileContent] {
+    public func readProducedContents(_ workspace: Workspace, baseline: [String: StagedSnapshot], perFileCap: Int, totalCap: Int) -> [FileContent] {
         let fm = FileManager.default
         let root = workspace.root
         var results: [FileContent] = []
@@ -383,11 +398,12 @@ public struct WorkspaceManager: Sendable {
 
     /// True iff `url`'s current bytes equal the staged bytes — size first (cheap), then a bounded byte
     /// compare only when sizes match (bounded by the small staged input).
-    private func unchanged(_ url: URL, staged: Data) -> Bool {
+    private func unchanged(_ url: URL, staged: StagedSnapshot) -> Bool {
         let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? nil
-        if let size, size != staged.count { return false }
-        guard let (data, fullSize) = boundedRead(url, cap: staged.count) else { return false }
-        return fullSize == staged.count && data == staged
+        if let size, size != staged.size { return false }        // size differs → changed
+        guard let bytes = staged.bytes else { return false }     // over-cap staged file: can't prove equality → fail safe (changed)
+        guard let (data, fullSize) = boundedRead(url, cap: bytes.count) else { return false }
+        return fullSize == bytes.count && data == bytes
     }
 
     /// Read up to `cap` bytes (the capture ceiling) without slurping a huge file whole; also returns

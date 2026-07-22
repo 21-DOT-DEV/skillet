@@ -84,6 +84,25 @@ struct SafeReadTests {
         // Callers interpolate `reason` straight into disclosures/errors — keep them sentence-shaped.
         #expect(SafeFile.SafeReadRefusal.notRegularFile.reason.contains("not a regular file"))
         #expect(SafeFile.SafeReadRefusal.hardLink.reason.contains("hard link"))
+        #expect(SafeFile.SafeReadRefusal.unconfined.reason.contains("escapes"))
         #expect(SafeFile.SafeReadRefusal.oversized(size: 9, cap: 1 << 20).reason.contains("read cap"))
+    }
+
+    @Test("readConfinedRegularText reads a confined file but refuses a symlink ON THE PATH as unconfined (round 17)")
+    func readConfinedRegularTextConfinesToBase() throws {
+        let base = try makeDir(); defer { try? FileManager.default.removeItem(at: base) }
+        let real = base.appendingPathComponent("real.md")
+        try Data("body".utf8).write(to: real)
+        #expect(try SafeFile.readConfinedRegularText(real, base: base, cap: 1 << 20).get() == "body")
+
+        // A symlinked directory component that points OUT of `base` → refused before any read, so host
+        // content never siphons in through a symlinked path (the exact BodyExtractor guarantee).
+        let outside = base.deletingLastPathComponent().appendingPathComponent("out-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try Data("secret".utf8).write(to: outside.appendingPathComponent("x.md"))
+        try FileManager.default.createSymbolicLink(at: base.appendingPathComponent("link"), withDestinationURL: outside)
+        #expect(SafeFile.readConfinedRegularText(base.appendingPathComponent("link/x.md"), base: base, cap: 1 << 20)
+                == .failure(.unconfined))
     }
 }

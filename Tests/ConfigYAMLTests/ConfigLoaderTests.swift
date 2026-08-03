@@ -72,4 +72,45 @@ struct ConfigLoaderTests {
         #expect(config.judge?.provider == "claude-code")
         #expect(config.judge?.model == "claude-sonnet-4-6")
     }
+
+    /// Eight sections in one decode. This is the assertion that keeps proving the removed workaround
+    /// stays removable: the drafting section used to be read separately to hold this type to seven
+    /// stored properties, because an eighth made the decoder loop forever. That no longer reproduces
+    /// (see the note on `SkilletConfig.Suggest` for what was tested); if it ever returns, this is where
+    /// it shows up.
+    @Test func decodesEverySectionInOnePass() throws {
+        // All eight sections populated. The fixture used to set two of them while the name promised
+        // eight — the guard was real (the fault was about how many FIELDS the type has, not how many
+        // keys a file sets, so any decode exercised it) but the name overstated what it proved.
+        let yaml = """
+        project:
+          skills_root: skills
+        harness:
+          default: claude-code
+        lint:
+          disable: [SKILL-S001]
+        runs:
+          k: 3
+        judge:
+          provider: claude-code
+          model: claude-sonnet-4-6
+        scorers:
+          disable: [slop]
+        sanitize:
+          exempt_paths: [fixtures]
+        suggest:
+          model: claude-opus-5
+        """
+        let decoded = try ConfigLoader.decode(yaml)
+        #expect(decoded.project?.skillsRoot == "skills")
+        #expect(decoded.harness?.default == "claude-code")
+        #expect(decoded.lint?.disable == ["SKILL-S001"])
+        #expect(decoded.runs?.k == 3)
+        #expect(decoded.judge?.model == "claude-sonnet-4-6")
+        #expect(decoded.scorers?.disable == ["slop"])
+        #expect(decoded.sanitize?.exemptPaths == ["fixtures"])
+        #expect(decoded.suggest?.model == "claude-opus-5")
+        // A file with no drafting section yields nil rather than throwing.
+        #expect(try ConfigLoader.decode("project:\n  skills_root: skills").suggest == nil)
+    }
 }

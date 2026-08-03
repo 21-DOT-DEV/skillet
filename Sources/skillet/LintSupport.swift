@@ -3,6 +3,7 @@ import EDDCore
 import ProjectKit
 import ConfigYAML
 import LintKit
+import RenderKit
 
 /// Shared lint-input assembly used by **both** `skillet lint` and `run`'s free lint preflight — factored
 /// here so the two can't drift (design constitution V: free-before-paid, one gate definition).
@@ -29,6 +30,29 @@ func assembleSkillSource(_ raw: RawSkill) -> SkillSource {
 func lintSkillDirectory(_ dir: URL, config: SkilletConfig.Lint) throws -> LintReport {
     let raw = try SkillReader().read(skillDirectory: dir)
     return LintReport(diagnostics: Linter().lint(assembleSkillSource(raw), config: config))
+}
+
+/// The **free pre-spend gate** (design §6.1, constitution V): lint the skill and refuse a paid command
+/// before it spends. Lives here, not inside one command, so `run` and `suggest` share one definition
+/// (F41: it was private to `RunCommand`, so the new command literally could not call it).
+///
+/// `behavioralAxisRuns: false` filters the missing-`evals.json` error: an invocation that executes no
+/// behavioral evals doesn't need that file, so it must not be blocked on it. `suggest` runs none at all.
+/// Refusal is `ExitCode.usage` (2) — the pre-spend classification `run` already uses.
+/// Returns the skill it read, so a caller that needs the same file does not open it a second time.
+/// Two reads were not just wasted work: the gate could pass on one version of `SKILL.md` and the
+/// command then act on another, if the file changed in between.
+@discardableResult
+func runFreeLintGate(skillDir: URL, lintConfig: SkilletConfig.Lint, renderer: Renderer,
+                     behavioralAxisRuns: Bool = true) throws -> RawSkill {
+    let raw = try SkillReader().read(skillDirectory: skillDir)
+    var report = LintReport(diagnostics: Linter().lint(assembleSkillSource(raw), config: lintConfig))
+    if !behavioralAxisRuns {
+        report = LintReport(diagnostics: report.diagnostics.filter { $0.id != "SKILL-L009" })
+    }
+    guard report.errors > 0 else { return raw }   // clean or warnings-only → proceed to the paid path
+    Console.emit(try renderer.renderLint(report, nextSteps: ["skillet lint  # fix the findings, then re-run"]))
+    throw SilentExit(code: ExitCode.usage.rawValue)
 }
 
 /// Resolve requested skill **names** to discovered directories, de-duplicated and sorted for

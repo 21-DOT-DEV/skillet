@@ -51,7 +51,8 @@ public struct InitPlanner: Sendable {
         // Self-owned cache ignore (never touch the repo-root .gitignore).
         let cache = root.appendingPathComponent(".skillet")
         directory(cache)
-        file(cache.appendingPathComponent(".gitignore"), "*\n")
+        file(cache.appendingPathComponent(".gitignore"),
+             "# Created by skillet automatically — this whole folder is a rebuildable cache.\n*\n")
 
         // Skills, or an empty skills root for a fresh repo.
         if skills.isEmpty {

@@ -11,11 +11,18 @@ public struct ClaudeCLIJudgeRunner: JudgeRunner {
     let binaryPath: String
     let launcher: any ProcessLauncher
     let timeout: Duration
+    let outputLimitBytes: Int?
 
-    public init(binaryPath: String, launcher: any ProcessLauncher = SubprocessLauncher(), timeout: Duration = .seconds(120)) {
+    /// `outputLimitBytes: nil` keeps the launcher's generous default, which is right for a grader: its
+    /// reply is a short verdict. **A caller whose reply is then written to a file must pass its own
+    /// limit** — drafting inherited this `nil` and could therefore emit far more than it was able to
+    /// read back afterwards, which is how it came to write files it then called unreadable.
+    public init(binaryPath: String, launcher: any ProcessLauncher = SubprocessLauncher(),
+                timeout: Duration = .seconds(120), outputLimitBytes: Int? = nil) {
         self.binaryPath = binaryPath
         self.launcher = launcher
         self.timeout = timeout
+        self.outputLimitBytes = outputLimitBytes
     }
 
     public func ask(prompt: String, model: String) async throws -> String {
@@ -25,7 +32,7 @@ public struct ClaudeCLIJudgeRunner: JudgeRunner {
             workingDirectory: nil,
             timeout: timeout,
             environment: nil,
-            outputLimitBytes: nil   // verdict text is small; the built-in default is plenty
+            outputLimitBytes: outputLimitBytes   // nil = the launcher default (fine for a short verdict)
         )
         // A non-zero judge exit is an infrastructure failure, not a FAIL verdict — surface it so the
         // run loop marks the trial ungraded rather than parsing diagnostic output as a criterion FAIL.

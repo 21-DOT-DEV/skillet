@@ -1,7 +1,9 @@
 import Foundation
 import EDDCore
 
-/// Writes one session bundle to `evaluations/<skill>/sessions/<date>-<slug>.*` in the frozen layout.
+/// Writes one session bundle to `<skills-root>/<skill>/evaluations/sessions/<date>-<slug>.*` in the
+/// frozen layout. (The destination is caller-supplied, so behavior was always correct — this comment
+/// previously wrote the components in the reverse order, naming a directory that does not exist.)
 ///
 /// **Enforced-path guard:** `write` *requires* a ``SanitizationReport`` — there is no compilable path
 /// that writes a bundle without proof it was scrubbed (the report is stamped into `session-meta.json`).

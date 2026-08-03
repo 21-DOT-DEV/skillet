@@ -1,8 +1,8 @@
 # Phase 6 — Fix Suggestion & Safe Iteration (Northstar gap #2)
 
-**Status:** PLANNED
+**Status:** IN PROGRESS
 **Horizon:** Next
-**Last Updated:** 2026-07-06
+**Last Updated:** 2026-08-01
 
 ## Goal
 
@@ -14,7 +14,7 @@ failures, never imagined ones.
 
 ## Key Features
 
-1. **[F41]** Draft edit proposals (CLI: `skillet suggest`) — PLANNED · Ported
+1. **[F41]** Draft edit proposals (CLI: `skillet suggest`) — IMPLEMENTED (2026-08-01) · Ported
    - Purpose & user value: From the failure taxonomy, the cited `SKILL.md`
      passages, and corrective-turn excerpts, the judge drafts *minimal surgical*
      content-anchored `EditProposal`s — generalize from feedback, prefer deleting

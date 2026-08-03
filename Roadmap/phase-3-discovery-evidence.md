@@ -1,8 +1,8 @@
 # Phase 3 — Discovery & Evidence Capture
 
-**Status:** IN PROGRESS (F26 + F32 shipped 2026-07-11)
+**Status:** IN PROGRESS
 **Horizon:** Next
-**Last Updated:** 2026-06-18
+**Last Updated:** 2026-08-01
 
 ## Goal
 

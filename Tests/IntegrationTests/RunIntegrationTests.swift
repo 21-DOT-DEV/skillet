@@ -167,7 +167,10 @@ struct RunIntegrationTests {
         #expect(out.exitCode == 0)
         let ignore = root.appendingPathComponent(".skillet/.gitignore")
         #expect(FileManager.default.fileExists(atPath: ignore.path))
-        #expect((try? String(contentsOf: ignore, encoding: .utf8)) == "*\n")
+        let cacheIgnore = try? String(contentsOf: root.appendingPathComponent(".skillet/.gitignore"), encoding: .utf8)
+        // Self-ignoring on purpose, and self-documenting (the convention generated cache folders use).
+        #expect(cacheIgnore?.contains("*") == true)
+        #expect(cacheIgnore?.contains("Created by skillet automatically") == true)
     }
 
     @Test("Two runs in quick succession use distinct cache dirs (no same-second collision)")
@@ -334,5 +337,31 @@ struct RunIntegrationTests {
         let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--yes"])
         #expect(out.exitCode == 0 || out.exitCode == 1)   // it ran (not a probe/usage failure)
         #expect(FileManager.default.fileExists(atPath: benchmarkPath(root)))
+    }
+
+    // MARK: - the hidden test-only options
+
+    @Test("The offline switch is refused unless the suite enabled it")
+    func replayRefusedWhenSeamsDisabled() async throws {
+        let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay"],
+                                                 environment: ["SKILLET_TEST_SEAMS": ""])
+        #expect(out.exitCode == 2)
+        #expect(out.stderr.contains("--replay is a test-only option"))
+    }
+
+    /// The offline switch swaps real grading for canned verdicts, so a verdict file outside the project
+    /// must not be honoured. A given-but-unusable map falls back to failing every criterion, which is
+    /// what distinguishes "ignored" from "read".
+    @Test("A canned-verdict file outside the project is not read")
+    func replayMapCannotEscapeTheProject() async throws {
+        let root = try Fixture.makeRunRepo(evals: [("e1", ["X"])]); defer { Fixture.remove(root) }
+        let elsewhere = try Fixture.makeTempDirectory(); defer { Fixture.remove(elsewhere) }
+        let outside = elsewhere.appendingPathComponent("map.json")
+        try #"{"X": true}"#.write(to: outside, atomically: true, encoding: .utf8)
+
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "run", "demo", "--replay", "--replay-map", outside.path])
+        #expect(out.exitCode == 1, "the outside file must be ignored, so the criterion fails")
     }
 }

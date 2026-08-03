@@ -1,8 +1,8 @@
 # Phase 2 — Trustworthy Measurement & Static Gates
 
-**Status:** IN PROGRESS (F3 + F14 shipped 2026-07-04; F15 shipped 2026-07-07; F16 shipped 2026-07-08)
+**Status:** IN PROGRESS
 **Horizon:** Now
-**Last Updated:** 2026-07-08
+**Last Updated:** 2026-08-01
 
 ## Goal
 

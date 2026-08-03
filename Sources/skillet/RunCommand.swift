@@ -79,6 +79,12 @@ struct RunCommand: AsyncParsableCommand {
     func run() async throws {
         let renderer = options.makeRenderer()
         do {
+            // Before anything else: hidden options are refused outright unless the suite enabled them.
+            // The offline switch matters most — it swaps real grading for canned verdicts, so reaching it
+            // from an ordinary command line would let a failing quality gate report success.
+            if replay { try TestSeam.assertEnabled("--replay") }
+            if replayMap != nil { try TestSeam.assertEnabled("--replay-map") }
+            if replayBaselineMap != nil { try TestSeam.assertEnabled("--replay-baseline-map") }
             let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             let context = try ProjectLocator().locate(dashC: options.directory, cwd: cwd)
             guard let root = context.root.map({ URL(fileURLWithPath: $0) }) else {
@@ -227,11 +233,12 @@ struct RunCommand: AsyncParsableCommand {
             // `judge.model`'s required-explicit rule (§14-4) doesn't apply — nothing gets judged.
             let backend = try buildAdapterAndJudge(
                 config: config, judge: judgeCfg, timeout: timeout,
-                outputLimitBytes: runsCfg.maxOutputBytes, needsJudge: cases != nil
+                outputLimitBytes: runsCfg.maxOutputBytes, needsJudge: cases != nil, projectRoot: root
             )
+            // The shared before-you-spend gate (F41 extracted it so a paid command cannot forget it).
             // Strict for the paid path (refuse banned/unauth before spend); replay's probe is canned and
             // free — probed anyway so the executor's version is stamped into the records (M3 provenance).
-            let harnessInfo = try await backend.adapter.probe(strict: !replay)
+            let harnessInfo = try await SpendGate.assertHarnessReady(backend.adapter, strict: !replay)
             // F15 D-1: prove the harness can hold a skill-free baseline BEFORE any paid trial — a
             // $0 interrogation of the resolved binary. Flag support shifts across harness versions
             // (the denylist class), so it is checked every run, never assumed; refusal is exit 3.
@@ -249,8 +256,9 @@ struct RunCommand: AsyncParsableCommand {
             }
 
             let skillRef = SkillRef(name: skillName, path: skillDir.path)
-            try assertCacheNotSymlinked(projectRoot: root)   // confine cache writes to the repo (no symlink escape)
-            try ensureCacheGitignore(projectRoot: root)   // keep the cache gitignored even without prior `init`
+            // One call: the shared routine confines the path, refuses a file where the folder belongs,
+            // ensures the self-ignoring rule, and creates the directory.
+            try ensureCacheGitignore(projectRoot: root)
             // Second-resolution timestamp + a short uuid so two runs in the same second never share a path.
             let stamp = "\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
             let base = root.appendingPathComponent(".skillet/runs/\(stamp)", isDirectory: true)
@@ -305,6 +313,15 @@ struct RunCommand: AsyncParsableCommand {
         } catch let error as EDDError {
             Console.emit(renderer.renderError(error))
             throw SilentExit(code: error.exitCode.rawValue)
+        } catch let error as SilentExit {
+            throw error
+        } catch {
+            // Same three-way rule as the drafting command: anything we did not anticipate is our bug,
+            // reported as such rather than blamed on the project. Previously these escaped unhandled,
+            // producing an undocumented exit code.
+            let classified = EDDError.internalError(detail: "\(error)")
+            Console.emit(renderer.renderError(classified))
+            throw SilentExit(code: classified.exitCode.rawValue)
         }
     }
 
@@ -398,7 +415,8 @@ struct RunCommand: AsyncParsableCommand {
     /// absent rather than silently picking one — the reproducibility hazard the surveyed tools carry.
     /// The replay path is exempt: no real judge is built there (canned verdicts, nothing spent).
     private func buildAdapterAndJudge(
-        config: SkilletConfig?, judge judgeCfg: SkilletConfig.Judge, timeout: Duration, outputLimitBytes: Int, needsJudge: Bool = true
+        config: SkilletConfig?, judge judgeCfg: SkilletConfig.Judge, timeout: Duration,
+        outputLimitBytes: Int, needsJudge: Bool = true, projectRoot: URL
     ) throws -> (adapter: any HarnessAdapter, judge: any Judge, baselineJudge: any Judge, id: String, provider: String, model: String, promptVersion: String, evidencePolicy: EvidencePolicy) {
         // F16: the grounded grader captures produced-file contents; its policy is set from the --judge
         // selection and applies even under --replay (so the capture path is exercised offline; grading
@@ -408,8 +426,8 @@ struct RunCommand: AsyncParsableCommand {
             // Arm-distinct canned verdicts (F15 A5): the baseline map defaults to fail-all, so a
             // replayed --ab shows a deterministic positive Δ; tests override either arm's map.
             return (ReplayAdapter(),
-                    ReplayJudge(loadReplayMap(), defaultPass: replayMap == nil),
-                    ReplayJudge(loadBaselineReplayMap(), defaultPass: false),
+                    ReplayJudge(loadReplayMap(projectRoot), defaultPass: replayMap == nil),
+                    ReplayJudge(loadBaselineReplayMap(projectRoot), defaultPass: false),
                     "replay", "replay", "replay", "replay", policy)
         }
         // Trigger-only (F14): grading is deterministic — no judge is constructed or configured-for.
@@ -434,7 +452,7 @@ struct RunCommand: AsyncParsableCommand {
         }
         let claudePath = config?.harness?.claudeCode?.path
         guard let resolved = BinaryResolver().resolve(flag: nil, envVar: "SKILLET_CLAUDE_CODE_BIN", configPath: claudePath, pathName: "claude") else {
-            throw EDDError.harnessNotFound(harness: "claude-code")
+            throw EDDError.harnessNotFound(harness: "claude-code", reason: nil)
         }
         let adapter = ClaudeCodeAdapter(configPath: claudePath, timeout: timeout, outputLimitBytes: outputLimitBytes)
         let cliRunner = ClaudeCLIJudgeRunner(binaryPath: resolved.path)
@@ -478,19 +496,12 @@ struct RunCommand: AsyncParsableCommand {
     /// Confine the cache the way round 5 confines the skill/`evaluations` paths: reject a symlinked
     /// `.skillet`/`.skillet/runs` **before** writing `.gitignore` or forensics, so a malformed/hostile
     /// repo can't redirect raw traces/records outside the project (constitution VI).
-    private func assertCacheNotSymlinked(projectRoot: URL) throws {
-        let runsDir = projectRoot.appendingPathComponent(".skillet/runs", isDirectory: true)
-        if let link = WorkspaceManager.firstSymlinkOnPath(from: projectRoot, to: runsDir) {
-            throw EDDError.invalidArtifact(path: ".skillet", reason: "cache path crosses a symlink (not allowed): \(link.lastPathComponent)")
-        }
-    }
 
+    /// Delegates to the shared cache preparation (F41 extracted it) so this command and `suggest`
+    /// cannot have one set of safety checks between them — which is how a plain file sitting where the
+    /// cache folder belongs came to be unguarded in both.
     private func ensureCacheGitignore(projectRoot: URL) throws {
-        let cache = projectRoot.appendingPathComponent(".skillet", isDirectory: true)
-        let ignore = cache.appendingPathComponent(".gitignore")
-        guard !FileManager.default.fileExists(atPath: ignore.path) else { return }
-        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
-        try "*\n".write(to: ignore, atomically: true, encoding: .utf8)
+        try CacheSupport.prepareCacheDirectory(projectRoot: projectRoot, subdirectory: "runs")
     }
 
     /// The free lint gate (design §6.1, constitution V): reuse the shipped error-tier catalog
@@ -500,17 +511,13 @@ struct RunCommand: AsyncParsableCommand {
     /// distinct from a *measured* non-PASS (exit 1) and from a corrupt/missing-evals artifact (exit 4/2,
     /// which `loadEvals` already enforced). Warnings (incl. a <3-case suite) proceed. `doctor` owns the
     /// broader Phase-2 preflight catalog; `run` only enforces the already-shipped free subset.
+    /// Delegates to the shared free pre-spend gate in `LintSupport` (F41 extracted it there so `suggest`
+    /// can use the same definition instead of copying the filter). Behavior is unchanged for `run`:
+    /// a trigger-only invocation still passes `behavioralAxisRuns: false`, which filters SKILL-L009's
+    /// missing-`evals.json` error (F14's "each axis where its file exists").
     private func runLintPreflight(skillDir: URL, lintConfig: SkilletConfig.Lint, renderer: Renderer, behavioralAxisRuns: Bool = true) throws {
-        var report = try lintSkillDirectory(skillDir, config: lintConfig)
-        if !behavioralAxisRuns {
-            // A run that executes no behavioral evals doesn't need evals.json: SKILL-L009's error
-            // must not block a trigger-only skill (F14's "each axis where its file exists"). The
-            // SKILL.md-quality rules (L001/L003) still gate — the description is what trigger tests.
-            report = LintReport(diagnostics: report.diagnostics.filter { $0.id != "SKILL-L009" })
-        }
-        guard report.errors > 0 else { return }   // clean or warnings-only → proceed to the paid path
-        Console.emit(try renderer.renderLint(report, nextSteps: ["skillet lint  # fix the findings, then re-run"]))
-        throw SilentExit(code: ExitCode.usage.rawValue)   // preflight refused before measurement
+        try runFreeLintGate(skillDir: skillDir, lintConfig: lintConfig, renderer: renderer,
+                            behavioralAxisRuns: behavioralAxisRuns)
     }
 
     private func preflight(_ cases: [EvalCase], skillDir: URL, skillName: String) throws {
@@ -550,16 +557,23 @@ struct RunCommand: AsyncParsableCommand {
     // Operator-supplied replay-map paths (hidden test seam) read through the one sanctioned untrusted
     // reader (T2): bounds a pathological file and refuses a symlink / special / hard-linked path, matching
     // every other file read. A refusal falls back to the empty map exactly as an unreadable path did.
-    private func loadReplayMap() -> [String: Bool] {
-        guard let path = replayMap,
-              case let .success(data) = SafeFile.readPlainData(URL(fileURLWithPath: path), cap: 1 << 20) else { return [:] }
-        return (try? JSONDecoder().decode([String: Bool].self, from: data)) ?? [:]
+    private func loadReplayMap(_ projectRoot: URL) -> [String: Bool] {
+        Self.decodeVerdictMap(replayMap, projectRoot: projectRoot)
     }
 
-    private func loadBaselineReplayMap() -> [String: Bool] {
-        guard let path = replayBaselineMap,
-              case let .success(data) = SafeFile.readPlainData(URL(fileURLWithPath: path), cap: 1 << 20) else { return [:] }
-        return (try? JSONDecoder().decode([String: Bool].self, from: data)) ?? [:]
+    private func loadBaselineReplayMap(_ projectRoot: URL) -> [String: Bool] {
+        Self.decodeVerdictMap(replayBaselineMap, projectRoot: projectRoot)
+    }
+
+    /// **Confined to the project**, like every other read here — unconfined, these hidden options read any
+    /// regular file on the machine. Nothing is echoed back on failure (an unusable file falls back to the
+    /// empty map, exactly as an unreadable path always did), so this closes the reach rather than a leak.
+    private static func decodeVerdictMap(_ path: String?, projectRoot: URL) -> [String: Bool] {
+        guard let path,
+              case let .success(text) = SafeFile.readConfinedRegularText(
+                  URL(fileURLWithPath: path), base: projectRoot, cap: 1 << 20)
+        else { return [:] }
+        return (try? JSONDecoder().decode([String: Bool].self, from: Data(text.utf8))) ?? [:]
     }
 
     // MARK: - spend gate

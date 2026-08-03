@@ -99,12 +99,22 @@ public extension Evidence {
             guard !reason.isEmpty else { throw EvidenceError.missingStateReason(state: header.state) }
         }
     }
+
+    /// Whether this record belongs to `skill` — the same "contents must match where it lives" rule as the
+    /// `id` ↔ filename cross-check above, one level up. A record filed under one skill while declaring
+    /// another is misfiled, and using it would ground a change to THIS skill in evidence about a
+    /// different one.
+    ///
+    /// Deliberately returns the **fact, not the reaction**, because the two callers must react
+    /// differently: a record the operator named by hand is a hard error, while one merely swept up by a
+    /// bulk scan is skipped with a note. Sharing the reaction too would force one of those to be wrong.
+    func belongs(to skill: String) -> Bool { header.skill == skill }
 }
 
-enum EvidenceValidation {
+public enum EvidenceValidation {
     /// `<YYYY-MM-DD>-<kebab-slug>` — a 10-char ISO date, a dash, then a non-empty lowercase kebab slug.
     /// Scalar-based (not `Character`) so the ASCII bounds are unambiguous (mirrors the capture slug check).
-    static func isValidID(_ id: String) -> Bool {
+    public static func isValidID(_ id: String) -> Bool {
         let s = Array(id.unicodeScalars)
         guard s.count >= 12 else { return false }
         func digit(_ i: Int) -> Bool { s[i] >= "0" && s[i] <= "9" }

@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.19.0
-**Last Updated:** 2026-07-17
+**Version:** v1.21.0
+**Last Updated:** 2026-08-01
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is
@@ -44,9 +44,9 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 | Foundation | 1 | Walking Skeleton — prove the loop end-to-end | COMPLETE | [phase-1](Roadmap/phase-1-walking-skeleton.md) |
 | Now | 2 | Trustworthy Measurement & Static Gates | IN PROGRESS | [phase-2](Roadmap/phase-2-measurement-static-gates.md) |
 | Next | 3 | Discovery & Evidence Capture | IN PROGRESS | [phase-3](Roadmap/phase-3-discovery-evidence.md) |
-| Next | 4 | Error Analysis — *Northstar gap #1* | PLANNED | [phase-4](Roadmap/phase-4-error-analysis.md) |
+| Next | 4 | Error Analysis — *Northstar gap #1* | IN PROGRESS | [phase-4](Roadmap/phase-4-error-analysis.md) |
 | Next | 5 | The Computable Runbook — *differentiator #1* | PLANNED | [phase-5](Roadmap/phase-5-computable-runbook.md) |
-| Next | 6 | Fix Suggestion & Safe Iteration — *Northstar gap #2* | PLANNED | [phase-6](Roadmap/phase-6-fix-suggestion-iteration.md) |
+| Next | 6 | Fix Suggestion & Safe Iteration — *Northstar gap #2* | IN PROGRESS | [phase-6](Roadmap/phase-6-fix-suggestion-iteration.md) |
 | Next | 7 | Multi-Harness Portability — *differentiator #2* | PLANNED | [phase-7](Roadmap/phase-7-multi-harness.md) |
 | Later | 8 | Beyond v1 — deeper analysis, broader reach | FUTURE | [phase-8](Roadmap/phase-8-beyond-v1.md) |
 
@@ -61,14 +61,17 @@ derived from `skillet-design.md` and an external best-practice cross-reference
 - **Phase 3 (Next):** Record production sessions and human friction as
   structured, greppable evidence (secret-sanitized on capture) — the raw material
   for error analysis.
-- **Phase 4 (Next):** Mine the corpus into a routed failure taxonomy,
-  contradictions first — error analysis *before* codification. Scored judge
-  diagnostics (F62) densify the signal; scores never gate.
+- **Phase 4 (In progress):** Mine the corpus into a routed failure taxonomy,
+  contradictions first — error analysis *before* codification. `skillet triage`
+  (F33) shipped 2026-07-19. Scored judge diagnostics (F62) densify the signal;
+  scores never gate.
 - **Phase 5 (Next):** The gates engine + `skillet next` — "git status for EDD":
   the single highest-value action, with its reason and the exact command. Plus
   observed-seed trigger-corpus expansion (F63).
-- **Phase 6 (Next):** Draft minimal `SKILL.md` edits from observed evidence and
-  prove them by A/B in a throwaway worktree before a human lands them.
+- **Phase 6 (In progress):** Draft minimal `SKILL.md` edits from observed evidence and
+  prove them by A/B in a throwaway worktree before a human lands them. `skillet
+  suggest` (F41) shipped 2026-08-01 — it drafts and writes proposals; applying
+  them and proving them by A/B are still to come.
 - **Phase 7 (Next):** Run the same suite across multiple agents and print a
   per-harness `pass^k` portability table.
 - **Phase 8 (Later):** Track B axial coding, more adapters, the remaining lint
@@ -135,14 +138,13 @@ Phase 1's `F1–F8` and Phase 8's `F10–F13` were already global and were prese
 
 ## Global Risks & Assumptions
 
-- **Phase 1 COMPLETE; later phases greenfield.** All Phase 1 features ship — F1 (project discovery
-  & output contract), F2 (`skillet init`), F4 (`skillet lint`), F5 (trace & harness seam), F6
-  (claude-code adapter), F8 (frozen boundary codecs), and now F7 (`skillet run` — the neutral runner,
-  `pass^k`, `RunKit`+`JudgeKit`) — `Specs/001`–`007`, 235 tests green. **Phase 2 is IN PROGRESS —
-  F3 (`skillet doctor`) + F14 (the trigger axis) shipped 2026-07-04, F15 (the A/B baseline arm)
-  shipped 2026-07-07, F16 (the grounded judge) shipped 2026-07-08 (`Specs/008`–`011`, 356 tests
-  green)**; the remaining Phase 2–8 features are PLANNED/FUTURE: those statuses reflect design intent verified against the design doc
-  (Medium confidence), not running code.
+- **Phase 1 COMPLETE; not-yet-started phases are greenfield.** Which features have shipped, and each
+  phase's status, live in the phase table above and in the phase documents it links — the only place
+  they are tracked. This section deliberately does **not** restate them: a second copy of a moving
+  fact is exactly how these went stale before (it stopped at 2026-07-08 while five more features
+  shipped). The standing risk is what belongs here, and it is unchanged: for a phase not yet started,
+  the status reflects **design intent verified against the design doc (Medium confidence), not
+  running code**.
 - **"Ported" assumption.** The design doc says much of v1 is faithfully
   translated from a predecessor (`swift-skill-eval` + a Python trigger harness).
   That predecessor is not in this repo, so `Ported` tags are a scheduling hint,

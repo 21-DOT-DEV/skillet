@@ -35,13 +35,18 @@ struct SkilletHarness {
 
     @discardableResult
     func run(_ arguments: [String], workingDirectory: URL? = nil, environment: [String: String]? = nil) async throws -> Output {
-        // `nil` inherits; an overlay layers on the parent env (PATH etc. survive) — the doctor tests
-        // use this to pin SKILLET_CLAUDE_CODE_BIN at a shim binary.
-        let env: Environment = environment.map { overlay in
-            .inherit.updating(Dictionary(uniqueKeysWithValues: overlay.map {
-                (Environment.Key(stringLiteral: $0.key), Optional($0.value))
-            }))
-        } ?? .inherit
+        // An overlay layers on the parent env (PATH etc. survive) — the doctor tests use this to pin
+        // SKILLET_CLAUDE_CODE_BIN at a shim binary.
+        //
+        // Every invocation enables the hidden test-only options, which the binary otherwise refuses: they
+        // are what keeps the suite offline and free. Set here, once, rather than at ~90 call sites. A test
+        // proving the refusal passes an empty value for this variable — empty counts as unset, which is
+        // the only way to "remove" a variable through an overlay.
+        var merged = ["SKILLET_TEST_SEAMS": "1"]
+        merged.merge(environment ?? [:]) { _, fromTest in fromTest }
+        let env: Environment = .inherit.updating(Dictionary(uniqueKeysWithValues: merged.map {
+            (Environment.Key(stringLiteral: $0.key), Optional($0.value))
+        }))
         let result = try await Subprocess.run(
             .path(executable),
             arguments: .init(arguments),

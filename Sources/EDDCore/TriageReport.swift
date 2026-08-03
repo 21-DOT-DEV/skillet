@@ -79,8 +79,6 @@ public struct TriageClusterRow: Codable, Sendable, Equatable {
 }
 
 /// An input triage saw but could not use — surfaced, never silently dropped.
-public struct TriageDisclosure: Codable, Sendable, Equatable {
-    public let subject: String
-    public let reason: String
-    public init(subject: String, reason: String) { self.subject = subject; self.reason = reason }
-}
+/// Alias for the format-neutral ``Disclosure`` (F41: `suggest` embeds the same shape, so the type no
+/// longer carries one command's name). Source-compatible; the encoded JSON is unchanged.
+public typealias TriageDisclosure = Disclosure

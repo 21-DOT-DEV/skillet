@@ -30,4 +30,4 @@ roadmap re-phasing.
 | 015 | Structured friction & finding evidence + lifecycle (`skillet.friction/1` / `skillet.finding/1`) | 3 · F29 | Implemented (2026-07-17) | [plan.md](015-friction-finding-evidence/plan.md) |
 | 016 | Corpus triage — Track A failure taxonomy (`skillet triage`) | 4 · F33 | Implemented (2026-07-19) | [plan.md](016-corpus-triage/plan.md) |
 | 017 | Security hardening — untrusted file-I/O audit (evidence table + tracked follow-ups) | cross-cutting | Audit complete (2026-07-21); T1–T11 tracked | [plan.md](017-security-hardening/plan.md) |
-| 018 | Draft edit proposals (`skillet suggest`) | 6 · F41 | Planned (2026-07-22) | [plan.md](018-draft-edit-proposals/plan.md) |
+| 018 | Draft edit proposals (`skillet suggest`) | 6 · F41 | Implemented (2026-08-01) | [plan.md](018-draft-edit-proposals/plan.md) |

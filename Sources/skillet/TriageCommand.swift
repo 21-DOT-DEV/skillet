@@ -19,7 +19,7 @@ struct TriageCommand: AsyncParsableCommand {
         discussion: """
         Reads each captured session bundle's cached scorer results (no re-scoring, no model, no \
         network), clusters hits by rule into a ranked failure taxonomy, and writes one finding file \
-        per new cluster under evaluations/<skill>/findings/ — durable evidence the gates engine will \
+        per new cluster under <skills-root>/<skill>/evaluations/findings/ — durable evidence the gates engine will \
         consume. Findings auto-link to friction events that share sessions. Re-runs never modify an \
         existing finding: a still-firing cluster whose finding you closed is reported, not reopened. \
         Use --dry-run to preview without writing.
@@ -70,7 +70,18 @@ struct TriageCommand: AsyncParsableCommand {
                 ?? skillReports.first)?.skill
             Console.emit(try renderer.renderTriage(
                 report, nextSteps: Self.nextSteps(
-                    emptyCorpus: allEmpty, skill: footerSkill, skillsRoot: skillsRoot, since: since)))
+                    emptyCorpus: allEmpty, skill: footerSkill, skillsRoot: skillsRoot, since: since,
+                    // Only a finding whose FILE IS ON DISK may be named: a hint exists to be pasted, and
+                    // one that fails teaches people to distrust every later hint too. A preview run wrote
+                    // nothing, and a failed write left nothing — both are handled below by explaining
+                    // rather than by naming a file that isn't there.
+                    topFindingId: dryRun ? nil : skillReports.first { $0.skill == footerSkill }?
+                        // "blocked" means a file GOT IN THE WAY, not that a usable finding exists — the file that
+                        // blocked the write is frequently not a finding at all, so naming it hands over a
+                        // command that fails on the very file this command just refused.
+                        .clusters.first { ["written", "exists", "closed-still-firing"].contains($0.fileStatus) }?
+                        .findingId,
+                    isPreview: dryRun)))
             // Reporter: no non-zero exit on clusters/disclosures.
         } catch let error as EDDError {
             Console.emit(renderer.renderError(error))
@@ -103,16 +114,13 @@ struct TriageCommand: AsyncParsableCommand {
         // literature's "doomed to fail later" red herring. It's a *certain* corpus-integrity problem, so
         // surface it specifically (what / where / how-to-fix); the command still notes-and-continues
         // (reporter posture — exit 0; the exit-code policy for integrity problems is tracked, Specs/017 T12).
-        for (label, dir) in [("evaluations", evalDir),
-                             ("evaluations/sessions", evalDir.appendingPathComponent("sessions")),
-                             ("evaluations/findings", findingsDir),
-                             ("evaluations/friction", evalDir.appendingPathComponent("friction"))] {
-            var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: dir.path, isDirectory: &isDir), !isDir.boolValue {
-                disclosures.append(DisclosedInput(
-                    subject: "\(skill)/\(label)",
-                    reason: "is a file, not a directory (a folder was expected here) — remove or rename it"))
-            }
+        // Same detection as the drafting command (shared so the two can't disagree about which folders
+        // must exist); different reaction — this is a report, so a broken folder is noted and the run
+        // continues, whereas drafting has to stop.
+        for broken in EvidenceLayout.misshapen(skillDir: confinedSkillDir) {
+            disclosures.append(DisclosedInput(
+                subject: "\(skill)/\(broken.label)",
+                reason: "is a file, not a directory (a folder was expected here) — remove or rename it"))
         }
 
         let (bundles, loaderDisclosures) = CorpusLoader().load(
@@ -168,8 +176,10 @@ struct TriageCommand: AsyncParsableCommand {
                     continue
                 }
                 do {
+                    // Same rule as the drafting writer, through the same routine: never replace an
+                    // existing file, and never leave a half-written one if this process dies.
                     let text = try EvidenceFrontmatter.encode(newFinding.finding, body: newFinding.body)
-                    try Data(text.utf8).write(to: dest, options: [.withoutOverwriting])
+                    try FileCreate.exclusively(text, at: dest)
                     written.append("findings/\(name)")
                     outcomes[id] = "written"
                 } catch {
@@ -277,6 +287,7 @@ struct TriageCommand: AsyncParsableCommand {
     /// automatically the day Phase 5 registers it; until then the future command appears only in
     /// once-it-lands prose (capture's `friction add` precedent).
     static func nextSteps(emptyCorpus: Bool, skill: String?, skillsRoot: String, since: String? = nil,
+                          topFindingId: String? = nil, isPreview: Bool = false,
                           registered: Set<String>? = nil) -> [String] {
         let reg = registered ?? Set(SkilletCommand.configuration.subcommands.compactMap { $0.configuration.commandName })
         // No skill discovered (empty tree, or the only candidate was a symlink discovery skips —
@@ -298,8 +309,35 @@ struct TriageCommand: AsyncParsableCommand {
             }
             return ["record a session — skillet capture --skill \(skill) --slug <name>"]
         }
-        if reg.contains("next") { return ["skillet next"] }
-        return ["review findings under evaluations/\(skill)/findings/ — `skillet next` picks them up once it lands (Phase 5)"]
+        // Seeds the list rather than returning: the drafting hint below is *appended*, which is what the
+        // comment there has always claimed. Returning here would silently drop it the day this command
+        // lands — latent today, since it is not registered yet.
+        var steps: [String] = reg.contains("next") ? ["skillet next"] : []
+        // `suggest` ships now, so it is the real next step from a finding — named only when actually
+        // registered (the standing rule: never advertise a command that does not exist), and with a
+        // concrete id so the line is copy-pasteable rather than a placeholder.
+
+        // The path is `<skills-root>/<skill>/evaluations/findings/` — NOT `evaluations/<skill>/…`, which
+        // is where this hint used to point (a directory that does not exist, so the copy-paste failed).
+        // Skipped once that command exists, because this line literally says "once it lands".
+        if !reg.contains("next") {
+            steps.append("review findings under \(skillsRoot)/\(skill)/evaluations/findings/ — `skillet next` picks them up once it lands (Phase 5)")
+        }
+        // `suggest` ships now, so it is the real next step from a finding — appended, not substituted,
+        // because you still need to read the finding before drafting from it. Named only when actually
+        // registered (never advertise a command that does not exist), with a concrete, copy-pasteable id.
+        if reg.contains("suggest") {
+            if let finding = topFindingId {
+                steps.append("draft a fix — skillet suggest \(skill) --from \(finding)")
+            } else if isPreview {
+                // Don't vanish: drafting is a real next step the reader should know about — it just
+                // isn't reachable until the findings are actually written. Say what unlocks it instead
+                // of naming a file that does not exist (hiding an available capability costs
+                // discoverability; naming a missing one costs trust).
+                steps.append("re-run without --dry-run to write these findings, then draft a fix from one with skillet suggest")
+            }
+        }
+        return steps
     }
 
     // MARK: - Date helpers (capture's stamp semantics: UTC, en_US_POSIX)

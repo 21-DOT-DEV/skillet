@@ -22,6 +22,10 @@ jobs:
   macos:
     name: macOS (Swift 6.3)
     runs-on: macos-26
+    # Bound a hang. The default is 6 hours, so a job that stops making progress burns the whole budget
+    # and reports a generic timeout hours later. The full build + suite takes ~2 minutes; 20 leaves ample
+    # headroom while turning a stall into a fast, legible failure.
+    timeout-minutes: 20
     permissions:
       contents: read
     env:
@@ -39,6 +43,7 @@ jobs:
   linux:
     name: Ubuntu (Swift 6.3)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     container: swift:6.3 # official Swift image — deterministic toolchain, no third-party setup action
     permissions:
       contents: read

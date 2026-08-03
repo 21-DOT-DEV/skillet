@@ -108,6 +108,40 @@ public struct Renderer: Sendable {
         }
     }
 
+    /// `skillet suggest` (F41). **Report-and-point:** the summary states what happened and names the file
+    /// written; the drafted edits themselves live in that file, never duplicated here.
+    public func renderSuggest(_ result: SuggestResult, nextSteps: [String] = []) throws -> Rendering {
+        switch mode {
+        case .json:
+            return Rendering(stdout: try SkilletJSON.encode(result) + "\n")
+        case .human:
+            return Rendering(stdout: humanSuggest(result, nextSteps: nextSteps))
+        }
+    }
+
+    private func humanSuggest(_ result: SuggestResult, nextSteps: [String]) -> String {
+        var lines = ["suggest — \(result.skill)"]
+        lines.append("  model            \(result.model)")
+        lines.append("  instructions     \(result.promptVersion)")
+        lines.append("  evidence         \(result.motivation.joined(separator: ", "))")
+        // A14: an empty proof list is normal and must never be silent — say what it means and what to do.
+        lines.append(result.expected.isEmpty
+            ? "  proves           (none — no eval is linked to this evidence yet; write one so a fix can be proven)"
+            : "  proves           \(result.expected.joined(separator: ", "))")
+        lines.append("  prompt size      \(result.estimatedPromptBytes) bytes")
+        if result.dryRun {
+            lines.append("  dry run          nothing sent, nothing written")
+        } else {
+            lines.append("  drafted          \(result.edits) edit\(result.edits == 1 ? "" : "s")")
+            if let path = result.path { lines.append("  written          \(path)") }
+        }
+        for disclosure in result.disclosures {
+            lines.append("  ! \(disclosure.subject): \(disclosure.reason)")
+        }
+        for step in nextSteps { lines.append("→ next: \(step)") }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
     /// A generic aligned table for plumbing/listing output (e.g. `harness info`). Column widths come
     /// from the widest cell; the last column is left unpadded to avoid trailing whitespace.
     public func renderTable(_ headers: [String], _ rows: [[String]]) -> Rendering {

@@ -14,13 +14,14 @@ structured evidence, and ship a `SKILL.md` edit only after a previously-failing 
 > [Specs/010](Specs/010-ab-baseline/plan.md), [Specs/011](Specs/011-grounded-judge/plan.md),
 > [Specs/012](Specs/012-deterministic-scorers/plan.md)).
 > **Phase 3 — F26+F32 (`skillet capture`, scrubbed + scored session bundles) shipped; Phase 4 — F33
-> (`skillet triage`, the free corpus failure taxonomy) shipped** ([Specs/013](Specs/013-capture-session-evidence/plan.md)–[Specs/016](Specs/016-corpus-triage/plan.md)).
+> (`skillet triage`, the free corpus failure taxonomy) shipped; Phase 6 — F41 (`skillet suggest`,
+> drafted `SKILL.md` edits from observed evidence) shipped** ([Specs/013](Specs/013-capture-session-evidence/plan.md)–[Specs/018](Specs/018-draft-edit-proposals/plan.md)).
 > `Package.swift` plus `EDDCore`, `TraceKit`,
 > `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `ScoreKit`, `JudgeKit`, `RunKit`, `CorpusKit`, `SanitizerKit`, `AnalysisKit`, `ConfigYAML`, and the
 > `skillet` executable exist — the executable owns the full ArgumentParser command tree (no
 > `skilletCLI` library; `ProjectKit` is the discovery/config-IO home) — with the full suite green
-> (`swift build && swift test`). Shipped commands: `init` · `doctor` · `lint` · `score` · `run` · `capture` · `triage` · `harness
-> list`/`info` — see *Commands* below. **Per-feature records live nearest the artifact**: each
+> (`swift build && swift test`). For what exists right now, `skillet --help` is authoritative — this
+> file does not keep a second copy of that list; see *Commands* below for what each one does. **Per-feature records live nearest the artifact**: each
 > feature's detailed capsule is its [`Specs/NNN` plan](Specs/README.md) status, with design-only
 > changes in [`skillet-design-changelog.md`](skillet-design-changelog.md); this banner stays a
 > current-state summary — one clause per feature, no history. Everything under *Planned* is still
@@ -45,7 +46,7 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 [`21-DOT-DEV/.github`](https://github.com/21-DOT-DEV/.github) (`CONTRIBUTING.md`, `SECURITY.md`,
 `CODE_OF_CONDUCT.md`). There are intentionally no repo-local copies.
 
-## Commands (true now — Phase 1 / F1, F2, F4–F8)
+## Commands (true now — verified against the binary by the test suite)
 
 - `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`).
 - `swift test` — run the unit + integration suites (all green in CI; the count lives in the run output, not here). The integration suite drives
@@ -54,6 +55,8 @@ Contributing, security disclosure, and code of conduct are handled at the org le
   `skillet init --json`, `skillet doctor [<skill>...] [--json]` (free $0 preflight; exit 3 + remedy on failure),
   `skillet lint [--json]`, `skillet score <path> [--format tty|json|sarif]` (free, model-free deterministic scorers over produced text → SARIF 2.1.0; a reporter, not a gate — exit 0 even with findings, exit 4 on a corrupt config), `skillet harness list`, `skillet harness info [--json]`,
   `skillet run [<skill>] [--axis behavior|trigger|all] [--ab] [--judge text-judge|grounded-judge] [--runs <k>] [--dry-run] [--yes] [--no-input] [--keep-workspace]` (paid: shells `claude`, resolved via `SKILLET_CLAUDE_CODE_BIN` env → `harness.claude-code.path` in `skillet.yaml` → `PATH` — behavioral trials add the judge; trigger trials are judge-free single calls; `--ab` doubles behavioral trials with a provably skill-free baseline arm, both arms judged; `--judge grounded-judge` reads produced-file contents to catch created-but-wrong, larger grading requests — gated by the combined spend estimate),
+  `skillet triage [<skill>] [--since <YYYY-MM-DD>] [--dry-run] [--json]` (free: reads the recorded session bundles under a skill's `evaluations/sessions/`, groups their findings into a failure taxonomy, and writes one evidence file per cluster under `evaluations/findings/` — never overwrites an existing file, reports what it skipped, and exits 0 even when it finds problems: it is a reporter, not a gate),
+  `skillet suggest <skill> --from <evidence-id>... [--out <name>.json] [-n|--dry-run] [--yes] [--json]` (paid: one model call that **drafts** minimal `SKILL.md` edits from the evidence records you name plus the human notes sharing their sessions, and writes them to `.skillet/proposals/<id>.json` — it **applies nothing**; free static gates and a read-only check that the model program is usable run first, `-n` previews the request and its size without spending, an over-ceiling request refuses unless `--yes`, and a name already held by a different draft exits 2 without overwriting),
   `skillet capture --skill <s> --slug <x> [--session <ref>] [--target-dir <path>] [--date <YYYY-MM-DD>] [--force] [--fail-on-secret] [--secret-scanner-path <p>]` (records the newest claude-code session — or `--session` — as a **secret-scrubbed**, scored evidence bundle under `<skills_root>/<skill>/evaluations/sessions/`; **always redacts** — there is no `--no-sanitize` — and **fails closed** if `betterleaks` can't run; `--fail-on-secret` exits 1 for CI, the bundle still written scrubbed),
   `skillet --help`, `skillet --version`. Hidden test seams on `run`: `--replay` (offline adapter+judge),
   `--replay-map <json>` (with-arm canned verdicts), `--replay-baseline-map <json>` (baseline-arm canned
@@ -146,9 +149,13 @@ Treat everything in this section as a target to build toward, not as existing fu
 `LintKit`, `JudgeKit`, `RunKit`, `ProjectKit`, `RenderKit`, and `ConfigYAML` kits + the `skillet`
 executable with `init`/`doctor`/`lint`/`run`/`harness` (see the status banner + Commands above; `doctor`
 is Phase 2's first shipped feature). Phase 2 also shipped `ScoreKit` + `score`; Phase 3 has shipped
-`CorpusKit` + `SanitizerKit` + `capture` (F26/F32); Phase 4 has shipped `AnalysisKit` + `triage` (F33).
-The kits and commands still *planned* are the remaining Phase 3+ ones — `IterateKit`
-and `friction`/`next`/`suggest`/`iterate`/`baseline`/`report`/… .
+`CorpusKit` + `SanitizerKit` + `capture` (F26/F32); Phase 4 has shipped `AnalysisKit` + `triage` (F33);
+Phase 6 has shipped `suggest` (F41).
+
+**What is still planned is not listed here.** It used to be, and the list went stale the moment a
+command shipped without someone remembering to edit this sentence. Two sources answer it and neither
+can drift: `skillet --help` is authoritative for what exists in the binary right now, and the
+[ROADMAP phase table](ROADMAP.md) is authoritative for what is planned and when.
 
 ### Package architecture (design §11)
 

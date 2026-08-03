@@ -150,6 +150,10 @@ struct TriageIntegrationTests {
         let out = try await SkilletHarness().run(["-C", root.path, "triage"])
         #expect(out.stdout.contains("`skillet next` picks them up once it lands"))   // prose fallback
         #expect(!out.stdout.contains("→ next: skillet next"))                        // no actionable unregistered suggestion
+        // The hint must name the REAL directory — `<skills-root>/<skill>/evaluations/findings/`. It used
+        // to print `evaluations/<skill>/findings/`, which does not exist, so the copy-paste led nowhere.
+        #expect(out.stdout.contains("skills/demo/evaluations/findings/"))
+        #expect(!out.stdout.contains("evaluations/demo/findings/"))
     }
 
     @Test("Friction sharing a session is joined and printed; staleness notes an old-version bundle")
@@ -250,8 +254,10 @@ struct TriageIntegrationTests {
 
         let out = try await SkilletHarness().run(["-C", root.path, "triage"])
         #expect(out.exitCode == 0)
-        #expect(out.stdout.contains("evaluations/demo/findings"))    // the skill with results
-        #expect(!out.stdout.contains("evaluations/alpha/findings"))  // not the alphabetical accident
+        // Real layout: `<skills-root>/<skill>/evaluations/findings/` (the reversed `evaluations/<skill>/…`
+        // this used to assert names a directory that does not exist — corrected with the hint itself).
+        #expect(out.stdout.contains("skills/demo/evaluations/findings"))    // the skill with results
+        #expect(!out.stdout.contains("skills/alpha/evaluations/findings"))  // not the alphabetical accident
     }
 
     @Test("Empty corpus exits 0 and points at capture; bad --since and unknown skill are usage errors")
@@ -463,5 +469,50 @@ struct TriageIntegrationTests {
         #expect(out.exitCode == 4)
         #expect(out.stderr.contains("symlink"))
         #expect(!out.stdout.contains("slop-vocabulary"))                         // the outside corpus was never read
+    }
+
+    @Test("The drafting hint only names a finding that exists; a preview run explains instead of naming one")
+    func draftingHintNeverNamesAMissingFile() async throws {
+        let version = try await Self.currentVersion()
+        let root = try Self.makeTriageRepo(bundles: [("2026-06-01-a", version, [("SKILL-S001", "warning", "m")])])
+        defer { Fixture.remove(root) }
+
+        // Preview: nothing is written, so no finding may be named — but the capability must not vanish.
+        let preview = try await SkilletHarness().run(["-C", root.path, "triage", "--dry-run"])
+        #expect(preview.exitCode == 0)
+        #expect(!preview.stdout.contains("--from"), "a preview run must not name a file that was never written")
+        #expect(preview.stdout.contains("re-run without --dry-run"))
+
+        // Real run: the finding is on disk, so the hint is copy-pasteable — and it actually works.
+        let real = try await SkilletHarness().run(["-C", root.path, "triage"])
+        #expect(real.stdout.contains("skillet suggest demo --from "))
+        // Pull the id straight out of the hint and confirm the file the user would be sent to exists.
+        if let range = real.stdout.range(of: "--from ") {
+            let id = real.stdout[range.upperBound...].prefix { !$0.isWhitespace }
+            let path = root.appendingPathComponent("skills/demo/evaluations/findings/\(id).md")
+            #expect(FileManager.default.fileExists(atPath: path.path), "the hint named \(id), which does not exist")
+        }
+    }
+
+    @Test("A file that BLOCKED a write is never offered as something to draft from")
+    func blockedFileIsNotOfferedAsAFinding() async throws {
+        let version = try await Self.currentVersion()
+        let root = try Self.makeTriageRepo(bundles: [("2026-06-01-a", version, [("SKILL-S001", "warning", "m")])])
+        defer { Fixture.remove(root) }
+        // Occupy the finding's filename with something that is not a finding at all — the exact case
+        // "blocked" reports. Offering it would hand over a command that fails on this very file.
+        let findings = root.appendingPathComponent("skills/demo/evaluations/findings", isDirectory: true)
+        try FileManager.default.createDirectory(at: findings, withIntermediateDirectories: true)
+        // Write a non-finding at every plausible id by covering the whole folder after a real run.
+        let real = try await SkilletHarness().run(["-C", root.path, "triage"])
+        #expect(real.exitCode == 0)
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: findings.path)) ?? [] where name.hasSuffix(".md") {
+            try "this is not a finding".write(to: findings.appendingPathComponent(name),
+                                              atomically: true, encoding: .utf8)
+        }
+        let blocked = try await SkilletHarness().run(["-C", root.path, "triage"])
+        #expect(blocked.stdout.contains("already exists"), "precondition: the write is blocked")
+        #expect(!blocked.stdout.contains("skillet suggest demo --from"),
+                "a blocked file must not be offered as something to draft from")
     }
 }

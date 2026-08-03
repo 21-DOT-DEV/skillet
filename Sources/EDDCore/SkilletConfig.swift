@@ -10,8 +10,9 @@ public struct SkilletConfig: Codable, Sendable, Equatable {
     public var judge: Judge?
     public var scorers: Scorers?
     public var sanitize: Sanitize?
+    public var suggest: Suggest?
 
-    public init(project: Project? = nil, harness: Harness? = nil, lint: Lint? = nil, runs: Runs? = nil, judge: Judge? = nil, scorers: Scorers? = nil, sanitize: Sanitize? = nil) {
+    public init(project: Project? = nil, harness: Harness? = nil, lint: Lint? = nil, runs: Runs? = nil, judge: Judge? = nil, scorers: Scorers? = nil, sanitize: Sanitize? = nil, suggest: Suggest? = nil) {
         self.project = project
         self.harness = harness
         self.lint = lint
@@ -19,6 +20,22 @@ public struct SkilletConfig: Codable, Sendable, Equatable {
         self.judge = judge
         self.scorers = scorers
         self.sanitize = sanitize
+        self.suggest = suggest
+    }
+
+    /// `suggest:` — drafting settings (F41 D8).
+    ///
+    /// **History, so nobody re-derives it.** This was briefly kept off ``SkilletConfig`` and decoded on
+    /// its own: at the time, adding an eighth stored property here made the YAML decoder loop forever
+    /// (seen with a bare `String?` too, so it was not this type's shape). Re-tested 2026-08-01 against
+    /// swift-yaml `473252b0` in three conditions — ordinary build with the full suite, optimized build
+    /// driving the real binary over an eight-field file, and a single-threaded build (the compilation
+    /// shape this library's faults here are sensitive to) — and it did not reproduce in any of them. The
+    /// separate decode was therefore removed: a workaround nobody can re-test is worse than the risk,
+    /// and both build platforms now run under a job time limit, so a return shows up as a fast failure.
+    public struct Suggest: Codable, Sendable, Equatable {
+        public var model: String?
+        public init(model: String? = nil) { self.model = model }
     }
 
     public struct Project: Codable, Sendable, Equatable {

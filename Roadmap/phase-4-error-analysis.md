@@ -1,8 +1,8 @@
 # Phase 4 — Error Analysis (Northstar gap #1)
 
-**Status:** PLANNED
+**Status:** IN PROGRESS
 **Horizon:** Next
-**Last Updated:** 2026-07-07
+**Last Updated:** 2026-08-01
 
 ## Goal
 
@@ -15,7 +15,7 @@ decide what's worth a test. This phase is sequenced ahead of the harness matrix
 
 ## Key Features
 
-1. **[F33]** Corpus triage — Track A (CLI: `skillet triage`) — PLANNED · Ported
+1. **[F33]** Corpus triage — Track A (CLI: `skillet triage`) — IMPLEMENTED (2026-07-19) · Ported
    - Purpose & user value: Run deterministic scorers across every bundle and
      cluster the signal into a failure taxonomy — error analysis, not a pass-rate
      — so the maintainer sees the patterns that actually recur.

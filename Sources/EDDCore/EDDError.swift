@@ -13,7 +13,11 @@ public enum EDDError: Error, Sendable, Equatable {
     /// A command that requires a project was run outside one. Exit ``ExitCode/environment``.
     case projectNotFound(cwd: String)
     /// A harness binary could not be resolved (no flag/env/config/PATH). Exit ``ExitCode/environment``.
-    case harnessNotFound(harness: String)
+    /// The harness is the obstacle. `reason` is `nil` when we genuinely could not find the program;
+    /// otherwise it says what went wrong with a program we DID find (a failed call, a timeout, a refused
+    /// launch). One concept, accurate specifics — the previous single fixed message claimed "could not
+    /// find it" for every case, so a sign-in or quota failure told people to install software they had.
+    case harnessNotFound(harness: String, reason: String?)
     /// An explicitly pinned harness binary is on the denylist. Exit ``ExitCode/environment``.
     case harnessBanned(harness: String, version: String)
     /// The harness resolved + ran but is not authenticated (e.g. `claude auth status` reports logged-out).
@@ -35,6 +39,14 @@ public enum EDDError: Error, Sendable, Equatable {
     case captureDestinationExists(paths: [String])
     /// `capture` found no native session for the workspace. Exit ``ExitCode/environment``.
     case sessionNotFound(workspace: String)
+    /// A spend/safety gate refused before any paid work (e.g., the prompt ceiling without `--yes`).
+    /// Exit ``ExitCode/gate``.
+    case gate(message: String, remedy: String)
+    /// An error we did not anticipate. Carries the underlying text so the defect is diagnosable.
+    case internalError(detail: String)
+    /// The operating system refused a write we need — permissions, disk space, an I/O fault. The
+    /// machine is the obstacle, not the project's contents, so this is an environment problem.
+    case cacheUnwritable(path: String, reason: String)
 
     /// The stable exit code for this error.
     public var exitCode: ExitCode {
@@ -42,6 +54,9 @@ public enum EDDError: Error, Sendable, Equatable {
         case .usage: .usage
         case .directoryNotFound, .pathNotFound, .projectNotFound, .harnessNotFound, .harnessBanned, .harnessUnauthenticated, .skillNotVisible, .baselineNotIsolable, .sanitizerNotFound, .captureDestinationExists, .sessionNotFound: .environment
         case .invalidArtifact: .artifact
+        case .gate: .gate
+        case .internalError: .internalError
+        case .cacheUnwritable: .environment
         }
     }
 
@@ -52,7 +67,7 @@ public enum EDDError: Error, Sendable, Equatable {
         case .directoryNotFound: "directory_not_found"
         case .pathNotFound: "path_not_found"
         case .projectNotFound: "project_not_found"
-        case .harnessNotFound: "harness_not_found"
+        case let .harnessNotFound(_, reason): reason == nil ? "harness_not_found" : "harness_unavailable"
         case .harnessBanned: "harness_banned"
         case .harnessUnauthenticated: "harness_unauthenticated"
         case .skillNotVisible: "skill_not_visible"
@@ -61,12 +76,19 @@ public enum EDDError: Error, Sendable, Equatable {
         case .sanitizerNotFound: "sanitizer_not_found"
         case .captureDestinationExists: "capture_destination_exists"
         case .sessionNotFound: "session_not_found"
+        case .gate: "gate"
+        case .internalError: "internal_error"
+        case .cacheUnwritable: "cache_unwritable"
         }
     }
 
     /// Human-readable "what went wrong, and why".
     public var message: String {
         switch self {
+        case let .internalError(detail):
+            "internal error — this is a defect in skillet, not a problem with your project: \(detail)"
+        case let .cacheUnwritable(path, reason):
+            "could not write \(path): \(reason)"
         case let .usage(message, _):
             message
         case let .directoryNotFound(path):
@@ -75,8 +97,9 @@ public enum EDDError: Error, Sendable, Equatable {
             "the path to score does not exist or is not readable: \(path)"
         case let .projectNotFound(cwd):
             "no skillet project found from \(cwd) (no skillet.yaml or .git boundary up the tree)"
-        case let .harnessNotFound(harness):
-            "could not find the \(harness) binary (checked the flag, env, config, and PATH)"
+        case let .harnessNotFound(harness, reason):
+            reason.map { "the \(harness) harness could not be used: \($0)" }
+                ?? "could not find the \(harness) binary (checked the flag, env, config, and PATH)"
         case let .harnessBanned(harness, version):
             "the pinned \(harness) version \(version) is on the denylist (known-bad)"
         case let .harnessUnauthenticated(harness):
@@ -93,6 +116,8 @@ public enum EDDError: Error, Sendable, Equatable {
             "capture destination already exists: \(paths.joined(separator: ", "))"
         case let .sessionNotFound(workspace):
             "no claude-code session found for \(workspace) — nothing to capture"
+        case let .gate(message, _):
+            message
         }
     }
 
@@ -105,6 +130,10 @@ public enum EDDError: Error, Sendable, Equatable {
     /// The exact next action that fixes the error.
     public var remedy: String {
         switch self {
+        case .internalError:
+            "please report it at https://github.com/21-DOT-DEV/skillet/issues with the command you ran"
+        case .cacheUnwritable:
+            "check the directory's write permissions and available disk space, then re-run"
         case let .usage(_, remedy):
             remedy
         case .directoryNotFound:
@@ -113,8 +142,10 @@ public enum EDDError: Error, Sendable, Equatable {
             "pass an existing, readable file or directory to `skillet score`"
         case .projectNotFound:
             "run from inside a skills repository, or initialize one with `skillet init`"
-        case let .harnessNotFound(harness):
-            "install \(harness), or set its path via --harness-path, SKILLET_\(Self.envID(harness))_BIN, or harness.\(harness).path"
+        case let .harnessNotFound(harness, reason):
+            reason == nil
+                ? "install \(harness), or set its path via --harness-path, SKILLET_\(Self.envID(harness))_BIN, or harness.\(harness).path"
+                : "check you are signed in, that you are within any usage limits, and that the configured model name is valid"
         case let .harnessBanned(harness, _):
             "pin a non-banned version, or set SKILLET_ALLOW_BANNED_\(Self.envID(harness))=1 to override deliberately"
         case let .harnessUnauthenticated(harness):
@@ -131,6 +162,8 @@ public enum EDDError: Error, Sendable, Equatable {
             "re-run with --force to overwrite, or choose a different --slug"
         case .sessionNotFound:
             "run the work in that directory first, or pass --session <id>; check --target-dir points at the workspace"
+        case let .gate(_, remedy):
+            remedy
         }
     }
 }

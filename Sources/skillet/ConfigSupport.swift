@@ -33,25 +33,22 @@ enum ConfigOrigin: Equatable {
 /// Config files are small; anything past this is refused, not read (F33 security pass).
 private let configReadCap = 1 << 20   // 1 MiB
 
-func loadConfigWithOrigin(options: GlobalOptions, context: ProjectContext? = nil) throws -> (config: SkilletConfig?, origin: ConfigOrigin) {
+/// The config file's **text**, resolved once with the precedence below, or `nil` when there is no file.
+/// Every caller resolves the file through this one function, so they cannot disagree about which file
+/// is in play, the precedence that chose it, or how an unreadable one is reported. (For a while a second
+/// caller kept its own copy of this logic while a comment claimed otherwise; that caller — a separate
+/// read of the `suggest:` section — has since been removed entirely.)
+private func configText(options: GlobalOptions, context: ProjectContext?) throws
+    -> (text: String, origin: ConfigOrigin, errorPath: String)? {
     if let explicit = options.config {
-        // Safe read (F33 security pass): an operator-supplied path is untrusted input — a FIFO here
-        // previously hung every config-consuming command via an unbounded `String(contentsOfFile:)`.
-        let text: String
         switch SafeFile.readPlainText(URL(fileURLWithPath: explicit), cap: configReadCap) {
         case let .success(contents):
-            text = contents
+            return (contents, .explicit(path: explicit), explicit)
         case let .failure(refusal):
             throw EDDError.usage(message: "config file \(refusal.reason): \(explicit)",
                                  remedy: "pass --config with a plain readable skillet.yaml path, or omit it")
         }
-        do { return (try validated(ConfigLoader.decode(text), path: explicit), .explicit(path: explicit)) }
-        catch let error as EDDError { throw error }
-        catch { throw EDDError.invalidArtifact(path: explicit, reason: "not valid skillet.yaml") }
     }
-    // Validate `-C` the way root/lint/run do: an invalid directory is an environment error (exit 3), not
-    // silently ignored (previously `try?` swallowed it → `harness list/info` ran with defaults). Discovery
-    // succeeding with no project marker still yields `nil` (built-in defaults).
     let located: ProjectContext
     if let context {
         located = context
@@ -59,23 +56,30 @@ func loadConfigWithOrigin(options: GlobalOptions, context: ProjectContext? = nil
         let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         located = try ProjectLocator().locate(dashC: options.directory, cwd: cwd)
     }
-    guard let root = located.root else { return (nil, .defaults) }
-    // Safe read (F33 security pass): a cloned repo's `skillet.yaml` is untrusted — a FIFO here
-    // previously hung EVERY command at config load (the read was an unguarded, unbounded
-    // `String(contentsOf:)` behind a bare exists-check). Absent stays defaults; a refusal (symlink /
-    // special file / hard link / oversized / binary) fails loud as an artifact error, exactly like
-    // present-but-undecodable — a config that exists but can't be *safely* read is an artifact problem.
+    guard let root = located.root else { return nil }
     let url = URL(fileURLWithPath: root).appendingPathComponent("skillet.yaml")
     switch SafeFile.readPlainText(url, cap: configReadCap) {
     case .failure(.notFound):
-        return (nil, .defaults)
+        return nil
     case let .failure(refusal):
         throw EDDError.invalidArtifact(path: "skillet.yaml", reason: "skillet.yaml \(refusal.reason)")
     case let .success(text):
-        do { return (try validated(ConfigLoader.decode(text), path: "skillet.yaml"), .repo(path: root + "/skillet.yaml")) }
-        catch let error as EDDError { throw error }
-        catch { throw EDDError.invalidArtifact(path: "skillet.yaml", reason: "not valid skillet.yaml") }
+        return (text, .repo(path: root + "/skillet.yaml"), "skillet.yaml")
     }
+}
+
+func loadConfigWithOrigin(options: GlobalOptions, context: ProjectContext? = nil) throws -> (config: SkilletConfig?, origin: ConfigOrigin) {
+    // Reads through the shared resolver above — which is now true, not merely claimed. It previously
+    // kept its own copy of the same read-and-branch logic, so the comment promising the two could not
+    // disagree described a structure that did not exist. One reader, one precedence, one place a
+    // refusal is classified; this function is only decode + validate on top.
+    guard let resolved = try configText(options: options, context: context) else { return (nil, .defaults) }
+    do { return (try validated(ConfigLoader.decode(resolved.text), path: resolved.errorPath), resolved.origin) }
+    catch let error as EDDError { throw error }
+    // Carry the decoder's detail: it names the offending key and what was wrong with it. The bare
+    // "not valid skillet.yaml" told you a file you can see is broken without saying which of its eight
+    // sections broke it. Consistent with every other decode failure here, which all quote the cause.
+    catch { throw EDDError.invalidArtifact(path: resolved.errorPath, reason: "not valid skillet.yaml — \(error)") }
 }
 
 /// Value-level validation at the trust boundary (F33 security pass): every command reads config through
@@ -83,6 +87,39 @@ func loadConfigWithOrigin(options: GlobalOptions, context: ProjectContext? = nil
 /// comprehensive-fix stance (patch the class, not the reported path). Deeper per-command confinement
 /// guards stay as layered defense. Today's one rule: `skills_root` must be a plain relative subpath.
 private func validated(_ config: SkilletConfig, path: String) throws -> SkilletConfig {
+    var config = config
+    // **Canonicalize first, then judge the canonical form.** `skills_root` is pasted into user-facing
+    // hints ("review findings under <skills-root>/<skill>/…"), and a legal trailing slash produced a
+    // doubled separator — a copy-paste path that doesn't match the real one (path *building* hides this,
+    // because `appendingPathComponent` normalizes). Doing it here, once at the trust boundary, fixes every
+    // consumer at once instead of leaving a trap for the next message someone writes — the standing
+    // canonicalization rule: normalize where input enters, **before** validation, never per use site
+    // (CERT "Input Validation and Data Sanitization").
+    //
+    // Leading `/` is preserved deliberately: it is what marks the value absolute, and the check below
+    // must still see it. Collapsing it away would turn `/etc/` into a *relative*-looking `etc` and let a
+    // hostile config escape the project — the exact rule S7 exists to enforce.
+    if let raw = config.project?.skillsRoot {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isAbsolute = trimmed.hasPrefix("/")
+        // Drop no-op `.` segments (`./skills` → `skills`) — the same doubled-text defect in another
+        // costume. `..` is deliberately NOT dropped: the escape rule below must still see it.
+        // Trim **each segment**, not just the ends: `skills /` keeps its space through a whole-value
+        // trim (the trailing character is the slash), so the hint printed `skills /demo/…` and the
+        // directory created carried the space — the same broken-copy-paste defect in another costume.
+        let segments = trimmed.split(separator: "/", omittingEmptySubsequences: true)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && $0 != "." }
+        var canonical = segments.joined(separator: "/")
+        if isAbsolute { canonical = "/" + canonical }
+        // A lone `.` is the ecosystem's conventional "the directory holding this config" (TypeScript's
+        // `rootDir: "."` and friends) — a *deliberate* value, unlike a blank one, which means unset or
+        // mistyped. Keep it rather than collapsing to "" (which the empty rule would then reject):
+        // silently turning a working, conventional value into an error is a breaking change that would
+        // deserve a deprecation period, not a bug-fix round.
+        if canonical.isEmpty, !trimmed.isEmpty, !isAbsolute { canonical = "." }
+        config.project?.skillsRoot = canonical
+    }
     if let skillsRoot = config.project?.skillsRoot,
        let violation = SkilletConfig.Project.skillsRootViolation(skillsRoot) {
         throw EDDError.invalidArtifact(

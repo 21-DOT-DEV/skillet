@@ -153,7 +153,7 @@ public enum TriageEngine {
             let recordings = acc.stems.sorted()
             // The computed join (D6): friction events sharing any session with this cluster.
             let linked = friction
-                .filter { !Set($0.sessions).isDisjoint(with: recordings) }
+                .filter { EvidenceLink.sharesSession($0.sessions, recordings) }
                 .map(\.id).sorted()
             let existing = existingFindings.first { $0.cluster == rule.slug }
             let status: String

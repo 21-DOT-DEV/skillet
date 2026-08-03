@@ -1,8 +1,8 @@
 # Phase 1 — Walking Skeleton: Prove the Loop End-to-End
 
-**Status:** COMPLETE — F1, F2, F4, F5, F6, F7, F8 all shipped (`doctor` F3 moved to Phase 2)
+**Status:** COMPLETE (note: `doctor`/F3 moved to Phase 2)
 **Horizon:** Now
-**Last Updated:** 2026-07-01
+**Last Updated:** 2026-08-01
 **Review:** completed-items cross-artifact audit (2026-07-01) → [phase-1-review.md](phase-1-review.md)
 
 ## Goal

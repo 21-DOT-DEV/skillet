@@ -46,16 +46,16 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         guard let resolved = resolver.resolve(
             flag: nil, envVar: "SKILLET_CLAUDE_CODE_BIN", configPath: configPath, pathName: "claude"
         ) else {
-            throw EDDError.harnessNotFound(harness: "claude-code")
+            throw EDDError.harnessNotFound(harness: "claude-code", reason: nil)
         }
         // A pinned-but-unreachable binary (bad path/permissions) is "not found", not an opaque crash.
         let output: ProcessOutput
         do {
             output = try await launcher.run(resolved.path, ["--version"], workingDirectory: nil, timeout: .seconds(60), environment: nil, outputLimitBytes: nil)
         } catch {
-            throw EDDError.harnessNotFound(harness: "claude-code")
+            throw EDDError.harnessNotFound(harness: "claude-code", reason: nil)
         }
-        guard output.exitCode == 0 else { throw EDDError.harnessNotFound(harness: "claude-code") }
+        guard output.exitCode == 0 else { throw EDDError.harnessNotFound(harness: "claude-code", reason: nil) }
         let version = Self.parseVersion(output.stdout)
         let bypassed = environment["SKILLET_ALLOW_BANNED_CLAUDE_CODE"] != nil
         var warnings: [String] = []
@@ -139,7 +139,7 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         guard let resolved = resolver.resolve(
             flag: nil, envVar: "SKILLET_CLAUDE_CODE_BIN", configPath: configPath, pathName: "claude"
         ) else {
-            throw EDDError.harnessNotFound(harness: "claude-code")
+            throw EDDError.harnessNotFound(harness: "claude-code", reason: nil)
         }
         // Honor the injection contract (§9.2): the runner stages skills under the workspace discovery
         // path (`<workspace>/.claude/skills/<name>/`). For `.only`, enforce that each requested skill is
@@ -209,7 +209,7 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         guard let resolved = resolver.resolve(
             flag: nil, envVar: "SKILLET_CLAUDE_CODE_BIN", configPath: configPath, pathName: "claude"
         ) else {
-            throw EDDError.harnessNotFound(harness: "claude-code")
+            throw EDDError.harnessNotFound(harness: "claude-code", reason: nil)
         }
         let output: ProcessOutput
         do {

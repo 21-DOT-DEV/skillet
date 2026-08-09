@@ -11,6 +11,14 @@ roadmap re-phasing.
 > spec-kit's scripts default to lowercase `specs/`, so adopting that tooling later would need the
 > path adjusted.
 
+> **Test counts: deltas, not totals.** A plan's header says what shipped and when; it does **not**
+> carry a running total of how many tests the whole suite had, because that is a snapshot of a moment
+> and the same number is already recorded, dated, in the plan's own status log at the end of the file.
+> Fifteen headers carried one, and five had drifted out of step with their own logs — one said
+> "implemented 2026-07-19 (584 tests green)" above an entry recording 547 for that same day. What a
+> feature *added* is different and belongs here: `+21 tests (5 report unit, 7 audit, …)` describes this
+> feature's contribution and never goes stale.
+
 | # | Feature | Phase | Status | Plan |
 |---|---|---|---|---|
 | 001 | Project discovery & output contract | 1 · F1 | Implemented | [plan.md](001-project-discovery-output-contract/plan.md) |
@@ -31,3 +39,4 @@ roadmap re-phasing.
 | 016 | Corpus triage — Track A failure taxonomy (`skillet triage`) | 4 · F33 | Implemented (2026-07-19) | [plan.md](016-corpus-triage/plan.md) |
 | 017 | Security hardening — untrusted file-I/O audit (evidence table + tracked follow-ups) | cross-cutting | Audit complete (2026-07-21); T1–T11 tracked | [plan.md](017-security-hardening/plan.md) |
 | 018 | Draft edit proposals (`skillet suggest`) | 6 · F41 | Implemented (2026-08-01) | [plan.md](018-draft-edit-proposals/plan.md) |
+| 019 | Safe apply to the working tree (`skillet suggest --apply`) | 6 · F42 | Implemented (2026-08-04) | [plan.md](019-safe-apply/plan.md) |

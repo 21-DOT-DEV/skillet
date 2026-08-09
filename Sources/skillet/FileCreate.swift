@@ -1,4 +1,5 @@
 import Foundation
+import ProjectKit
 #if canImport(Darwin)
 import Darwin
 #else
@@ -56,5 +57,103 @@ enum FileCreate {
                                         ? "file already exists"
                                         : "could not create the file (\(String(cString: strerror(code))))"])
         }
+    }
+
+    /// Replace an **existing** file's contents, atomically, **keeping the permissions it already had**.
+    ///
+    /// The sibling above refuses to replace anything; this one exists to replace, so it is a different
+    /// routine rather than a flag. Same shape: write a neighbour, put it in place with one operation, so
+    /// the destination name never holds a partly-written file.
+    ///
+    /// **The permissions are set on the neighbour, before it goes into place** — not corrected
+    /// afterwards. A rename inherits the mode of the file being moved, and a freshly written one gets
+    /// generic defaults, so correcting it afterwards leaves a gap in which the file is readable by
+    /// people the original excluded. That gap is not merely brief: if the process dies inside it, the
+    /// file keeps the wrong permissions permanently and silently. Rust's package manager shipped exactly
+    /// this bug — writing a settings file reset its mode — and fixed it by setting the mode before the
+    /// swap, which is what this does.
+    /// The underlying reason, without the wrapper. A failed write arrives wrapped in layers naming the
+    /// temporary file; the cause a person can act on is the innermost one ("Permission denied").
+    private static func plainCause(_ error: Error) -> String {
+        let outer = error as NSError
+        if let underlying = outer.userInfo[NSUnderlyingErrorKey] as? NSError {
+            return underlying.localizedDescription
+        }
+        return outer.localizedDescription
+    }
+
+    static func replacingContents(of destination: URL, with contents: String) throws {
+        // **A pointer to somewhere else is refused, not replaced.** Reading the mode of a symbolic link
+        // returns the *link's* own mode — always 0755 here — not that of the file it points at, so a
+        // private 0600 file's path ended up holding a world-readable 0755 file while the private file
+        // itself sat untouched. Measured, not reasoned about. Nothing escaped the project, because
+        // renaming over a name never writes through a pointer; what was untrue was this routine's own
+        // promise to keep the permissions the file already had. Turning someone's pointer into an
+        // ordinary file is a surprise on its own terms too.
+        //
+        // Every caller happens to check this already. That is exactly the argument for checking here:
+        // the promise above should hold because of what this routine does, not because each caller
+        // remembers. **This is a check, not a race that is closed** — a pointer swapped in between here
+        // and the rename would still be replaced. The consequence stays bounded for the reason above.
+        guard !SafeFile.isSymlink(destination) else {
+            throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError,
+                          userInfo: [NSFilePathErrorKey: destination.path,
+                                     NSLocalizedDescriptionKey:
+                                        "it points somewhere else, and replacing it would turn the pointer into an ordinary file"])
+        }
+        let directory = destination.deletingLastPathComponent()
+        let temporary = directory.appendingPathComponent(
+            ".\(destination.lastPathComponent).replacing-\(UUID().uuidString)")
+        // Read the mode first: after the swap there is nothing left to read it from.
+        //
+        // **A failure here stops the write.** This used to fall back to whatever the system hands out by
+        // default, silently — so a file you had deliberately made private could come back readable by
+        // others with no mention of it. Being unable to carry out a safety step is not the same as the
+        // step saying "nothing to do", and the direction of the wrong guess here is widening who can read
+        // your file. The two causes are told apart because their fixes are unrelated.
+        let mode: NSNumber
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
+            guard let found = attributes[.posixPermissions] as? NSNumber else {
+                throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError,
+                              userInfo: [NSFilePathErrorKey: destination.path,
+                                         NSLocalizedDescriptionKey:
+                                            "its permissions could not be read, so they could not be preserved"])
+            }
+            mode = found
+        } catch let readFailure as NSError where readFailure.code == NSFileReadUnknownError {
+            throw readFailure
+        } catch {
+            let missing = !FileManager.default.fileExists(atPath: destination.path)
+            throw NSError(domain: NSCocoaErrorDomain, code: NSFileReadUnknownError,
+                          userInfo: [NSFilePathErrorKey: destination.path,
+                                     NSLocalizedDescriptionKey: missing
+                                        ? "the file to replace is not there"
+                                        : "its permissions could not be read, so they could not be preserved: \(plainCause(error))"])
+        }
+
+        do { try Data(contents.utf8).write(to: temporary, options: [.withoutOverwriting]) }
+        catch {
+            // Report the file you asked to write, not the neighbour it travels through. Verified: the
+            // raw failure named `.SKILL.md.replacing-E1E6566C-…`, telling you that you lack permission
+            // on a randomly-named file you have never seen and cannot find.
+            throw NSError(domain: NSCocoaErrorDomain, code: (error as NSError).code,
+                          userInfo: [NSFilePathErrorKey: destination.path,
+                                     NSLocalizedDescriptionKey: plainCause(error)])
+        }
+        var placed = false
+        defer { if !placed { try? FileManager.default.removeItem(at: temporary) } }
+
+        try FileManager.default.setAttributes([.posixPermissions: mode], ofItemAtPath: temporary.path)
+        // `rename` replaces the destination in one step. Unlike the creating sibling, replacing is the
+        // whole point here, so a link that refuses an existing name would be the wrong primitive.
+        guard rename(temporary.path, destination.path) == 0 else {
+            let code = errno
+            throw NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError,
+                          userInfo: [NSFilePathErrorKey: destination.path,
+                                     NSLocalizedDescriptionKey:
+                                        "could not replace the file (\(String(cString: strerror(code))))"])
+        }
+        placed = true
     }
 }

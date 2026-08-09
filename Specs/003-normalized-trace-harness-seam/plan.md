@@ -4,7 +4,7 @@
 |---|---|
 | **Feature** | F5 — Normalized trace & harness-adapter seam |
 | **Phase** | 1 — Walking Skeleton ([Roadmap/phase-1-walking-skeleton.md](../../Roadmap/phase-1-walking-skeleton.md), F5) |
-| **Status** | IMPLEMENTED (2026-06-21) — 58 tests green; docs verified |
+| **Status** | IMPLEMENTED (2026-06-21) — docs verified |
 | **Post-audit (2026-07-01)** | Verified by the [Phase-1 audit](../../Roadmap/phase-1-review.md). Naming delta: the replay double shipped as **`ReplayAdapter`** (house `<X>Adapter` convention), not the `HarnessReplay` written throughout this plan. The protocol later grew `probe(strict:)` + `HarnessInfo.warnings` (F6 correctness pass / F7); design §9.1 and code agree today. |
 | **Last updated** | 2026-06-21 |
 | **Builds on** | F1/F2 — `EDDCore` (`SchemaIdentified`/`SkilletJSON`/`ExitCode`/`EDDError`), `RenderKit`, the `skillet` executable + subcommand pattern ([spec 001](../001-project-discovery-output-contract/plan.md), [spec 002](../002-adopt-skillet-repo/plan.md)) |

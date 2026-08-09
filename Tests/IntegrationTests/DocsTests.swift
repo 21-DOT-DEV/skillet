@@ -1,5 +1,11 @@
 import Testing
 import Foundation
+import Subprocess
+#if canImport(System)
+import System
+#else
+import SystemPackage
+#endif
 
 @Suite("Docs are true", .tags(.integration))
 struct DocsTests {
@@ -240,6 +246,219 @@ struct DocsTests {
         for name in names {
             #expect(section.contains("skillet \(name)"),
                     "`skillet \(name)` ships but is not documented in AGENTS.md's Commands section")
+        }
+    }
+
+    /// The names the binary actually answers to.
+    static func registeredCommands() async throws -> Set<String> {
+        let out = try await SkilletHarness().run(["--experimental-dump-help"])
+        struct Dump: Decodable {
+            struct Command: Decodable { let commandName: String?; let subcommands: [Command]? }
+            let command: Command
+        }
+        let names = (try JSONDecoder().decode(Dump.self, from: Data(out.stdout.utf8))
+            .command.subcommands ?? []).compactMap(\.commandName).filter { $0 != "help" }
+        #expect(names.count > 5, "guard against the check silently finding nothing to compare")
+        return Set(names)
+    }
+
+    /// The reverse of the two checks above, and the direction that was missing. They prove every shipped
+    /// command is written down; neither notices the design document **presenting a command you cannot
+    /// run** — which it did for two of them, alongside a list of options the parser rejects. Anything
+    /// named there but not registered has to be marked, in the document, with the marker below; the
+    /// marker is what turns "this looks out of date" into something a machine settles.
+    static let plannedMarker = "(planned)"
+
+    @Test("Every command the design document lists is one the tool answers to, or is marked planned")
+    func designListsNothingYouCannotRun() async throws {
+        let registered = try await Self.registeredCommands()
+        let design = try DocFile.read("skillet-design.md")
+        guard let block = Self.porcelainBlock(design) else {
+            Issue.record("skillet-design.md has no porcelain command block to check"); return
+        }
+        var checked = 0
+        for line in block.split(separator: "\n") {
+            let text = String(line)
+            guard let name = text.split(separator: " ").dropFirst().first.map(String.init),
+                  text.hasPrefix("skillet ") else { continue }
+            checked += 1
+            if registered.contains(name) {
+                #expect(!text.contains(Self.plannedMarker),
+                        "`skillet \(name)` ships — remove the \(Self.plannedMarker) marker")
+            } else {
+                #expect(text.contains(Self.plannedMarker),
+                        "the design document presents `skillet \(name)` as something you can run, but the tool does not register it — mark it \(Self.plannedMarker)")
+            }
+        }
+        #expect(checked > 5, "guard against the check silently finding nothing to compare")
+    }
+
+    /// The design document's usage line for `suggest` advertised two options the parser refuses, so a
+    /// reader following it got a parse error. Same rule as above, applied to option names.
+    @Test("Every option the design document spells out for suggest is one the parser accepts")
+    func designSpellsOnlyRealOptions() async throws {
+        let help = try await SkilletHarness().run(["suggest", "--help"]).stdout
+        let design = try DocFile.read("skillet-design.md")
+        guard let synopsis = Self.suggestSynopsis(design) else {
+            Issue.record("skillet-design.md has no `skillet suggest` usage block to check"); return
+        }
+        // Everything that looks like an option in the usage line, and the planned ones listed beneath it.
+        let named = Set(synopsis.matches(of: /--[a-z][a-z-]+/).map { String($0.output) })
+        let planned = Set(Self.plannedOptions(design))
+        #expect(!named.isEmpty, "guard against the check silently finding nothing to compare")
+        for option in named.subtracting(planned) {
+            #expect(help.contains(option),
+                    "the design document spells `\(option)` in the suggest usage line, but the parser does not accept it — either ship it or list it as planned beneath the block")
+        }
+        for option in planned where help.contains(option) {
+            Issue.record("`\(option)` is listed as planned but the parser now accepts it — move it into the usage line")
+        }
+    }
+
+    /// The fenced block under "porcelain" in §6.1 — the list a reader takes as "what I can run".
+    static func porcelainBlock(_ design: String) -> String? {
+        guard let anchor = design.range(of: "skillet init        # adopt skillet in a repo") else { return nil }
+        let rest = design[anchor.lowerBound...]
+        return String(rest[..<(rest.range(of: "\n```")?.lowerBound ?? rest.endIndex)])
+    }
+
+    /// The fenced usage line under the `#### \`skillet suggest\`` heading.
+    static func suggestSynopsis(_ design: String) -> String? {
+        guard let heading = design.range(of: "#### `skillet suggest`") else { return nil }
+        let rest = design[heading.upperBound...]
+        guard let open = rest.range(of: "```") else { return nil }
+        let body = rest[open.upperBound...]
+        return String(body[..<(body.range(of: "```")?.lowerBound ?? body.endIndex)])
+    }
+
+    /// Options the design document itself declares not-yet-available, read from the line beneath the
+    /// usage block so the exemption lives next to the claim it exempts.
+    static func plannedOptions(_ design: String) -> [String] {
+        guard let heading = design.range(of: "#### `skillet suggest`") else { return [] }
+        let rest = design[heading.upperBound...]
+        let window = String(rest.prefix(2_000))
+        guard let line = window.range(of: "Planned, not yet accepted:") else { return [] }
+        let tail = window[line.upperBound...]
+        let sentence = String(tail[..<(tail.range(of: "\n\n")?.lowerBound ?? tail.endIndex)])
+        return sentence.matches(of: /--[a-z][a-z-]+/).map { String($0.output) }
+    }
+
+    // MARK: - the documentation catalog
+
+    static let catalog = DocFile.root.appending(path: "Sources/skillet/skillet.docc")
+
+    static func catalogFiles() throws -> [String] {
+        try FileManager.default.contentsOfDirectory(atPath: catalog.path).filter { $0.hasSuffix(".md") }
+    }
+
+    /// The catalog listed four commands while nine shipped, and nothing noticed. The binary is the
+    /// source of truth and cannot drift.
+    @Test("Every command the binary exposes appears in the documentation's command table")
+    func catalogListsEveryCommand() async throws {
+        let out = try await SkilletHarness().run(["--experimental-dump-help"])
+        struct Dump: Decodable {
+            struct Command: Decodable { let commandName: String?; let subcommands: [Command]? }
+            let command: Command
+        }
+        let names = (try JSONDecoder().decode(Dump.self, from: Data(out.stdout.utf8))
+            .command.subcommands ?? []).compactMap(\.commandName).filter { $0 != "help" }
+        #expect(names.count > 5, "guard against the check silently finding nothing to compare")
+
+        let landing = try String(contentsOf: Self.catalog.appending(path: "skillet.md"), encoding: .utf8)
+        for name in names {
+            #expect(landing.contains("| `\(name)` |"),
+                    "`skillet \(name)` ships but has no row in the documentation's command table")
+        }
+    }
+
+    @Test("Every cross-reference in the documentation points at a document that exists")
+    func catalogCrossReferencesResolve() throws {
+        let files = try Self.catalogFiles()
+        #expect(files.count > 1)
+        let stems = Set(files.map { String($0.dropLast(3)) })
+        for file in files {
+            let text = try String(contentsOf: Self.catalog.appending(path: file), encoding: .utf8)
+            for match in text.components(separatedBy: "<doc:").dropFirst() {
+                let target = String(match.prefix(while: { $0 != ">" }))
+                #expect(stems.contains(target), "\(file) links to <doc:\(target)>, which does not exist")
+            }
+        }
+    }
+
+    /// **The tutorial is a test, output included.** Its shell steps are extracted and executed in a
+    /// scratch folder, in order, and each step's printed output is compared **exactly** against the
+    /// sample shown beneath it — the model Go bakes in for documentation examples, where the declared
+    /// output is the assertion. Checking only that commands succeed was half the job: it caught a step
+    /// that stopped working, but not a sample that had drifted from what the tool prints.
+    ///
+    /// Exact comparison is sustainable here because nothing in these samples varies between runs — no
+    /// dates, no generated identifiers, no absolute paths. Churn is what trains people to re-record a
+    /// snapshot without reading it, and there is none to churn.
+    ///
+    /// The convention: ```sh fences are the tour and are run; a ```text fence immediately after one is
+    /// that step's expected output. A step with no sample beneath it is only required to succeed.
+    /// Machine-specific setup is written as prose so it can never be mistaken for either.
+    @Test("The free tutorial's commands still work, and print what it says they print", .tags(.slow))
+    func tutorialCommandsStillWork() async throws {
+        let text = try String(contentsOf: Self.catalog.appending(path: "TryingItForFree.md"), encoding: .utf8)
+
+        // Fenced blocks in order, so each command can be paired with the sample beneath it.
+        var fences: [(kind: String, body: String)] = []
+        var current: [Substring]?
+        var kind = ""
+        for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            if line.hasPrefix("```sh") { current = []; kind = "sh"; continue }
+            if line.hasPrefix("```text") { current = []; kind = "text"; continue }
+            if line.hasPrefix("```"), current != nil {
+                fences.append((kind, current!.joined(separator: "\n"))); current = nil; continue
+            }
+            if current != nil { current!.append(line) }
+        }
+        var steps: [(command: String, sample: String?)] = []
+        for (index, fence) in fences.enumerated() where fence.kind == "sh" {
+            let next = index + 1 < fences.count ? fences[index + 1] : nil
+            steps.append((fence.body, next?.kind == "text" ? next?.body : nil))
+        }
+        #expect(steps.count >= 5, "found \(steps.count) runnable steps — the tour should have more")
+        #expect(steps.contains { $0.sample != nil }, "no step has a sample to compare against")
+
+        // One shell, so the working directory and created files carry across steps; a marker between
+        // them splits the combined output back apart. Errors are folded into the same stream so the
+        // comparison sees what a person at a terminal would see, in the order they would see it.
+        let marker = "===SKILLET-DOC-STEP==="
+        let script = (["exec 2>&1", "set -e"] + steps.enumerated().map { index, step in
+            (index == 0 ? "" : "printf '\\n\(marker)\\n'\n") + step.command
+        }).joined(separator: "\n")
+
+        let scratch = try Fixture.makeTempDirectory(); defer { Fixture.remove(scratch) }
+        let binDirectory = try SkilletHarness().executable.removingLastComponent()
+        let path = "\(binDirectory):" + (ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin")
+
+        let result = try await Subprocess.run(
+            .path(FilePath("/bin/sh")),
+            arguments: .init(["-c", script]),
+            environment: .inherit.updating(["PATH": path]),
+            workingDirectory: FilePath(scratch.path),
+            output: .string(limit: 1 << 20), error: .string(limit: 1 << 20))
+        var code: Int32 = -1
+        if case let .exited(value) = result.terminationStatus { code = value }
+        let printed = result.standardOutput ?? ""
+        #expect(code == 0, "a command in the tutorial failed:\n\(printed)")
+
+        // Only surrounding blank lines are normalised — a sample must otherwise match to the character.
+        let actual = printed.components(separatedBy: "\n\(marker)\n")
+        #expect(actual.count == steps.count, "expected \(steps.count) steps of output, got \(actual.count)")
+        for (index, step) in steps.enumerated() where step.sample != nil {
+            guard index < actual.count else { continue }
+            let expected = step.sample!.trimmingCharacters(in: .newlines)
+            let got = actual[index].trimmingCharacters(in: .newlines)
+            #expect(got == expected, """
+                the tutorial shows different output than the command produces, at step \(index + 1):
+                --- the tutorial says ---
+                \(expected)
+                --- the command printed ---
+                \(got)
+                """)
         }
     }
 }

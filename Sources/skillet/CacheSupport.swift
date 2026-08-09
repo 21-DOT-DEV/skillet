@@ -22,7 +22,8 @@ enum CacheSupport {
         if let link = SafeFile.firstSymlinkOnPath(from: projectRoot, to: target) {
             throw EDDError.invalidArtifact(
                 path: relativeLabel(target, from: projectRoot),
-                reason: "cache path crosses a symlink (not allowed): \(link.lastPathComponent)")
+                reason: "cache path crosses a symlink (not allowed): \(link.lastPathComponent)",
+                fix: "replace the symbolic link with a real folder — a link could send this outside the project, where the checks that keep it undoable do not reach")
         }
         // A plain file where a folder belongs is a malformed project — the user's problem to fix, with a
         // specific remedy. Without this check the folder-creation call throws a raw filesystem error,
@@ -34,7 +35,8 @@ enum CacheSupport {
                !isDirectory.boolValue {
                 throw EDDError.invalidArtifact(
                     path: relativeLabel(candidate, from: projectRoot),
-                    reason: "is a file, but a directory is expected here — remove or rename it")
+                    reason: "is a file, but a directory is expected here — remove or rename it",
+                    fix: "remove or rename that file so a folder can take its place, then re-run")
             }
         }
         // Keep the cache self-ignoring even when this is the first skillet command run in a repo, so a

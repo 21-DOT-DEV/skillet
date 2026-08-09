@@ -682,8 +682,13 @@ struct SuggestIntegrationTests {
 
         // Identical draft already present: you are in the desired state — name the file worth reading.
         let repeated = try await SkilletHarness().run(args)
-        #expect(repeated.stdout.contains("nothing to write — review the existing draft at .skillet/proposals/fix.json"))
+        #expect(repeated.stdout.contains("nothing to draft — review the existing draft at .skillet/proposals/fix.json"))
         #expect(!repeated.stdout.contains("review the excerpt →"))
+        // **The summary must agree with that closing line.** It used to print "written <path>" here,
+        // directly above a line saying nothing had been written — the gap this test previously had.
+        #expect(!repeated.stdout.contains("written          "),
+                "a run that wrote nothing must not claim it wrote a file")
+        #expect(repeated.stdout.contains("already there"))
 
         // A different draft holds the name: the useful step is how to write yours.
         let reply2 = try Self.writeReply(
@@ -695,6 +700,11 @@ struct SuggestIntegrationTests {
         #expect(taken.stdout.contains("occupied by something else"))
         #expect(taken.stdout.contains("--out"))
         #expect(!taken.stdout.contains("review the excerpt →"))
+        // Nothing was saved, and the model did produce an edit — so "drafted 0 edits" read as though the
+        // model had returned nothing. Say what happened to the file instead.
+        #expect(!taken.stdout.contains("drafted          0"),
+                "reads as 'the model produced nothing' when it produced an edit that was not saved")
+        #expect(taken.stdout.contains("not saved"))
     }
 
     @Test("A model program that runs but fails is described as such — never as 'could not find it'")
@@ -788,6 +798,12 @@ struct SuggestIntegrationTests {
         let out = try await SkilletHarness().run(
             ["-C", root.path, "suggest", "demo", "--from", "2026-06-09-slop", "--reply-file", secret.path])
         #expect(out.exitCode != 0)
+        // **Say why it failed, not just that it did.** Without this the test passes whenever the command
+        // errors for *any* reason — a missing model, a bad fixture — so the confinement check could be
+        // removed entirely and nothing here would notice. Not found in the report; found by sweeping for
+        // the same shape after two nearby tests turned out to have it.
+        #expect(out.stderr.contains("escapes its base directory"),
+                "it must fail *because* the path leaves the project, not for some unrelated reason")
         #expect(!out.stdout.contains("TOP-SECRET-CANARY-VALUE"))
         #expect(!out.stderr.contains("TOP-SECRET-CANARY-VALUE"),
                 "no part of a file outside the project may be echoed back")
@@ -974,5 +990,124 @@ struct SuggestIntegrationTests {
             with: Data(contentsOf: proposals.appendingPathComponent(entries[0]))) as? [String: Any])
         let edits = try #require(saved["edits"] as? [[String: Any]])
         #expect(edits.first?["proposed_text"] as? String == "", "the deletion reached the file")
+    }
+
+    /// Drafting is the step that costs money. On a file using Windows line breaks it used to drop every
+    /// multi-line edit as "does not appear in SKILL.md" and advise a re-draft — which hit the same wall,
+    /// charging again each time round. Applying had already been fixed; drafting had not.
+    @Test("Drafting against a file with Windows line breaks keeps the edits instead of dropping them")
+    func draftingHandlesWindowsLineBreaks() async throws {
+        let root = try Self.makeRepo(); defer { Fixture.remove(root) }
+        let file = root.appendingPathComponent("skills/demo/SKILL.md")
+        let windows = try String(contentsOf: file, encoding: .utf8)
+            .replacingOccurrences(of: "\n", with: "\r\n")
+        try windows.write(to: file, atomically: true, encoding: .utf8)
+
+        // A two-line quote, with plain newlines — which is what a model returns whatever the file uses.
+        let reply = try Self.writeReply(
+            ##"{"edits":[{"current_excerpt":"# Guide\n\nAlways use the rule of three.","proposed_text":"# Guide\n\nUse three.","rationale":"r","addresses":["2026-06-09-slop"]}]}"##,
+            in: root)
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "suggest", "demo", "--from", "2026-06-09-slop", "--reply-file", reply, "--json"])
+        #expect(out.exitCode == 0)
+        let json = try #require(try JSONSerialization.jsonObject(with: Data(out.stdout.utf8)) as? [String: Any])
+        #expect(json["edits"] as? Int == 1, "the edit must survive, not be dropped as missing")
+    }
+
+    /// A script could not tell "a new draft was created" from "one was already there": both reported a
+    /// path and no field said which had happened. An explicit changed/unchanged signal is the standard
+    /// for a command you can run repeatedly.
+    @Test("The machine summary says which of the four things happened to the file")
+    func machineSummaryNamesTheOutcome() async throws {
+        let root = try Self.makeRepo(friction: true); defer { Fixture.remove(root) }
+        let reply = try Self.writeReply(Self.goodReply, in: root)
+        let args = ["-C", root.path, "suggest", "demo", "--from", "2026-06-09-slop",
+                    "--out", "fix.json", "--reply-file", reply, "--json"]
+
+        func outcome(_ output: String) throws -> String {
+            let json = try #require(try JSONSerialization.jsonObject(with: Data(output.utf8)) as? [String: Any])
+            return try #require(json["outcome"] as? String)
+        }
+
+        #expect(try outcome(try await SkilletHarness().run(args).stdout) == "written")
+        #expect(try outcome(try await SkilletHarness().run(args).stdout) == "unchanged",
+                "the second run created nothing — it must not report the same thing as the first")
+
+        // Linking a test to the evidence makes the saved draft's derived list out of date; refreshing it
+        // does rewrite the file, so that is a different outcome again from leaving it alone.
+        let record = root.appendingPathComponent("skills/demo/evaluations/findings/2026-06-09-slop.md")
+        let text = try String(contentsOf: record, encoding: .utf8)
+        try text.replacingOccurrences(of: "model: opus", with: "model: opus\neval: rule-of-three")
+            .write(to: record, atomically: true, encoding: .utf8)
+        #expect(try outcome(try await SkilletHarness().run(args).stdout) == "refreshed")
+
+        // A **different request** — different evidence — asked to write to the same name. That name is
+        // held by the draft above, so nothing is saved at all.
+        let other = try Self.writeReply(
+            ##"{"edits":[{"current_excerpt":"# Guide","proposed_text":"# Guidance","rationale":"r","addresses":["2026-06-10-handfix"]}]}"##,
+            in: root, named: "other.json")
+        let blocked = try await SkilletHarness().run(
+            ["-C", root.path, "suggest", "demo", "--from", "2026-06-10-handfix", "--out", "fix.json",
+             "--reply-file", other, "--json"])
+        #expect(try outcome(blocked.stdout) == "not-saved")
+    }
+
+    @Test("A preview says it was a preview")
+    func previewNamesItsOutcome() async throws {
+        let root = try Self.makeRepo(); defer { Fixture.remove(root) }
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "suggest", "demo", "--from", "2026-06-09-slop", "--dry-run", "--json"])
+        let json = try #require(try JSONSerialization.jsonObject(with: Data(out.stdout.utf8)) as? [String: Any])
+        #expect(json["outcome"] as? String == "previewed")
+    }
+
+    /// A model may legitimately conclude that nothing needs changing. That is an answer, not a success:
+    /// there is nothing to review and nothing to apply. The tool used to exit 0 and print two next steps
+    /// — review the excerpt, then apply the draft — when there was no excerpt, and applying is refused a
+    /// moment later with "contains no edits". So it handed over a command it would reject.
+    @Test("A draft proposing nothing says so, and does not offer a command that will be refused")
+    func emptyDraftIsNotSuccess() async throws {
+        let root = try Self.makeRepo(); defer { Fixture.remove(root) }
+        let reply = try Self.writeReply(##"{"edits":[]}"##, in: root)
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "suggest", "demo", "--from", "2026-06-09-slop", "--reply-file", reply])
+        #expect(out.exitCode == 1, "ran fine and produced nothing — neither success nor a failure to run")
+        #expect(out.stdout.contains("nothing to apply"), "say plainly that there is nothing here")
+        #expect(!out.stdout.contains("--apply"),
+                "never hand over a command that the very next step refuses")
+        #expect(!out.stdout.contains("review the excerpt"), "there is no excerpt to review")
+    }
+
+    /// The file is kept deliberately: it records that this exact request was made and yielded nothing,
+    /// which is what a repeat run compares against.
+    @Test("A draft proposing nothing is still written down")
+    func emptyDraftIsStillRecorded() async throws {
+        let root = try Self.makeRepo(); defer { Fixture.remove(root) }
+        let reply = try Self.writeReply(##"{"edits":[]}"##, in: root)
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "suggest", "demo", "--from", "2026-06-09-slop", "--reply-file", reply, "--json"])
+        let json = try #require(try JSONSerialization.jsonObject(with: Data(out.stdout.utf8)) as? [String: Any])
+        #expect(json["edits"] as? Int == 0)
+        #expect(json["outcome"] as? String == "written", "the words in this output are a published contract")
+        let path = try #require(json["path"] as? String)
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(path).path))
+    }
+
+    /// Declining to read a file and rejecting its contents are different problems. The advice for the
+    /// second — correct the file so it matches the required shape — was printed for both, at four places
+    /// that turn the first into the second.
+    @Test("A file that cannot be read is told how to fix that, not how to fix a schema")
+    func unreadableFileAdvisesAboutTheRead() async throws {
+        let root = try Self.makeRepo(); defer { Fixture.remove(root) }
+        // A reply file that is a directory: readable path, but nothing a text read can do with it.
+        let asDirectory = root.appendingPathComponent("reply.json", isDirectory: true)
+        try FileManager.default.createDirectory(at: asDirectory, withIntermediateDirectories: true)
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "suggest", "demo", "--from", "2026-06-09-slop",
+             "--reply-file", asDirectory.path])
+        #expect(out.stderr.contains("not a regular file"), "say what was wrong with reading it")
+        #expect(out.stderr.contains("put an ordinary file there"), "and what to do about that")
+        #expect(!out.stderr.contains("matches its schema"),
+                "nothing was read, so nothing can be said about the shape of its contents")
     }
 }

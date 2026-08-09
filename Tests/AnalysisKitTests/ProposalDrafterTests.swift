@@ -188,7 +188,7 @@ struct ProposalDrafterTests {
         #expect(parsed.disclosures.first?.reason.contains("appears 4 times") == true,
                 "got: \(parsed.disclosures.first?.reason ?? "none")")
         // And the direct result, so the count isn't only checked through the message.
-        #expect(ProposalDrafter.anchor("dup", in: "dup\na\ndup\nb\ndup\nc\ndup\n") == .ambiguous(count: 4, capped: false))
+        #expect(ProposalDrafter.anchor("dup", in: "dup\na\ndup\nb\ndup\nc\ndup\n") == .ambiguous(count: 4, lines: ["1", "3", "5", "7"], capped: false))
     }
 
     @Test("The shared 'related evidence' rule is one place, and both filterings still behave")
@@ -306,5 +306,23 @@ struct ProposalDrafterTests {
         #expect(parsed.edits.count == 1, "a deletion is what the instructions ask for, not a no-op")
         #expect(parsed.edits.first?.proposedText == "")
         #expect(parsed.disclosures.isEmpty, "nothing to disclose — the edit was kept")
+    }
+
+    /// A model that names one real record and one it invented used to have the invented one removed
+    /// without a word — hiding fabrication exactly when it is hardest to notice, because the rest of the
+    /// answer looked right.
+    @Test("Naming a mix of real and invented evidence says which ones were ignored")
+    func partlyInventedEvidenceIsDisclosed() throws {
+        let context = DraftContext(
+            skill: "demo", skillMarkdown: "# Guide\n\nAlways use the rule of three.\n",
+            named: [DraftEvidence(id: "2026-06-09-real", kind: .finding, body: "b", eval: nil, sessions: [])],
+            linkedFriction: [], model: "m", runDate: "2026-06-10")
+        let parsed = try ProposalDrafter.parse(
+            reply: #"{"edits":[{"current_excerpt":"Always use the rule of three.","proposed_text":"x","rationale":"r","addresses":["2026-06-09-real","2026-01-01-invented"]}]}"#,
+            context: context)
+        #expect(parsed.edits.count == 1, "the edit is kept — what verified is kept, what did not is surfaced")
+        #expect(parsed.edits.first?.addresses == ["2026-06-09-real"], "only the real record is recorded")
+        #expect(parsed.disclosures.contains { $0.reason.contains("2026-01-01-invented") },
+                "the invented id must be named, not silently removed")
     }
 }

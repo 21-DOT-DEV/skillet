@@ -62,7 +62,7 @@ private func configText(options: GlobalOptions, context: ProjectContext?) throws
     case .failure(.notFound):
         return nil
     case let .failure(refusal):
-        throw EDDError.invalidArtifact(path: "skillet.yaml", reason: "skillet.yaml \(refusal.reason)")
+        throw refusal.rejection(path: "skillet.yaml", saying: "skillet.yaml ")
     case let .success(text):
         return (text, .repo(path: root + "/skillet.yaml"), "skillet.yaml")
     }
@@ -124,7 +124,8 @@ private func validated(_ config: SkilletConfig, path: String) throws -> SkilletC
        let violation = SkilletConfig.Project.skillsRootViolation(skillsRoot) {
         throw EDDError.invalidArtifact(
             path: path,
-            reason: "project.skills_root '\(skillsRoot)' \(violation) — it must name a folder inside the project (a plain relative subpath)")
+            reason: "project.skills_root '\(skillsRoot)' \(violation) — it must name a folder inside the project (a plain relative subpath)",
+            fix: "set project.skills_root in skillet.yaml to a folder inside the project, written as a relative path")
     }
     return config
 }
@@ -140,4 +141,19 @@ func loadConfig(options: GlobalOptions, context: ProjectContext? = nil) throws -
 func configuredRegistry(options: GlobalOptions) throws -> HarnessRegistry {
     let claudePath = try loadConfig(options: options)?.harness?.claudeCode?.path
     return HarnessRegistry(adapters: [ReplayAdapter(), ClaudeCodeAdapter(configPath: claudePath)])
+}
+
+/// A project-relative path to **show a person**, assembled from the setting naming where skills live
+/// plus the parts beneath it.
+///
+/// That setting may be the conventional `"."`, meaning skills sit at the project root. Joining it by
+/// hand yields `./demo/SKILL.md` — a valid path, but not the canonical form, which is conventionally
+/// written without `./` parts. One command stripped it and four did not, so the same project printed
+/// two spellings of the same path depending on which command you happened to run.
+///
+/// Only `.` and empty parts are dropped. The settings boundary already refuses `..` and absolute values
+/// and trims each part, so nothing else is left to tidy. This is for **display only** — paths used to
+/// actually reach files are built separately, and a `.` in those is resolved by the operating system.
+func projectRelativePath(_ segments: String...) -> String {
+    segments.filter { $0 != "." && !$0.isEmpty }.joined(separator: "/")
 }

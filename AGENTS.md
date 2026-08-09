@@ -4,7 +4,12 @@
 CLI for eval-driven development (EDD) of agent skills: capture real runs, turn hand-fixes into
 structured evidence, and ship a `SKILL.md` edit only after a previously-failing eval proves it.
 
-> **Status: Phase 1 COMPLETE — F1, F2, F4–F8 landed** ([completed-items audit](Roadmap/phase-1-review.md));
+> **Status — nine commands ship today:** `init`, `doctor`, `lint`, `score`, `harness`, `run`, `capture`,
+> `triage`, `suggest` (drafting *and* `--apply`). **Phases are not worked in order**, so a later phase
+> can be finished while an earlier one still has open features — which is why "Phase 2 IN PROGRESS"
+> appears below alongside shipped Phase 6 work, rather than contradicting it.
+>
+> **Phase 1 COMPLETE — F1, F2, F4–F8 landed** ([completed-items audit](Roadmap/phase-1-review.md));
 > **Phase 2 IN PROGRESS — F3 (`skillet doctor`, the $0 preflight) and F14 (`skillet run --axis
 > trigger`, the deterministic description axis) shipped 2026-07-04; F15 (`skillet run --ab`, the
 > provably skill-free baseline arm with paired Δ) shipped 2026-07-07; F16 (`skillet run --judge
@@ -15,9 +20,10 @@ structured evidence, and ship a `SKILL.md` edit only after a previously-failing 
 > [Specs/012](Specs/012-deterministic-scorers/plan.md)).
 > **Phase 3 — F26+F32 (`skillet capture`, scrubbed + scored session bundles) shipped; Phase 4 — F33
 > (`skillet triage`, the free corpus failure taxonomy) shipped; Phase 6 — F41 (`skillet suggest`,
-> drafted `SKILL.md` edits from observed evidence) shipped** ([Specs/013](Specs/013-capture-session-evidence/plan.md)–[Specs/018](Specs/018-draft-edit-proposals/plan.md)).
+> drafted `SKILL.md` edits from observed evidence) and F42 (`suggest --apply`, safe apply to the
+> working tree — all-or-nothing, clean-repo required, never commits) shipped** ([Specs/013](Specs/013-capture-session-evidence/plan.md)–[Specs/019](Specs/019-safe-apply/plan.md)).
 > `Package.swift` plus `EDDCore`, `TraceKit`,
-> `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `ScoreKit`, `JudgeKit`, `RunKit`, `CorpusKit`, `SanitizerKit`, `AnalysisKit`, `ConfigYAML`, and the
+> `ProjectKit`, `RenderKit`, `HarnessKit`, `LintKit`, `ScoreKit`, `JudgeKit`, `RunKit`, `CorpusKit`, `SanitizerKit`, `AnalysisKit`, `IterateKit`, `ConfigYAML`, and the
 > `skillet` executable exist — the executable owns the full ArgumentParser command tree (no
 > `skilletCLI` library; `ProjectKit` is the discovery/config-IO home) — with the full suite green
 > (`swift build && swift test`). For what exists right now, `skillet --help` is authoritative — this
@@ -56,7 +62,7 @@ Contributing, security disclosure, and code of conduct are handled at the org le
   `skillet lint [--json]`, `skillet score <path> [--format tty|json|sarif]` (free, model-free deterministic scorers over produced text → SARIF 2.1.0; a reporter, not a gate — exit 0 even with findings, exit 4 on a corrupt config), `skillet harness list`, `skillet harness info [--json]`,
   `skillet run [<skill>] [--axis behavior|trigger|all] [--ab] [--judge text-judge|grounded-judge] [--runs <k>] [--dry-run] [--yes] [--no-input] [--keep-workspace]` (paid: shells `claude`, resolved via `SKILLET_CLAUDE_CODE_BIN` env → `harness.claude-code.path` in `skillet.yaml` → `PATH` — behavioral trials add the judge; trigger trials are judge-free single calls; `--ab` doubles behavioral trials with a provably skill-free baseline arm, both arms judged; `--judge grounded-judge` reads produced-file contents to catch created-but-wrong, larger grading requests — gated by the combined spend estimate),
   `skillet triage [<skill>] [--since <YYYY-MM-DD>] [--dry-run] [--json]` (free: reads the recorded session bundles under a skill's `evaluations/sessions/`, groups their findings into a failure taxonomy, and writes one evidence file per cluster under `evaluations/findings/` — never overwrites an existing file, reports what it skipped, and exits 0 even when it finds problems: it is a reporter, not a gate),
-  `skillet suggest <skill> --from <evidence-id>... [--out <name>.json] [-n|--dry-run] [--yes] [--json]` (paid: one model call that **drafts** minimal `SKILL.md` edits from the evidence records you name plus the human notes sharing their sessions, and writes them to `.skillet/proposals/<id>.json` — it **applies nothing**; free static gates and a read-only check that the model program is usable run first, `-n` previews the request and its size without spending, an over-ceiling request refuses unless `--yes`, and a name already held by a different draft exits 2 without overwriting),
+  `skillet suggest <skill> --from <evidence-id>... [--out <name>.json] [-n|--dry-run] [--yes] [--json]` (paid: one model call that **drafts** minimal `SKILL.md` edits from the evidence records you name plus the human notes sharing their sessions, and writes them to `.skillet/proposals/<id>.json`; **applying is a separate, opt-in step** (`--proposals <name>.json --apply`, free — no model call — which writes your working tree all-or-nothing, refuses a dirty repository, and never commits or stages); free static gates and a read-only check that the model program is usable run first, `-n` previews the request and its size without spending, an over-ceiling request refuses unless `--yes`, and a name already held by a different draft exits 2 without overwriting),
   `skillet capture --skill <s> --slug <x> [--session <ref>] [--target-dir <path>] [--date <YYYY-MM-DD>] [--force] [--fail-on-secret] [--secret-scanner-path <p>]` (records the newest claude-code session — or `--session` — as a **secret-scrubbed**, scored evidence bundle under `<skills_root>/<skill>/evaluations/sessions/`; **always redacts** — there is no `--no-sanitize` — and **fails closed** if `betterleaks` can't run; `--fail-on-secret` exits 1 for CI, the bundle still written scrubbed),
   `skillet --help`, `skillet --version`. Hidden test seams on `run`: `--replay` (offline adapter+judge),
   `--replay-map <json>` (with-arm canned verdicts), `--replay-baseline-map <json>` (baseline-arm canned

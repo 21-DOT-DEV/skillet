@@ -250,6 +250,18 @@ public enum ProposalDrafter {
                         reason: "names evidence that was not provided (\(claimed.joined(separator: ", "))) — dropped, since it cannot be traced to anything observed"))
                     continue
                 }
+                // A model that names some real records and some it made up used to have the invented
+                // ones removed without a word — hiding fabrication precisely when it is hardest to spot,
+                // because the rest of the answer looked right. The edit is still kept: standard practice
+                // for partly-fabricated references is to keep what verifies and surface what did not,
+                // rather than discard the whole answer. What changes is that the discarding is said out
+                // loud.
+                let invented = claimed.filter { !namedIds.contains($0) }
+                if !addresses.isEmpty && !invented.isEmpty {
+                    disclosures.append(Disclosure(
+                        subject: label,
+                        reason: "also named evidence that was not provided (\(invented.sorted().joined(separator: ", "))) — those were ignored; the edit is kept for the records that do exist"))
+                }
                 let attributed = addresses.isEmpty ? namedIds.sorted() : addresses
                 if addresses.isEmpty {
                     disclosures.append(Disclosure(
@@ -266,37 +278,35 @@ public enum ProposalDrafter {
             case .missing:
                 disclosures.append(Disclosure(
                     subject: label, reason: "its quoted excerpt does not appear in \(editableFileName) — dropped (drift)"))
-            case let .ambiguous(count, capped):
+            case let .ambiguous(count, lines, capped):
                 // Say "at least" once the scan is capped — under-reporting a count is exactly the defect
-                // the accurate-count fix removed; the cap must not quietly reintroduce it.
+                // the accurate-count fix removed; the cap must not quietly reintroduce it. The locations
+                // are named because every match has identical text, so where they are is the only thing
+                // that tells them apart.
                 let howMany = capped ? "at least \(count)" : "\(count)"
+                let where_ = "lines \(lines.joined(separator: ", "))\(count > lines.count ? ", and more" : "")"
                 disclosures.append(Disclosure(
-                    subject: label, reason: "its quoted excerpt appears \(howMany) times in \(editableFileName) — dropped (ambiguous)"))
+                    subject: label,
+                    reason: "its quoted excerpt appears \(howMany) times in \(editableFileName) (\(where_)) — dropped (ambiguous)"))
             }
         }
         return ParsedDraft(edits: edits, disclosures: disclosures)
     }
 
-    enum AnchorResult: Equatable { case found(lines: String), missing, ambiguous(count: Int, capped: Bool) }
+    enum AnchorResult: Equatable { case found(lines: String), missing, ambiguous(count: Int, lines: [String], capped: Bool) }
 
-    /// Exact-once match, and the line span of the hit — derived here rather than trusted from the reply.
+    /// Exact-once match, through the shared rule in the pure core — the same one the apply engine uses
+    /// against the file on disk, so a passage accepted at drafting time is judged by identical logic
+    /// when it is applied.
     static func anchor(_ excerpt: String, in text: String) -> AnchorResult {
-        guard !excerpt.isEmpty else { return .missing }
-        // Count **every** occurrence, not just the first two: the disclosure exists to help someone
-        // narrow the quoted text, and "appears 2 times" when it appears 9 is actively misleading. Capped
-        // so a pathological excerpt/file pair can't make this expensive; at the cap the message says
-        // "at least N", which stays true rather than under-reporting.
-        let scanCap = 1_000
-        var ranges: [Range<String.Index>] = []
-        var searchStart = text.startIndex
-        while ranges.count < scanCap, let found = text.range(of: excerpt, range: searchStart..<text.endIndex) {
-            ranges.append(found)
-            searchStart = found.upperBound
+        // Translate the quoted passage into the file's own line-break convention first — exactly what
+        // applying does. Without it, a file checked out on Windows made the model's every multi-line
+        // quote look absent, so this **paid** step dropped all its edits and advised a re-draft that
+        // would hit the same wall, charging again each time round.
+        switch ExcerptAnchor.locate(ExcerptAnchor.matchingLineBreaks(of: excerpt, to: text), in: text) {
+        case let .found(_, lines): .found(lines: lines)
+        case .missing: .missing
+        case let .ambiguous(count, lines, capped): .ambiguous(count: count, lines: lines, capped: capped)
         }
-        guard let only = ranges.first else { return .missing }
-        if ranges.count > 1 { return .ambiguous(count: ranges.count, capped: ranges.count == scanCap) }
-        let startLine = text[text.startIndex..<only.lowerBound].filter { $0 == "\n" }.count + 1
-        let endLine = startLine + text[only].filter { $0 == "\n" }.count
-        return .found(lines: startLine == endLine ? "\(startLine)" : "\(startLine)-\(endLine)")
     }
 }

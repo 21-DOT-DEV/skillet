@@ -92,6 +92,42 @@ Tier: **H** = hostile bytes (deep-verified) · **T** = trusted/tool-owned (inven
 
 ## 5. Status log
 
+- **2026-08-08 — a reported bug that no longer exists, a test that could not tell working from silently
+  doing nothing, and fifteen headers quoting a number that goes stale.** (1) **The reported bug was
+  already fixed — by the commit under review.** The claim was that the setting naming where skill folders
+  live is cleaned up only as a whole string, so `skills /` keeps its space and gets pasted into printed
+  paths. The per-piece cleanup is present at `ConfigSupport.swift:110-112`, and `git show a9c0e85`
+  confirms that commit added it; `a9c0e85` is the current checkout. Checked behaviourally rather than by
+  reading — six spellings (`skills`, `skills `, `skills /`, `skills/ /`, ` skills / `, `./skills`) all
+  resolve to the same place and find the skill. A test for `skills /` already existed too. **One live
+  item remained:** `skills/ /`, where a piece is nothing but a space, was untested, and it is the only
+  spelling reaching *both* steps together — trimming empties the piece, then the empty piece is dropped.
+  Added, along with turning the three matching spellings into rows: this test had grown a block at a time
+  and each row now runs as its own case, so a failure names which spelling broke. The differently-shaped
+  fourth case, which uses an empty project and asserts a different line, stayed separate rather than
+  being forced into the rows. (2) **A test that only checked nothing had failed.** Setting the value to
+  the lone `.` means "skills live at the project root". The test created a skill there and then asserted
+  only that the command did not exit 4 and that the error text did not name the setting — never that the
+  skill was found. Demonstrated: pointing the setting at a folder holding no skill leaves both original
+  assertions passing while the skill goes undiscovered. The same shape sat ten lines below it, and
+  sweeping the whole suite for it turned up a **third instance the report did not mention** — a security
+  test at `SuggestIntegrationTests.swift:800` checking that a reply file outside the project fails, but
+  never *why*, so the confinement could have been removed and the test would still pass if the command
+  failed for any other reason. All three now assert what should have happened. The sweep was worth
+  measuring rather than guessing: a first pass flagged fourteen candidates, of which eleven were false
+  positives — asserting "these lines do not count toward the budget" is a real property, not a weak
+  check. (3) **Test counts in plan headers.** Fifteen headers quoted one, and five disagreed with their
+  own history — `Specs/016-corpus-triage/plan.md:7` said "implemented 2026-07-19 (584 tests green)" above
+  an entry recording 547 for that same day. A running total is a snapshot of the whole suite at a moment,
+  and the same number is already recorded, dated, per round in each plan's own status log, so the header
+  copy is duplication that drifts. Removed from all fifteen. **What a feature *added* is kept**, because
+  that never goes stale: `+21 tests (5 report unit, 7 audit, …)` describes this feature's contribution,
+  and `Specs/010-ab-baseline/plan.md` already used exactly that form, so the rule follows an existing
+  precedent rather than inventing one. Written down in [Specs/README.md](../README.md) so it does not
+  come back. **A correction to my own work mid-round:** I first wrote the spellings as a loop inside one
+  test and told the user each row would be named in the output, which a loop does not do; converted to
+  real per-row cases. 755 tests / 92 suites green, zero warnings; staged, no commits.
+
 - **2026-08-01 (filesystem failures classified by remedy, not by cause).** A plain permissions problem creating the scratch folder escaped unclassified and was reported as *"this is a defect in skillet, not a problem with your project"* — blaming ourselves for the machine's refusal — while the other paid command let the same class escape entirely unhandled. Fixed with a **single stated rule**, written where the next such error will be classified: a broken *layout* is something to fix in the project (bad artifact); the operating system refusing us — permissions, disk, I/O — is something to fix on the machine (environment); anything unanticipated is our bug (internal). Grounded in the modern convention of categorising errors by *what the user must do and who is responsible* rather than technical root cause; the extended Unix I/O codes were considered and rejected as cause-based, non-portable, and rarely consumed — [a modern replacement library abandoned them for user-error vs system-error ranges](https://github.com/square/exit), and [the operative advice is to document whatever codes you return](https://chrisdown.name/2013/11/03/exit-code-best-practises.html). The earlier file-write classification, which called a permissions failure a data problem, is harmonised to the same rule, and the message now carries the remedy (check permissions and disk space). +1 test.
 - **2026-08-01 (S15 — a paid command could spend without the harness safety check).** The measured-run command refuses a known-bad or signed-out model program **before** paying; the drafting command, added later, went straight from locating the program to running it — so it could spend against a blocked or unauthenticated setup, and the blocked/not-signed-in refusals were unreachable from it entirely. Fixed by making that check **one shared routine both commands call**, rather than adding a second copy: the security guidance is explicit that a single routine is what prevents "several implementations, most correct and one flawed", and that every path to the same operation must apply the same checks — a description of this bug rather than an analogy ([OWASP access control](https://top10proactive.owasp.org/the-top-10/c1-accesscontrol/)). The measured-run command's behaviour is unchanged (it still relaxes strictness only for its canned offline mode, and still receives the harness details it stamps into records). The drafting command skips the gate only where nothing is spent. **Verified by removing the gate — the test fails; restored, it passes.** +1 test.
 - **2026-07-30 (S14 — a drafting evidence id could read files outside the project).** `suggest --from <id>` interpolated the operator's text straight into a path. `appendingPathComponent` treats `/` as a separator and the OS resolves `..` at open time, so `--from ../../../../elsewhere` resolved outside the project; the safe reader refuses symlinks, special files and hard links but does **not** confine a path, so any ordinary `.md` on the machine was readable up to the 1 MiB cap — and the differing errors for present-vs-absent made it an existence oracle. Fixed with two layers: the id is checked against the project's **existing** id rule (a date plus a lowercase-and-dashes name, which structurally cannot contain `/`, `\\` or `.`) **before** it touches a path, and the read then goes through the confining reader with the evidence folder as its base. Paths are built one component at a time. The refusal echoes the id the user typed but never confirms whether anything exists there. **Verified by reverting both guards — the test fails; restored, it passes.** +1 test. (The same round also classified previously-unhandled filesystem errors from the write path as artifact failures, so a permissions problem or a create-race can no longer escape as an unclassified error.)

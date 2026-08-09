@@ -515,4 +515,30 @@ struct TriageIntegrationTests {
         #expect(!blocked.stdout.contains("skillet suggest demo --from"),
                 "a blocked file must not be offered as something to draft from")
     }
+
+    /// With skills living at the project root, four hints built their paths by hand and printed a
+    /// redundant `./` prefix — while one other command stripped it, so the same project printed two
+    /// spellings of the same path depending which command you ran. Paths shown to people are
+    /// conventionally written in canonical form, without `./` parts.
+    @Test("Paths in hints have no redundant './' when skills live at the project root")
+    func hintsAreCanonicalWhenSkillsLiveAtTheRoot() async throws {
+        let root = try Fixture.makeTempDirectory(); defer { Fixture.remove(root) }
+        try "project:\n  skills_root: .\n".write(
+            to: root.appendingPathComponent("skillet.yaml"), atomically: true, encoding: .utf8)
+
+        // No skill yet — the hint tells you where to put one.
+        let empty = try await SkilletHarness().run(["-C", root.path, "triage"])
+        #expect(empty.stdout.contains("add a skill (<name>/SKILL.md)"))
+        #expect(!empty.stdout.contains("./"), "got: \(empty.stdout)")
+    }
+
+    @Test("A nested skills folder still appears in full in the same hint")
+    func hintsKeepANestedFolder() async throws {
+        let root = try Fixture.makeTempDirectory(); defer { Fixture.remove(root) }
+        try "project:\n  skills_root: a/b\n".write(
+            to: root.appendingPathComponent("skillet.yaml"), atomically: true, encoding: .utf8)
+        let out = try await SkilletHarness().run(["-C", root.path, "triage"])
+        #expect(out.stdout.contains("add a skill (a/b/<name>/SKILL.md)"),
+                "stripping must only drop '.', never a real folder — got: \(out.stdout)")
+    }
 }

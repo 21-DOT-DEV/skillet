@@ -27,14 +27,14 @@ failures, never imagined ones.
    - Dependencies: findings (Phase 4), evidence (Phase 3), judge (Phase 2).
    - Confidence: Medium — design §6.1 `suggest`, §7.3.
 
-2. **[F42]** Safe apply to the working tree (CLI: `skillet suggest --apply[=<indices>]`) — PLANNED · Net-new
+2. **[F42]** Safe apply to the working tree (CLI: `skillet suggest --proposals <name>.json --apply [--edits <n>...]`) — SHIPPED 2026-08-04 · Net-new
    - Purpose & user value: Materialize a reviewed proposal into your working tree
      via content-anchored application (exact-once match, refuse-on-ambiguity,
      fail-loud on drift) — refusing a dirty tree and stopping short of the commit.
      The deliberate, safer P5 amendment.
    - Northstar: gap #2 (automates the apply step the human used to do by hand).
    - Success metrics:
-     - `suggest --apply=<i>` writes selected edits to the working tree, refuses a dirty tree, and never commits.
+     - `suggest --apply` writes the draft's edits to the working tree (`--edits <n>...` narrows it), refuses a dirty tree, and never commits.
      - An anchor that matches zero or >1 times aborts loudly with a remedy.
    - Dependencies: proposals (F41), content-anchored `EditApply` engine.
    - Confidence: Medium — design §6.1 `suggest`, §7.3.

@@ -118,7 +118,7 @@ struct CaptureCommand: AsyncParsableCommand {
         if let link = SafeFile.firstSymlinkOnPath(from: projectRootURL, to: sessionsDir) {
             throw EDDError.usage(
                 message: "refusing to write through a symlink on the sessions path: '\(link.path)'",
-                remedy: "the bundle destination (\(skillsRoot)/\(skill)/evaluations/sessions) must not cross a symlink")
+                remedy: "the bundle destination (\(projectRelativePath(skillsRoot, skill, "evaluations/sessions"))) must not cross a symlink")
         }
         // Resolve `--target-dir` through symlinks (consistent with base/projectRoot) AND confine it under
         // the project root: `extractBodies`'s `noSymlink` only guards the *leaf* under `workspace`, not

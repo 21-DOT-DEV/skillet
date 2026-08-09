@@ -86,6 +86,7 @@ struct ProposalFormatTests {
             promptVersion: "v1",
             estimatedPromptBytes: 4096,
             dryRun: dryRun,
+            outcome: dryRun ? .previewed : .written,
             disclosures: [Disclosure(subject: "findings/2026-05-01-x.md", reason: "is a symbolic link — not followed")])
     }
 
@@ -103,6 +104,7 @@ struct ProposalFormatTests {
          "prompt_version": "v1",
          "estimated_prompt_bytes": 4096,
          "dry_run": false,
+         "outcome": "written",
          "disclosures": [{"subject": "findings/2026-05-01-x.md", "reason": "is a symbolic link — not followed"}]}
         """
         #expect(try jsonSemanticEqual(try SkilletJSON.encode(sampleResult()), golden))

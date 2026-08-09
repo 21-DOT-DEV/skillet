@@ -104,7 +104,7 @@ Precise names are half the "intuitive" battle. These terms are used consistently
 | **Finding** | One structured record emitted by `triage` from scorers or corrective-turn mining |
 | **Lever** | Where a fix belongs: `eval` \| `benchmark` \| `lint` \| `skill_md` \| `reference` \| `config`. Routing is a hypothesis, not a verdict |
 | **Gate** | A deterministic rule evidence must clear before a lever may be pulled (e.g., prose edits need ≥3 sessions across ≥2 domains) |
-| **Proposal** | A candidate edit to a skill as content-anchored `EditProposal`s (per-edit `current_excerpt` → `proposed_text`, exact-once anchors) — drafted by `skillet suggest` or by hand — the output of `suggest`, the input of `iterate` |
+| **Proposal** | A candidate edit to a skill as content-anchored `EditProposal`s (per-edit `current_excerpt` → `proposed_text`, exact-once anchors) — drafted by `skillet suggest` or by hand — the output of `suggest`, and the input of `suggest --apply` |
 | **Judge** | The grader of rubric criteria. Pluggable; independent of the task harness; split by capability into text and grounded judges (§9.4) |
 | **Scorer** | A deterministic, free check that runs over outputs/bundles and emits SARIF |
 | **Lint rule** | A deterministic, free `SKILL-Lxxx` check over the SKILL.md *source*; the implementer of the `lint` lever |
@@ -265,19 +265,19 @@ through `$PAGER` (default `less -FIRX`) only on a TTY.
 
 ### 6.1 Porcelain — the loop
 
-The ten loop verbs map one-to-one onto the methodology spine (Discover → Codify → Measure → Interpret → Suggest → Apply → Re-measure) plus its free static gate, named for what the *user* is doing, not for the spine's internals.
+The ten loop verbs map one-to-one onto the methodology spine — six ship today, four are marked `(planned)` and are not yet registered (Discover → Codify → Measure → Interpret → Suggest → Apply → Re-measure) plus its free static gate, named for what the *user* is doing, not for the spine's internals.
 
 ```
 skillet init        # adopt skillet in a repo
 skillet lint        # free static analysis of SKILL.md source — the cheapest lever
 skillet run         # measure: execute evals, both axes, any harnesses
 skillet capture     # discover: record a production session as evidence
-skillet friction    # discover: log/inspect human-observed friction
+skillet friction    # (planned) discover: log/inspect human-observed friction
 skillet triage      # interpret: mine the corpus into routed findings
 skillet suggest     # suggest: draft edit proposals from evidence — machine drafts, human reviews
-skillet next        # the prioritized, gate-aware worklist
-skillet iterate     # apply (safely): A/B a proposal in a throwaway worktree
-skillet report      # render results for humans (TTY or HTML)
+skillet next        # (planned) the prioritized, gate-aware worklist
+skillet iterate     # (planned) apply (safely): A/B a proposal in a throwaway worktree
+skillet report      # (planned) render results for humans (TTY or HTML)
 ```
 
 ---
@@ -498,13 +498,19 @@ flowchart LR
 #### `skillet suggest`
 
 ```
-skillet suggest <skill> [--from <evidence-id>... | --from-run <ts> | --from-triage]
-                [--out <proposals.json>] [--proposals <file>] [--apply[=<indices>]]
+skillet suggest <skill> --from <evidence-id>...
+                [--out <proposals.json>] [--proposals <name>.json] [--apply] [--edits <n>...]
+                [-n|--dry-run] [--yes]
 ```
+
+Planned, not yet accepted: `--from-run`, `--from-triage`.
+
+Both would name evidence in bulk rather than one id at a time; until they land, name each id with a
+repeated evidence flag.
 
 The Suggest step — northstar gap #2 made executable. In: the failure taxonomy, the SKILL.md passages cited by failing `expected_behavior` lines, and corrective-turn excerpts from the linked sessions. The Judge is asked for *minimal surgical* edits and emits `EditProposal` objects — `skill_md_lines`, `rationale`, `current_excerpt`, `proposed_text`, `addresses` — to `.skillet/proposals/` (or `--out`). The Proposal (§7.3) is the **output of `suggest`** and the **input of `iterate`**. Nothing is applied by default.
 
-**The `--apply` convention (safe by default).** One verb across `suggest` and `iterate` — *"materialize the proposal(s) into a tree"* — with the target set by the command and the default always off: `suggest --apply[=<indices>]` writes the selected proposals into your **working tree** through the content-anchored `EditApply` engine (exact-once anchor match, refuse-on-ambiguity, fail-loud on drift), refusing a dirty tree and **never committing**; `iterate --apply <indices>` materializes them into the **throwaway worktree** for measurement. One concept, different tree — a `plan`/`apply`-style safety default. This is the deliberate P5 amendment (v0.2), not a silent port: the default path still only emits proposals, and `--apply` automates exactly the apply step Appendix A previously told the human to run by hand, still stopping short of the commit.
+**The `--apply` convention (safe by default).** One verb across `suggest` and `iterate` — *"materialize the proposal(s) into a tree"* — with the target set by the command and the default always off: `suggest --apply [--edits <n>...]` writes the selected proposals into your **working tree** through the content-anchored `EditApply` engine (exact-once anchor match, refuse-on-ambiguity, fail-loud on drift), refusing a dirty tree and **never committing**; `iterate --apply <indices>` materializes them into the **throwaway worktree** for measurement. One concept, different tree — a `plan`/`apply`-style safety default. This is the deliberate P5 amendment (v0.2), not a silent port: the default path still only emits proposals, and `--apply` automates exactly the apply step Appendix A previously told the human to run by hand, still stopping short of the commit.
 
 Drafting carries the improvement principles as standing judge instructions — generalize from feedback rather than adding fiddly MUSTs, prefer deleting prose that isn't pulling weight, prefer extraction to `references/` over inline growth, explain the why — under the codify-what-you-discover constraint: `suggest` only drafts against *observed* evidence, never imagined failures. Each proposal records its `motivation` evidence ids, so a proven iterate can advance exactly the evidence that motivated it.
 
@@ -562,7 +568,7 @@ proposals: fix-density.json — applying [0] of 1  (extract refusal prose to ref
 aggregate pass^k               0.88     0.94     ▲   (observed k=3, no contradictions)
 
 no regressions · proposal set proven
-→ land it:  skillet suggest --proposals fix-density.json --apply=0   (writes your working tree; you commit)
+→ land it:  skillet suggest docc-articles --proposals fix-density.json --apply --edits 0   (writes your working tree; you commit)
 ```
 
 Any regression ⇒ worktree discarded, exit `1`, nothing emitted unless `--keep-worktree` for forensics. `skillet` never applies to the live tree from `iterate` and never commits (P5). On success it can, with `--mark`, advance the linked friction event to `proven` — an explicit, auditable state write whose verdict is **provisional until judge calibration clears** (no unresolved scorer↔judge contradiction on the affected evals, §8). For a `skill_md` edit this also honors the **held-out proof** gate (§8): a sibling eval in the same failure class — *not* the one the edit was drafted from — must pass too, so the proof reflects a generalizing fix rather than an overfit; with no sibling available the mark records `single-eval` and `next` advises authoring one.
@@ -729,7 +735,7 @@ Scorer flagged example density below the rule-of-three threshold in the ECDH wal
 
 Findings and friction events are both **evidence** — the gates engine consumes them uniformly, de-duplicating on shared sessions. `state_reason` is **required whenever `state ∈ {held, watch, closed}`** (a human-set state must carry its rationale; §6.1's `set-state … --reason`) and optional on the pipeline states — the reader rejects a `held`/`watch`/`closed` file that omits it.
 
-**Proposal** *(format changed in v0.2)* — the output of `suggest`, the input of `iterate`: a JSON set with `id`, `skill`, `motivation: <evidence ids>`, `expected: <eval ids that should flip>`, and per-edit `EditProposal`s carrying `skill_md_lines`, `rationale`, `current_excerpt`, `proposed_text`, `addresses`. Application is **content-anchored**: each `current_excerpt` must match exactly once (refuse-on-ambiguity, fail-loud on drift). This deliberately replaces the v0.1 unified-diff body — line-anchored hunk offsets rot the moment a human applies any earlier edit by hand, while content anchors survive reordering; strictly safer than `git apply`. Drafted by `skillet suggest` or by hand — the format doesn't care.
+**Proposal** *(format changed in v0.2)* — the output of `suggest`, and the input of `suggest --apply` (and of `iterate` once it ships): a JSON set with `id`, `skill`, `motivation: <evidence ids>`, `expected: <eval ids that should flip>`, and per-edit `EditProposal`s carrying `skill_md_lines`, `rationale`, `current_excerpt`, `proposed_text`, `addresses`. Application is **content-anchored**: each `current_excerpt` must match exactly once (refuse-on-ambiguity, fail-loud on drift). This deliberately replaces the v0.1 unified-diff body — line-anchored hunk offsets rot the moment a human applies any earlier edit by hand, while content anchors survive reordering; strictly safer than `git apply`. Drafted by `skillet suggest` or by hand — the format doesn't care.
 
 **Evidence lifecycle.** `logged → candidate → codified → proven → closed`, with `watch`/`held` as human-set side states. Engine-readable, command-written: `friction add` creates `logged`; gate clearance makes `next` *propose* candidacy; `eval new --from-friction` sets `codified`; `iterate --mark` sets `proven`; the human closes. No transition ever happens implicitly (D6). **F29** ships this as a typed `LifecycleState` enum plus a centralized legal-moves table + pure transition validator in `EDDCore` (illegal *and* self-transitions rejected; the one backward edge is the constrained `closed → logged` reopen, so a recurring friction / re-detected finding re-enters the pipeline instead of spawning a duplicate) — so "never implicit" is a **unit-tested property of the core**, not a per-command convention.
 
@@ -1248,9 +1254,9 @@ proposals: fix-density.json — applying [0] of 1 in a throwaway worktree
   (12 other evals)             …        …        —
 aggregate pass^k               0.88     0.94     ▲   (observed k=3, no contradictions)
 no regressions · proposal set proven  (friction marked proven via --mark)
-→ land it: skillet suggest --proposals .skillet/proposals/fix-density.json --apply=0
+→ land it: skillet suggest docc-articles --proposals fix-density.json --apply --edits 0
 
-$ skillet suggest --proposals .skillet/proposals/fix-density.json --apply=0
+$ skillet suggest docc-articles --proposals fix-density.json --apply --edits 0
 applied 1 edit to skills/docc-articles/SKILL.md (working tree only — commit is yours)
 
 $ git commit -am "docc-articles: ground rule-of-three in density guidance (proven: rule-of-three-density)"

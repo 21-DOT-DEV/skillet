@@ -110,6 +110,32 @@ public struct Renderer: Sendable {
 
     /// `skillet suggest` (F41). **Report-and-point:** the summary states what happened and names the file
     /// written; the drafted edits themselves live in that file, never duplicated here.
+    public func renderApply(_ result: ApplyResult, nextSteps: [String] = []) throws -> Rendering {
+        switch mode {
+        case .json:
+            return Rendering(stdout: try SkilletJSON.encode(result) + "\n")
+        case .human:
+            var lines = ["apply — \(result.skill)"]
+            lines.append("  draft            \(result.proposalId)")
+            lines.append("  file             \(result.path)")
+            let applied = zip(result.applied, result.lines).map { "\($0) (line \($1))" }
+            let none = "(none)"
+            lines.append(result.dryRun
+                ? "  would apply      \(applied.isEmpty ? none : applied.joined(separator: ", "))"
+                : "  applied          \(applied.joined(separator: ", "))")
+            // Stated every time, not only when someone asks: this command stops short of the commit,
+            // and a reader should never have to remember that.
+            lines.append(result.dryRun
+                ? "  dry run          nothing written"
+                : "  committed        no — review the change and commit it yourself")
+            for disclosure in result.disclosures {
+                lines.append("  ! \(disclosure.subject): \(disclosure.reason)")
+            }
+            if !nextSteps.isEmpty { lines.append("→ next: " + nextSteps.joined(separator: " · ")) }
+            return Rendering(stdout: lines.joined(separator: "\n") + "\n")
+        }
+    }
+
     public func renderSuggest(_ result: SuggestResult, nextSteps: [String] = []) throws -> Rendering {
         switch mode {
         case .json:
@@ -132,8 +158,26 @@ public struct Renderer: Sendable {
         if result.dryRun {
             lines.append("  dry run          nothing sent, nothing written")
         } else {
-            lines.append("  drafted          \(result.edits) edit\(result.edits == 1 ? "" : "s")")
-            if let path = result.path { lines.append("  written          \(path)") }
+            // Say what actually happened to the file. This printed `written <path>` for every outcome
+            // that had a path, so a repeat run claimed it had written a file while the next line said
+            // nothing had been written — and a run that saved nothing said "drafted 0 edits", which reads
+            // as "the model produced nothing" when it produced edits that were simply not saved.
+            // **No catch-all.** Every outcome is spelled out, so adding one stops the build here until
+            // somebody says what it prints — rather than quietly reusing the "written" wording, which is
+            // what the old default branch did for anything it did not recognise.
+            switch result.outcome {
+            case .notSaved:
+                lines.append("  not saved        a different draft already holds that name")
+            case .refreshed:
+                lines.append("  edits            \(result.edits)")
+                if let path = result.path { lines.append("  refreshed        \(path) — its list of evals was out of date") }
+            case .unchanged:
+                lines.append("  edits            \(result.edits)")
+                if let path = result.path { lines.append("  already there    \(path) — nothing was rewritten") }
+            case .written, .previewed:
+                lines.append("  drafted          \(result.edits) edit\(result.edits == 1 ? "" : "s")")
+                if let path = result.path { lines.append("  written          \(path)") }
+            }
         }
         for disclosure in result.disclosures {
             lines.append("  ! \(disclosure.subject): \(disclosure.reason)")

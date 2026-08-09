@@ -138,7 +138,7 @@ struct RunCommand: AsyncParsableCommand {
                 switch SafeFile.readPlainText(skillDir.appendingPathComponent("SKILL.md"), cap: 1 << 20) {
                 case let .success(text): markdown = text
                 case let .failure(refusal):
-                    throw EDDError.invalidArtifact(path: "\(skillName)/SKILL.md", reason: "SKILL.md \(refusal.reason)")
+                    throw refusal.rejection(path: "\(skillName)/SKILL.md", saying: "SKILL.md ")
                 }
                 guard WorkspaceManager.frontmatterStub(markdown: markdown) != nil else {
                     throw EDDError.invalidArtifact(
@@ -473,7 +473,8 @@ struct RunCommand: AsyncParsableCommand {
     /// project root to the skill, and any symlinked `evaluations/` / answer / record file.
     private func assertNoSymlinkEscape(skillDir: URL, projectRoot: URL, skillName: String) throws {
         if let link = WorkspaceManager.firstSymlinkOnPath(from: projectRoot, to: skillDir) {
-            throw EDDError.invalidArtifact(path: skillName, reason: "skill path crosses a symlink (not allowed): \(link.lastPathComponent)")
+            throw EDDError.invalidArtifact(path: skillName, reason: "skill path crosses a symlink (not allowed): \(link.lastPathComponent)",
+                                           fix: "replace the symbolic link with a real folder — a link could send this outside the project, where the checks that keep it undoable do not reach")
         }
         let evaluations = skillDir.appendingPathComponent("evaluations")
         // `SKILL.md` is read (by the lint preflight + eval loader) before staging's symlink check, so it
@@ -485,7 +486,8 @@ struct RunCommand: AsyncParsableCommand {
                     evaluations.appendingPathComponent("benchmark.json"),
                     evaluations.appendingPathComponent("grading.json")]
         where WorkspaceManager.isSymlink(url) {
-            throw EDDError.invalidArtifact(path: skillName, reason: "skill path is a symlink (not allowed): \(url.lastPathComponent)")
+            throw EDDError.invalidArtifact(path: skillName, reason: "skill path is a symlink (not allowed): \(url.lastPathComponent)",
+                                           fix: "replace the symbolic link with a real folder — a link could send this outside the project, where the checks that keep it undoable do not reach")
         }
     }
 
@@ -529,7 +531,8 @@ struct RunCommand: AsyncParsableCommand {
                       FileManager.default.fileExists(atPath: fixture.source.path) else {
                     throw EDDError.invalidArtifact(
                         path: "\(skillName)/evaluations/evals.json",
-                        reason: "eval references a fixture that is missing, out-of-skill, symlinked, hidden, or private (only fixtures/** and evaluations/fixtures/** are allowed): \(file)"
+                        reason: "eval references a fixture that is missing, out-of-skill, symlinked, hidden, or private (only fixtures/** and evaluations/fixtures/** are allowed): \(file)",
+                        fix: "point the eval at a real, readable file under the skill's own fixtures/ or evaluations/fixtures/ folder"
                     )
                 }
             }
@@ -539,7 +542,8 @@ struct RunCommand: AsyncParsableCommand {
             if let link = WorkspaceManager.firstSymlink(in: skillDir.appendingPathComponent(entry)) {
                 throw EDDError.invalidArtifact(
                     path: "\(skillName)",
-                    reason: "skill bundle contains a symlink (not allowed in Phase 1): \(entry)/…/\(link.lastPathComponent)"
+                    reason: "skill bundle contains a symlink (not allowed in Phase 1): \(entry)/…/\(link.lastPathComponent)",
+                    fix: "replace that link inside the skill folder with the real file, so what is measured is what is committed"
                 )
             }
         }

@@ -1,4 +1,5 @@
 import Foundation
+import EDDCore
 #if canImport(Darwin)
 import Darwin
 #elseif canImport(Glibc)
@@ -8,8 +9,9 @@ import Glibc
 /// Filesystem-confinement + safe-read primitives — the single source of truth for "is this a
 /// symlink / hidden / confined below a base?", and for a size-capped UTF-8 read. Shared by the run
 /// stager (RunKit's `WorkspaceManager`), the bundle rules/audit (HarnessKit's `SkillBundleRules` /
-/// `SkillBundleAudit`), and the deterministic scorers (ScoreKit). Pure Foundation — ProjectKit stays
-/// `EDDCore`-only, so every consumer depends on it *downward* (no dependency cycle). Extracted here
+/// `SkillBundleAudit`), and the deterministic scorers (ScoreKit). Foundation plus ProjectKit stays
+/// `EDDCore`-only, so every consumer depends on it *downward* (no dependency cycle) — which is what
+/// lets a declined read build the error a command throws, right here beside the refusal itself. Extracted here
 /// (F17) from `SkillBundleRules`/`WorkspaceManager`; those keep thin delegating wrappers so their
 /// callers don't churn.
 public enum SafeFile {
@@ -75,25 +77,93 @@ public enum SafeFile {
         // lstat-checking each in order. This flags ANY symlink component — even one that stays under base
         // (which the escape check passes) — and, by walking the raw suffix, catches a `..` placed *after* a
         // symlink (`link/../real` routes through `link` though it lexically collapses to `real`). `.`/`..`
-        // resolve lexically (round 14). Target is `base + relative` for every caller, so `base.path` is a
-        // genuine raw prefix; if it somehow isn't, the escape check already proved confinement, so skip.
-        let basePath = base.path
-        guard target.path.hasPrefix(basePath) else { return nil }
-        let suffix = String(target.path.dropFirst(basePath.count))
-        var components: [String] = []
-        for raw in suffix.split(separator: "/") {
+        // resolve lexically (round 14).
+        //
+        // **Where the base sits is settled by asking the filesystem, not by comparing text.** This used
+        // to require one path string to start with the other, and answer "no symlink here" when it did
+        // not. Two spellings of one folder are ordinary — on this platform `/tmp` is itself a pointer to
+        // `/private/tmp` — so a base written one way and a target written the other skipped the walk
+        // entirely and reported clean. Measured: with a real symlink inside the folder, `/tmp/x` flagged
+        // it and `/private/tmp/x` reported nothing. That is the fail-open shape OWASP names — a check
+        // that cannot run must deny, never permit — and it was permitting.
+        //
+        // Identity, not spelling: two paths name the same directory when the filesystem gives them the
+        // same device and file number, which is immune to case, to `/private`, and to any other alias.
+        // The walk itself must stay on the path **as written**, because a resolved path has its pointers
+        // already followed and so can never contain one (CERT FIO16-J's trap).
+        // Three outcomes, not two. A folder that is **absent** and one we **could not look at** are
+        // different: nothing can exist below a folder that is not there, so there is no pointer to find
+        // and a clean answer is the true one — callers legitimately ask about paths not yet created. But
+        // a folder we were refused sight of might hold anything, and that is the case that must refuse.
+        // Collapsing them broke a caller asking about a path under a folder that does not exist yet.
+        let baseID: FileIdentity
+        switch locate(base) {
+        case let .at(identity): baseID = identity
+        case .absent: return nil
+        case .unreadable: return target
+        }
+        var walked = URL(fileURLWithPath: "/")
+        var insideBase = identity(of: walked) == baseID
+        var depthInside = 0
+        var reachedBase = insideBase
+        for raw in target.path.split(separator: "/") {
             let component = String(raw)
             if component == "." { continue }
             if component == ".." {
-                if components.isEmpty { return target }   // pops above base → escape
-                components.removeLast()
+                if insideBase {
+                    if depthInside == 0 { return target }   // pops above base → escape
+                    depthInside -= 1
+                }
+                walked = walked.deletingLastPathComponent()
+                insideBase = insideBase || identity(of: walked) == baseID
                 continue
             }
-            components.append(component)
-            let walk = components.reduce(base) { $0.appendingPathComponent($1) }
-            if isSymlink(walk) { return walk }
+            walked = walked.appendingPathComponent(component)
+            // Only components *below* the base are ours to judge. Above it is the machine's own layout —
+            // a home directory reached through a pointer is not this project's business.
+            if insideBase {
+                depthInside += 1
+                if isSymlink(walked) { return walked }
+            } else if identity(of: walked) == baseID {
+                insideBase = true
+                reachedBase = true
+            }
         }
+        // Never found the base among the ancestors, so nothing was actually checked. Refuse rather than
+        // report clean — the whole point of the change above.
+        guard reachedBase else { return target }
         return nil
+    }
+
+    /// What the filesystem calls this thing: its device and file number, or `nil` if it cannot be read.
+    /// Two paths naming one directory give the same pair however each is spelled. Deliberately follows
+    /// pointers, because the question here is "is this the same folder", not "is this a pointer" — that
+    /// second question is asked separately, component by component, on the path as written.
+    static func identity(of url: URL) -> FileIdentity? {
+        if case let .at(found) = locate(url) { return found }
+        return nil
+    }
+
+    /// What the filesystem says about a path: which thing it is, that there is nothing there, or that we
+    /// were not allowed to find out. The third is the one worth keeping separate — it is the only one
+    /// where a clean answer would be a guess.
+    enum Located {
+        case at(FileIdentity)
+        case absent
+        case unreadable
+    }
+
+    static func locate(_ url: URL) -> Located {
+        var info = stat()
+        if stat(url.path, &info) == 0 { return .at(FileIdentity(device: info.st_dev, number: info.st_ino)) }
+        return errno == ENOENT || errno == ENOTDIR ? .absent : .unreadable
+    }
+
+    /// A directory's device and file number. Named rather than a pair of numbers so it can be compared
+    /// directly, including when one side is missing because the path could not be read.
+    struct FileIdentity: Equatable {
+        let device: dev_t
+        let number: ino_t
     }
 
     /// The confinement-canonical form of `url` (T9): the OS-resolved real path (`realpath` — every symlink
@@ -145,6 +215,45 @@ public enum SafeFile {
             case let .oversized(size, cap): "is \(size) bytes — exceeds the \(cap >> 20) MiB read cap"
             case .binary: "is not UTF-8 text"
             }
+        }
+
+        /// What to actually do about it. Lives here because the refusal is the only thing that knows
+        /// which of these happened: callers turn several of these into one "this file is invalid" error,
+        /// whose standard advice is *"fix or regenerate the file so it matches its schema"* — right for a
+        /// file whose contents are the wrong shape, and wrong for every case below. Being told to correct
+        /// a file's contents when the actual problem is that the path points somewhere else, or that a
+        /// directory sits where a file belongs, sends you looking where the problem is not.
+        public var fix: String {
+            switch self {
+            case .notFound:
+                "create it, or point the command at a file that exists"
+            case .symlink, .unconfined:
+                "replace the symbolic link with the real file — a link could reach outside the project, where the checks that keep this undoable do not apply"
+            case .notRegularFile:
+                "put an ordinary file there — a directory or a pipe cannot be read as one"
+            case .hardLink:
+                "replace it with an independent copy; a second name for the same file can be changed from outside the project"
+            case .unreadable:
+                "check the file's permissions and that the disk is readable, then re-run"
+            case let .oversized(_, cap):
+                "split it, or bring it under the \(cap >> 20) MiB limit"
+            case .binary:
+                "save it as UTF-8 text — this is read as text, not as binary data"
+            }
+        }
+
+        /// Turn a declined read into the error a command throws, **carrying the matching advice with it**.
+        ///
+        /// This exists because remembering to attach the advice at each call site did not work: six
+        /// places turn a declined read into this error, the advice was added at two of them, and the
+        /// other four went on telling people to fix a file's contents when the problem was that the path
+        /// pointed outside the project. One route means there is nothing left to remember, and a seventh
+        /// caller cannot repeat the omission.
+        ///
+        /// `saying` prefixes the reason where a call site names what it was reading ("canned reply …"),
+        /// which is information the refusal itself does not have.
+        public func rejection(path: String, saying prefix: String = "") -> EDDError {
+            .invalidArtifact(path: path, reason: prefix.isEmpty ? reason : "\(prefix)\(reason)", fix: fix)
         }
     }
 

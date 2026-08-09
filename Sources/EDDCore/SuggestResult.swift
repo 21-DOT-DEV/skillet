@@ -31,17 +31,57 @@ public struct SuggestResult: SchemaIdentified, Codable, Sendable, Equatable {
     /// refusing ceiling is checked against (D5).
     public let estimatedPromptBytes: Int
     public let dryRun: Bool
+    /// **What this run actually did to the file**, in one word. Without it a reader cannot tell "a new
+    /// draft was created" from "one was already there", and the human summary said `written` in both
+    /// cases while the line below it said nothing had been written. An explicit changed/unchanged signal
+    /// is the standard for a command you can run repeatedly.
+    ///
+    /// **This reports the file, not a verdict on the run.** A model may legitimately reply proposing no
+    /// change; that still saves a file, so this still says `written` while the command leaves a non-zero
+    /// status. The field that answers "is there anything here to use?" is ``edits`` — zero means nothing
+    /// was proposed, which is how structured output conventionally reports an empty result, and it is
+    /// deliberately the only place that is stated. A second field repeating it would be one more thing
+    /// that has to stay in agreement forever, and reading this one instead is the mistake worth naming
+    /// here rather than worth adding a field to prevent.
+    ///
+    /// - `written` — a new draft was saved.
+    /// - `refreshed` — a draft was already there; its list of tests was out of date and was updated, so
+    ///   the file *was* rewritten.
+    /// - `unchanged` — a draft was already there and nothing needed doing.
+    /// - `not-saved` — the chosen name is held by a different draft; nothing was saved.
+    /// - `previewed` — a dry run; nothing was sent and nothing written.
+    /// A **fixed set**, not free text. The display used to match three of these by name and let anything
+    /// else fall through to a branch that printed "written <path>" — so a value nobody had handled, or a
+    /// mistyped one, reported a successful write. Naming the set means a new outcome cannot be added
+    /// without the display saying what it prints, checked when the code is built rather than when someone
+    /// reads the output. The words written into the machine-readable output are unchanged.
+    public enum Outcome: String, Codable, Sendable, Equatable, CaseIterable {
+        /// A new draft was saved.
+        case written
+        /// A draft was already there; its list of tests was out of date and was updated, so the file
+        /// *was* rewritten.
+        case refreshed
+        /// A draft was already there and nothing needed doing.
+        case unchanged
+        /// The chosen name is held by a different draft; nothing was saved.
+        case notSaved = "not-saved"
+        /// A dry run; nothing was sent and nothing written.
+        case previewed
+    }
+
+    public let outcome: Outcome
     /// Anything skipped or rejected, with its reason (dropped edits, collisions, refused reads).
     public let disclosures: [Disclosure]
 
     public init(skill: String, proposalId: String?, path: String?, edits: Int,
                 motivation: [String], expected: [String], model: String, promptVersion: String,
-                estimatedPromptBytes: Int, dryRun: Bool, disclosures: [Disclosure]) {
+                estimatedPromptBytes: Int, dryRun: Bool, outcome: Outcome,
+                disclosures: [Disclosure]) {
         self.skill = skill; self.proposalId = proposalId; self.path = path; self.edits = edits
         self.motivation = motivation; self.expected = expected; self.model = model
         self.promptVersion = promptVersion
         self.estimatedPromptBytes = estimatedPromptBytes; self.dryRun = dryRun
-        self.disclosures = disclosures
+        self.outcome = outcome; self.disclosures = disclosures
     }
 
     /// Written by hand so the **key set is fixed**: Swift's synthesized encoder omits `nil` optionals,
@@ -61,6 +101,7 @@ public struct SuggestResult: SchemaIdentified, Codable, Sendable, Equatable {
         try c.encode(promptVersion, forKey: .promptVersion)
         try c.encode(estimatedPromptBytes, forKey: .estimatedPromptBytes)
         try c.encode(dryRun, forKey: .dryRun)
+        try c.encode(outcome, forKey: .outcome)
         try c.encode(disclosures, forKey: .disclosures)
     }
 }

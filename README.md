@@ -28,24 +28,31 @@ available today, dashed = planned** (see [ROADMAP.md](ROADMAP.md)):
 flowchart LR
     I["skillet init<br/>adopt"]
     R["skillet run<br/>measure · pass^k"]
-    D["skillet capture · friction<br/>discover failures"]
-    N["skillet triage · next<br/>interpret · what to fix"]
-    F["skillet suggest · iterate<br/>fix & prove in a worktree"]
+    D["skillet capture<br/>discover failures"]
+    N["skillet triage<br/>interpret · what to fix"]
+    F["skillet suggest<br/>draft a fix · apply it"]
 
     I --> R --> D --> N --> F --> R
 
+    Df["skillet friction<br/>log a failure by hand"]
+    Nf["skillet next<br/>the single next action"]
+    Ff["skillet iterate<br/>prove a fix by A/B"]
+    D -.- Df
+    N -.- Nf
+    F -.- Ff
+
     classDef planned stroke-dasharray:5 5
-    class D,N,F planned
+    class Df,Nf,Ff planned
 ```
 
 You **adopt** skillet once (`init`), then loop: **measure** with `run` (each eval repeated *k* times
 for a `pass^k` consistency score), **discover** real failures via `capture`/`friction`, **interpret**
-them with `triage` — `next` names the single highest-value action — then **fix and prove** the change
-with `suggest`/`iterate` in a throwaway worktree, and re-run. Free `lint` checks gate every paid
+them with `triage`, then **fix** with `suggest` — which drafts a minimal edit from that evidence and,
+with `--apply`, writes it into your working tree — and re-run. Free `lint` checks gate every paid
 `run`, and `skillet doctor` preflights the whole environment for $0 — config, harness, skill
 visibility — so a misconfig never costs money. Today `skillet init`, `skillet doctor`, `skillet lint`,
-`skillet run`, `skillet score`, `skillet capture`, and `skillet triage` ship (plus `skillet harness info`
-for setup); the rest lands across the roadmap phases.
+`skillet run`, `skillet score`, `skillet capture`, `skillet triage`, and `skillet suggest` ship (plus
+`skillet harness info` for setup); `friction`, `next` and `iterate` land across the roadmap phases.
 
 ## Install
 
@@ -97,12 +104,14 @@ The paid `run` shells the `claude` binary, resolved via `SKILLET_CLAUDE_CODE_BIN
 
 Every command speaks to **humans** (TTY) and **scripts** (`--json`, each payload carrying a `schema`
 field) and returns stable exit codes: `0` ok · `1` measured failure · `2` usage · `3` environment ·
-`4` artifact · `5` gate. Human/TTY text is for people and is **not** an API; `--json` and exit codes
+`4` artifact · `5` gate · `70` internal error. Human/TTY text is for people and is **not** an API; `--json` and exit codes
 are the stable contract.
 
 ## Documentation
 
-- [Testing skillet end-to-end](Sources/skillet/skillet.docc/TestingEndToEnd.md) — a hands-on walkthrough of `init` → `lint` → `run`, including a real claude-code run via the Zed-bundled binary (a DocC article in the `skillet` catalog).
+- [Trying skillet without spending anything](Sources/skillet/skillet.docc/TryingItForFree.md) — a tutorial: the whole loop on a throwaway project, no account and no cost. Its commands are executed by the test suite, so they cannot go stale.
+- [Measuring a skill](Sources/skillet/skillet.docc/MeasuringASkill.md) — how to point it at a real skill of your own and get a score.
+- [Turning evidence into a fix](Sources/skillet/skillet.docc/TurningEvidenceIntoAFix.md) — how to record sessions, group the failures, and draft an edit.
 - [AGENTS.md](AGENTS.md) — operational onboarding for humans and AI agents (commands, conventions, boundaries).
 - [skillet-design.md](skillet-design.md) — the product design (principles, command surface, file formats).
 - [ROADMAP.md](ROADMAP.md) + [Roadmap/](Roadmap/) — the phased plan.

@@ -44,7 +44,8 @@ public struct SkillReader: Sendable {
         case let .failure(refusal):
             throw EDDError.skillNotVisible(
                 skill: dir.lastPathComponent,
-                reason: "SKILL.md \(refusal == .notFound ? "is missing" : refusal.reason) at \(skillMarkdown.path)"
+                reason: "SKILL.md \(refusal == .notFound ? "is missing" : refusal.reason) at \(skillMarkdown.path)",
+                fix: refusal == .notFound ? nil : refusal.fix
             )
         }
         // Optional input: absent → nil, and a refusal (special file / link trick) also → nil — the

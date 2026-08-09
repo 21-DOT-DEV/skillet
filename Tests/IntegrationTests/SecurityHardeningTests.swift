@@ -56,36 +56,52 @@ struct SecurityHardeningTests {
             to: root.appendingPathComponent("skillet.yaml"), atomically: true, encoding: .utf8)
     }
 
-    @Test("skills_root is canonicalized at load — printed paths never double a separator or keep a './' prefix")
-    func skillsRootCanonicalizedInPrintedPaths() async throws {
-        // Both hints that interpolate the value are exercised. Each assertion is POSITIVE (the clean path
-        // must appear), so reverting the canonicalization fails the test — a negative-only assertion would
-        // pass vacuously, which is exactly how the first version of this test was wrong.
-        let version = try await TriageIntegrationTests.currentVersion()
+    /// One spelling of the setting that names where skill folders live, and the clean path it must
+    /// print. Rows rather than a run of near-identical blocks: this test started with one spelling and
+    /// gained another each time one turned up, so the next is now a line rather than another copy of
+    /// set-run-assert — and each row runs as its own case, so a failure names **which** spelling broke.
+    struct Spelling: Sendable, CustomStringConvertible {
+        let value: String
+        let mustNotShow: String
+        let why: String
+        var description: String { "skills_root: '\(value)'" }
+    }
 
-        // (a) The "review findings under …" hint — needs a recorded session, or the command takes the
-        // empty-corpus branch ("record a session — …"), which never mentions skills_root at all.
+    static let spellings: [Spelling] = [
+        .init(value: "skills/", mustNotShow: "skills//",
+              why: "a trailing separator must not double up"),
+        .init(value: "skills /", mustNotShow: "skills /",
+              why: "a space before the separator survives a whole-value trim, so each piece needs trimming too"),
+        .init(value: "./skills", mustNotShow: "./skills/demo",
+              why: "a leading './' is the same defect in another costume"),
+        .init(value: "skills/ /", mustNotShow: "skills/ ",
+              why: "a piece that is nothing but a space — trimming empties it and an empty piece is dropped, the only spelling reaching both steps together")
+    ]
+
+    /// The "review findings under …" hint. It needs a recorded session, or the command takes the
+    /// empty-corpus branch ("record a session — …"), which never mentions the setting at all.
+    ///
+    /// Every row asserts something POSITIVE — the clean path must appear — so undoing the cleanup fails
+    /// this. A row that only said "the bad spelling is absent" would pass even if nothing were printed,
+    /// which is exactly how the first version of this test was wrong.
+    @Test("Every spelling of skills_root prints the same clean path", arguments: spellings)
+    func skillsRootCanonicalizedInPrintedPaths(_ spelling: Spelling) async throws {
+        let version = try await TriageIntegrationTests.currentVersion()
         let root = try TriageIntegrationTests.makeTriageRepo(
             bundles: [("2026-06-01-a", version, [("SKILL-S001", "warning", "m")])])
         defer { Fixture.remove(root) }
-        try setSkillsRoot("skills/", in: root)
-        let withTrailing = try await SkilletHarness().run(["-C", root.path, "triage"])
-        #expect(withTrailing.stdout.contains("skills/demo/evaluations/findings/"))
-        #expect(!withTrailing.stdout.contains("skills//"))
 
-        // A space before the separator survives a whole-value trim, so it needs per-segment trimming.
-        try setSkillsRoot("skills /", in: root)
-        let spaced = try await SkilletHarness().run(["-C", root.path, "triage"])
-        #expect(spaced.stdout.contains("skills/demo/evaluations/findings/"))
-        #expect(!spaced.stdout.contains("skills /"))
+        try setSkillsRoot(spelling.value, in: root)
+        let out = try await SkilletHarness().run(["-C", root.path, "triage"])
+        #expect(out.stdout.contains("skills/demo/evaluations/findings/"),
+                "must print the clean path — \(spelling.why)")
+        #expect(!out.stdout.contains(spelling.mustNotShow), "the raw spelling leaked into the printed path")
+    }
 
-        // A leading "./" is the same defect in another costume.
-        try setSkillsRoot("./skills", in: root)
-        let dotSlash = try await SkilletHarness().run(["-C", root.path, "triage"])
-        #expect(dotSlash.stdout.contains("skills/demo/evaluations/findings/"))
-        #expect(!dotSlash.stdout.contains("./skills/demo"))
-
-        // (b) The "add a skill (…)" hint — the other interpolation site, shown when nothing is discovered.
+    /// The other place the setting is pasted into a printed line, shown when nothing is discovered.
+    /// Kept separate rather than forced into the rows above: different setup, different assertion.
+    @Test("The 'add a skill' hint uses the cleaned-up skills_root too")
+    func skillsRootCanonicalizedInTheAddASkillHint() async throws {
         let bare = try Fixture.makeTempDirectory()
         defer { Fixture.remove(bare) }
         try setSkillsRoot("skills/", in: bare)
@@ -123,6 +139,11 @@ struct SecurityHardeningTests {
         let dotRoot = try await SkilletHarness().run(["-C", root.path, "triage"])
         #expect(dotRoot.exitCode != 4, "a lone '.' is a conventional value, not a config error")
         #expect(!dotRoot.stderr.contains("skills_root"))
+        // **And the skill is actually found.** Checking only that nothing was rejected cannot tell
+        // "this works" from "this silently discovered nothing" — a change that quietly ignored the value
+        // would have passed. The rule is written at the top of this file and was not applied here.
+        #expect(dotRoot.stdout.contains("demo") || dotRoot.stderr.contains("demo"),
+                "the skill sitting at the project root must be discovered, not just tolerated")
 
         // The escape guard is SEGMENT-wise: a folder whose NAME merely contains dots is not an escape.
         // Only the unit tests covered this, so nothing proved the whole command agreed with the rule —
@@ -133,6 +154,10 @@ struct SecurityHardeningTests {
         let dottedName = try await SkilletHarness().run(["-C", root.path, "triage"])
         #expect(dottedName.exitCode != 4, "'my..skills' is a folder name, not a '..' escape")
         #expect(!dottedName.stderr.contains("path segment"))
+        // Same gap, ten lines apart and written in the same breath: not being refused is not the same as
+        // being used. The folder must appear in a path the command prints.
+        #expect(dottedName.stdout.contains("my..skills") || dottedName.stderr.contains("my..skills"),
+                "the folder whose name merely contains dots must actually be used, not just permitted")
     }
 
     @Test("A hard-linked skillet.yaml is refused (linked inode, not followed)")

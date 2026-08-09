@@ -70,8 +70,10 @@ derived from `skillet-design.md` and an external best-practice cross-reference
   observed-seed trigger-corpus expansion (F63).
 - **Phase 6 (In progress):** Draft minimal `SKILL.md` edits from observed evidence and
   prove them by A/B in a throwaway worktree before a human lands them. `skillet
-  suggest` (F41) shipped 2026-08-01 — it drafts and writes proposals; applying
-  them and proving them by A/B are still to come.
+  suggest` (F41) shipped 2026-08-01 — it drafts and writes proposals — and
+  `suggest --apply` (F42) shipped 2026-08-04, which writes a draft you have read
+  into your working tree, all of it or none, never committing. Proving a fix by
+  A/B (F43) is still to come.
 - **Phase 7 (Next):** Run the same suite across multiple agents and print a
   per-harness `pass^k` portability table.
 - **Phase 8 (Later):** Track B axial coding, more adapters, the remaining lint

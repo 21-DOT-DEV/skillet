@@ -85,7 +85,7 @@ struct DoctorCommand: AsyncParsableCommand {
             // Zero skills with a healthy project means init already ran — suggest authoring, not init.
             let nextSteps = report.healthy
                 ? [selected.first.map { "skillet run \($0.lastPathComponent)" }
-                    ?? "add a skill under \(skillsRoot)/<name>/ (SKILL.md + evaluations/evals.json), then re-run skillet doctor"]
+                    ?? "add a skill under \(projectRelativePath(skillsRoot, "<name>"))/ (SKILL.md + evaluations/evals.json), then re-run skillet doctor"]
                 : []
             Console.emit(try renderer.renderDoctor(report, nextSteps: nextSteps))
             if !report.healthy {

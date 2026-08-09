@@ -218,7 +218,8 @@ struct TriageCommand: AsyncParsableCommand {
             if let link = SafeFile.firstSymlinkOnPath(from: projectRoot, to: target) {
                 throw EDDError.invalidArtifact(
                     path: skill,
-                    reason: "triage path crosses a symlink or escapes the project (not allowed): \(link.lastPathComponent)")
+                    reason: "triage path crosses a symlink or escapes the project (not allowed): \(link.lastPathComponent)",
+                    fix: "replace the symbolic link with a real folder — a link could send this outside the project, where the checks that keep it undoable do not reach")
             }
         }
     }
@@ -295,13 +296,23 @@ struct TriageCommand: AsyncParsableCommand {
         // a real re-run, exactly as `doctor` does for a skill-less project (round 5 — was leaking the
         // literal `<skill>`/`<slug>` placeholders).
         guard let skill else {
-            return ["add a skill (\(skillsRoot)/<name>/SKILL.md), capture a session, then re-run skillet triage"]
+            return ["add a skill (\(projectRelativePath(skillsRoot, "<name>", "SKILL.md"))), capture a session, then re-run skillet triage"]
         }
         // A known skill with an empty corpus: capture is the next step, but the slug names the session
         // and has no default. Frame it as instruction ("record a session — …"), so the one unavoidable
         // placeholder reads as a fill-in rather than a broken copy-paste command (round 6 — a required
         // arg with no derivable default is shown as a placeholder, mirroring the command's own synopsis).
-        if emptyCorpus, reg.contains("capture") {
+        // **Returns whichever way the recording command goes.** This used to run only when that command
+        // was registered, so if it ever were not, an empty project fell through to the advice below and
+        // was told to "review findings" when there are none to review. Whether one command exists cannot
+        // decide whether a *different* sentence is true, which is what that made it do.
+        if emptyCorpus {
+            guard reg.contains("capture") else {
+                // Nothing to point at, so describe the state rather than name a command that is not there
+                // (the standing rule: never advertise something you cannot run).
+                return since.map { ["no recordings on or after \($0) — widen --since, or record a session"] }
+                    ?? ["no recordings yet — record a session to give this something to read"]
+            }
             // A date filter that hid every recording is not "capture something" (round 16): name the
             // filter so the hint matches reality — accurate whether the corpus is truly empty or filtered.
             if let since {
@@ -321,7 +332,7 @@ struct TriageCommand: AsyncParsableCommand {
         // is where this hint used to point (a directory that does not exist, so the copy-paste failed).
         // Skipped once that command exists, because this line literally says "once it lands".
         if !reg.contains("next") {
-            steps.append("review findings under \(skillsRoot)/\(skill)/evaluations/findings/ — `skillet next` picks them up once it lands (Phase 5)")
+            steps.append("review findings under \(projectRelativePath(skillsRoot, skill, "evaluations/findings"))/ — `skillet next` picks them up once it lands (Phase 5)")
         }
         // `suggest` ships now, so it is the real next step from a finding — appended, not substituted,
         // because you still need to read the finding before drafting from it. Named only when actually

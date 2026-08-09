@@ -21,14 +21,22 @@ struct PathWalkTests {
         return root
     }
 
+    /// Two ways of writing one folder. The second spelling is a pointer this test creates, rather than
+    /// `/private/tmp` — which is a pointer only on macOS, so relying on it made this pass there and fail
+    /// on Linux for a reason that had nothing to do with what is being tested.
     @Test("The same folder written two ways gives the same answer")
     func spellingDoesNotChangeTheAnswer() throws {
         let root = try Self.makeTree("walk-spelling"); defer { try? FileManager.default.removeItem(at: root) }
-        let target = URL(fileURLWithPath: "/tmp/walk-spelling/skills/demo")
-        for spelling in ["/tmp/walk-spelling", "/private/tmp/walk-spelling"] {
-            let found = SafeFile.firstSymlinkOnPath(from: URL(fileURLWithPath: spelling), to: target)
+        let alias = URL(fileURLWithPath: "/tmp/walk-spelling-alias")
+        try? FileManager.default.removeItem(at: alias)
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: root)
+        defer { try? FileManager.default.removeItem(at: alias) }
+
+        let target = root.appendingPathComponent("skills/demo")
+        for spelling in [root, alias] {
+            let found = SafeFile.firstSymlinkOnPath(from: spelling, to: target)
             #expect(found?.lastPathComponent == "demo",
-                    "written as \(spelling), the pointer at skills/demo went unreported")
+                    "written as \(spelling.path), the pointer at skills/demo went unreported")
         }
     }
 
@@ -52,18 +60,13 @@ struct PathWalkTests {
         #expect(SafeFile.firstSymlinkOnPath(from: base, to: target) == nil)
     }
 
-    @Test("A folder we are not allowed to look into is refused, not waved through")
+    /// Provoked with a name longer than any filesystem accepts rather than by removing permissions:
+    /// permission bits do not constrain the administrator account, and the container this project's
+    /// checks run in uses it, so a permission-based version of this test passed locally and silently
+    /// did nothing there. A name that is too long fails the same way for everyone.
+    @Test("A folder we cannot look at is refused, not waved through")
     func unreadableBaseIsRefused() throws {
-        let outer = URL(fileURLWithPath: "/tmp/walk-blocked")
-        try? FileManager.default.removeItem(at: outer)
-        try FileManager.default.createDirectory(at: outer.appendingPathComponent("inner"),
-                                                withIntermediateDirectories: true)
-        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: outer.path)
-        defer {
-            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: outer.path)
-            try? FileManager.default.removeItem(at: outer)
-        }
-        let base = outer.appendingPathComponent("inner")
+        let base = URL(fileURLWithPath: "/tmp/" + String(repeating: "n", count: 512))
         let found = SafeFile.firstSymlinkOnPath(from: base, to: base.appendingPathComponent("file.md"))
         #expect(found != nil, "nothing could be checked, so the answer must not be a clean one")
     }

@@ -257,6 +257,36 @@ the "no `--apply` yet" annotation and §7.3 loses the provisional-format note.
 
 ## 10. Status log
 
+- **2026-08-08 (fourth) — a refusal whose every clause was backwards, describing two situations that can
+  no longer happen.** When a quoted passage cannot be found, the tool separates "the file genuinely
+  changed" from "the two sides disagree about line breaks", because the fixes differ completely. The
+  second carried a single true-or-false flag meaning *the file has Windows line endings*, set by looking
+  for the Windows pair specifically. **Reproduced through the command.** With a skill file holding one
+  carriage return among plain newlines, that flag came out false and the message read "this edit has
+  Windows line endings (carriage returns) and the file does not" — the edit had plain newlines and the
+  file was the one with the carriage return, so both halves were backwards, and the remedy said to
+  "re-save the draft with plain line endings", which it already had. A remedy that changes nothing is the
+  false-retry loop this project has now been bitten by three times. **The report called it a misleading
+  message; the matrix showed something larger.** Running every file convention against every quote
+  convention proved that, since the previous round made all three convert, a file using exactly *one*
+  convention always matches. The only thing that reaches this refusal at all is a file using **more than
+  one** — which neither branch of the message described, and for which the flag is a coin toss. So the
+  flag was not merely set from the wrong test: the question it answered had stopped being the right
+  question, which is what a true-or-false value standing in for more states than it has tends to do.
+  It now names what is actually true and what is actually there — "SKILL.md mixes line-break conventions
+  — classic Mac (a carriage return alone) and Unix (a line feed)" — with a remedy that converts the file,
+  which is the only action that helps. Listing every convention present rather than picking one follows
+  the standard `file` utility, which reports "with CRLF, LF line terminators" for exactly this case.
+  **Refusing was kept over converting**, deliberately: the safety design is that you read the change
+  afterwards and commit it yourself, and rewriting every line break in a file nobody asked to reformat
+  would bury a two-line edit in a whole-file diff. **Two traps hit while building this, both recorded
+  because they are the kind that pass silently.** Swift treats a carriage return followed by a line feed
+  as one Character, so scanning characters found no line breaks at all in a Windows file — the scan works
+  on Unicode scalars instead. And my first end-to-end fixture put a carriage return immediately before an
+  existing newline, which forms the Windows pair rather than the lone carriage return it was meant to
+  test; a single-line quoted passage also never reaches this refusal, since it has no line break to
+  disagree about. Verified by undoing both halves and confirming the matching tests fail. 762 tests /
+  92 suites green, zero warnings; staged, no commits.
 - **2026-08-08 (third) — one reported refusal, and a silent corruption underneath it that the report did
   not reach.** Text files mark the end of a line one of three ways: a line feed (Unix, modern macOS), a
   carriage return followed by a line feed (Windows), or a carriage return alone (Macs before 2001). The

@@ -197,16 +197,44 @@ struct EditApplyTests {
         #expect(lines == "5", "the passage is on line 5, not line 1")
     }
 
-    /// The fallback still exists for what converting cannot rescue: a file that mixes both conventions
-    /// has no single convention to convert to. Saying which side carries the carriage returns matters
-    /// because the remedy differs completely from the one for a file that has genuinely moved on.
-    @Test("A file mixing both line-break conventions is diagnosed, not called drift")
+    /// The fallback still exists for what converting cannot rescue: a file that mixes conventions has no
+    /// single convention to convert to. Naming which ones are present matters because the remedy differs
+    /// completely from the one for a file that has genuinely moved on.
+    @Test("A file mixing line-break conventions is diagnosed, not called drift")
     func mixedFileIsDiagnosed() {
         let mixed = "alpha\r\nbravo\ncharlie\r\n"
         guard case let .refused(reasons) = plan([edit("bravo\ncharlie", "x")], in: mixed) else {
             Issue.record("expected a refusal"); return
         }
-        #expect(reasons == [.lineEndingsDiffer(index: 0, fileHasCarriageReturns: true)])
+        #expect(reasons == [.lineEndingsMixed(index: 0, found: [.pair, .lineFeed])])
+    }
+
+    /// The reported defect. A file mixing a lone carriage return with plain newlines carried a true/false
+    /// flag meaning "the file has Windows line endings", which was set by looking for the Windows *pair*
+    /// — absent here — so it came out false and the message said the **edit** had Windows line endings
+    /// and the file did not. Both halves backwards, with a remedy ("re-save the draft with plain line
+    /// endings") that was already true and so changed nothing.
+    @Test("A file mixing a lone carriage return with plain newlines names what it actually contains")
+    func loneCarriageReturnMixIsNamedCorrectly() {
+        let mixed = "alpha\rbravo\ncharlie\n"
+        guard case let .refused(reasons) = plan([edit("bravo\ncharlie", "x")], in: mixed) else {
+            Issue.record("expected a refusal"); return
+        }
+        #expect(reasons == [.lineEndingsMixed(index: 0, found: [.carriageReturn, .lineFeed])],
+                "the file holds a lone carriage return and a plain newline — say so, rather than blaming the edit")
+    }
+
+    /// Every convention present, not just the winning one — including a carriage return at the very end
+    /// of the text, which the scan has to look for after the loop rather than inside it.
+    @Test("Naming the conventions present", arguments: [
+        ("a\nb\n", [ExcerptAnchor.LineBreak.lineFeed]),
+        ("a\r\nb\r\n", [.pair]),
+        ("a\rb\r", [.carriageReturn]),
+        ("a\r\nb\nc\r", [.pair, .carriageReturn, .lineFeed]),
+        ("no breaks at all", [])
+    ])
+    func namesEveryConventionPresent(_ text: String, _ expected: [ExcerptAnchor.LineBreak]) {
+        #expect(ExcerptAnchor.LineBreak.allPresent(in: text) == expected)
     }
 
     /// A replacement carrying Windows line breaks used to be written into a plain file unchanged,

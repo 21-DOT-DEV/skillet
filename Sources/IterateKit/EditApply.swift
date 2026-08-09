@@ -33,7 +33,7 @@ public enum EditApply {
         /// The quoted text would have matched if the two sides agreed about line endings. Reported
         /// separately because "no longer in the file — draft again" is *wrong* here: the file has not
         /// changed, and re-drafting produces the same mismatch, so that advice loops forever.
-        case lineEndingsDiffer(index: Int, fileHasCarriageReturns: Bool)
+        case lineEndingsMixed(index: Int, found: [ExcerptAnchor.LineBreak])
         case ambiguous(index: Int, count: Int, lines: [String], capped: Bool)
         /// Two selected edits cover overlapping text, so applying either changes what the other meant.
         case overlapping(index: Int, with: Int)
@@ -76,8 +76,17 @@ public enum EditApply {
                 // has not drifted — the two sides simply disagree about newlines, and the remedy is
                 // completely different from "draft again".
                 if case .found = ExcerptAnchor.locate(ExcerptAnchor.withPlainLineBreaks(edit.currentExcerpt), in: ExcerptAnchor.withPlainLineBreaks(text)) {
-                    refusals.append(.lineEndingsDiffer(index: index,
-                                                       fileHasCarriageReturns: text.contains("\r\n")))
+                    // **The file is the one that is inconsistent.** Every convention now converts, so a
+                    // file using exactly one always matches — verified across every file/quote pairing.
+                    // What is left is a file using more than one, which has no single convention to
+                    // convert to. This used to carry a true/false flag meaning "the file has Windows line
+                    // endings", branching into two sentences that can no longer happen; for a file mixing
+                    // a lone carriage return with plain newlines the flag came out false and the message
+                    // said the *edit* had Windows line endings and the file did not — both halves
+                    // backwards, with a remedy ("re-save the draft with plain line endings") that was
+                    // already true and therefore changed nothing.
+                    refusals.append(.lineEndingsMixed(index: index,
+                                                      found: ExcerptAnchor.LineBreak.allPresent(in: text)))
                 } else {
                     refusals.append(.missing(index: index))
                 }

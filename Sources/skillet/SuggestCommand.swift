@@ -541,11 +541,7 @@ struct SuggestCommand: AsyncParsableCommand {
         }
         // The remedy has to follow the actual cause. "Draft again" is right for a file that has moved
         // on, useless for a passage that is not unique, and actively wrong for a line-ending mismatch.
-        let lineEndings = reasons.contains { if case .lineEndingsDiffer = $0 { return true }; return false }
-        let fileHasCR = reasons.contains {
-            if case let .lineEndingsDiffer(_, fileHasCarriageReturns) = $0 { return fileHasCarriageReturns }
-            return false
-        }
+        let lineEndings = reasons.contains { if case .lineEndingsMixed = $0 { return true }; return false }
         let ambiguous = reasons.contains { if case .ambiguous = $0 { return true }; return false }
         let overlapping = reasons.contains { if case .overlapping = $0 { return true }; return false }
         let unsupported = reasons.contains { if case .unsupportedPath = $0 { return true }; return false }
@@ -553,9 +549,12 @@ struct SuggestCommand: AsyncParsableCommand {
             message: "nothing was written — \(refusalDetail(reasons))",
             remedy: {
                 if lineEndings {
-                    return fileHasCR
-                        ? "give \(ProposalDrafter.editableFileName) one consistent line ending and re-run — drafting again will not help"
-                        : "the saved draft carries Windows line endings; re-save it with plain ones, or convert the file to match — drafting again will not help"
+                    // The file is inconsistent with itself, so neither side can be "converted to match"
+                    // the other — there is nothing single to match. The old wording told you to re-save
+                    // the draft with plain line endings, which it usually already had.
+                    return "convert \(ProposalDrafter.editableFileName) to a single line-break convention — most "
+                        + "editors have a line-endings setting, and `dos2unix` does it from a terminal — then apply "
+                        + "again; drafting again will not help"
                 }
                 if unsupported {
                     // Re-drafting cannot help: this version only ever writes the skill file, so a draft
@@ -578,10 +577,13 @@ struct SuggestCommand: AsyncParsableCommand {
             switch reason {
             case let .missing(index):
                 "edit \(index): the text it replaces is no longer in the file"
-            case let .lineEndingsDiffer(index, fileHasCarriageReturns):
-                fileHasCarriageReturns
-                    ? "edit \(index): the file uses Windows line endings (carriage returns) and this edit does not, so nothing lines up — the file has NOT changed, and re-drafting will hit the same thing"
-                    : "edit \(index): this edit has Windows line endings (carriage returns) and the file does not, so nothing lines up — the file has NOT changed, and re-drafting will hit the same thing"
+            case let .lineEndingsMixed(index, found):
+                // Naming the conventions found is the whole point: "more than one" tells you there is a
+                // problem, the list tells you what to look for. Same shape as the standard `file` utility,
+                // which lists every terminator present rather than choosing one.
+                "edit \(index): \(ProposalDrafter.editableFileName) mixes line-break conventions — "
+                    + "\(found.map(\.plainName).joined(separator: " and ")) — so there is no single one to match "
+                    + "against; the file has NOT changed, and re-drafting will hit the same thing"
             case let .ambiguous(index, count, lines, capped):
                 // Every match has identical text — the locations are the only thing that distinguishes
                 // them, and the fix is to quote a longer passage covering just the one you meant.

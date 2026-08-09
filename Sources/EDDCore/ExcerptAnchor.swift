@@ -49,7 +49,7 @@ public enum ExcerptAnchor {
     /// Reduced-to-plain-then-adopt is how the other two are already handled; this adds the third to the
     /// same mechanism rather than a new one, and matches how text tooling has treated all three since
     /// universal newline handling became standard.
-    public enum LineBreak {
+    public enum LineBreak: Equatable, Sendable {
         /// A carriage return followed by a line feed — Windows.
         case pair
         /// A carriage return alone — Macs before 2001.
@@ -69,8 +69,41 @@ public enum ExcerptAnchor {
         /// to be ruled out first or every Windows file would be read as the older convention.
         public static func of(_ text: String) -> LineBreak {
             if text.contains("\r\n") { return .pair }
-        if text.contains("\r") { return .carriageReturn }
-                return .lineFeed
+            if text.contains("\r") { return .carriageReturn }
+            return .lineFeed
+        }
+
+        /// What a person calls it.
+        public var plainName: String {
+            switch self {
+            case .pair: "Windows (a carriage return and a line feed)"
+            case .carriageReturn: "classic Mac (a carriage return alone)"
+            case .lineFeed: "Unix (a line feed)"
+            }
+        }
+
+        /// **Every** convention the text actually contains, not just the one that wins. More than one
+        /// means the file is inconsistent — which is its own problem with its own fix, and, now that all
+        /// three convert, the only thing left that can stop a passage matching at all. Reported the way
+        /// the standard `file` utility reports it: by naming each terminator present rather than picking.
+        public static func allPresent(in text: String) -> [LineBreak] {
+            // **Scalars, not characters.** Swift treats a carriage return followed by a line feed as one
+            // Character, so walking characters never sees the two halves and this returned "no line
+            // breaks at all" for every Windows file. Scalars see the bytes as written, which is the level
+            // this question lives at.
+            var sawPair = false, sawLoneReturn = false, sawLoneFeed = false
+            var previousWasReturn = false
+            for scalar in text.unicodeScalars {
+                if scalar == "\n" {
+                    if previousWasReturn { sawPair = true } else { sawLoneFeed = true }
+                } else if previousWasReturn {
+                    sawLoneReturn = true
+                }
+                previousWasReturn = scalar == "\r"
+            }
+            if previousWasReturn { sawLoneReturn = true }   // a carriage return at the very end
+            return [(sawPair, LineBreak.pair), (sawLoneReturn, .carriageReturn), (sawLoneFeed, .lineFeed)]
+                .filter(\.0).map(\.1)
         }
     }
 

@@ -384,7 +384,13 @@ struct ApplyIntegrationTests {
     /// The write goes through a neighbouring file before being put into place. When it failed, the error
     /// named that neighbour — telling you that you lack permission on a randomly-named file you have
     /// never seen — and printed the whole error structure around it.
-    @Test("A refused write names the file you asked for, in plain words")
+    /// **Skipped when the account can ignore permission bits**, which is the administrator account and
+    /// therefore the container this project's checks run in. Unlike the other cases in this file, the
+    /// thing under test *is* a refusal by the operating system, so there is no way to provoke it for a
+    /// user who is never refused — and a test that silently proves nothing is worse than one that says
+    /// it did not run.
+    @Test("A refused write names the file you asked for, in plain words",
+          .enabled(if: geteuid() != 0, "permission bits do not constrain the administrator account"))
     func writeFailureNamesTheRealFile() async throws {
         let (root, draft) = try await Self.makeRepo(); defer { Fixture.remove(root) }
         let folder = root.appendingPathComponent("skills/demo")
@@ -571,6 +577,39 @@ struct ApplyIntegrationTests {
         let after = try Self.skillText(root)
         #expect(after.contains("Use three when it helps."))
         #expect(!after.contains("\n"), "the file must not come back using two conventions at once")
+    }
+
+    /// The reported case, end to end. A skill file holding one carriage return among plain newlines used
+    /// to be refused with "this edit has Windows line endings and the file does not" — the edit had plain
+    /// newlines and the file was the one with the carriage return, so both halves were backwards, and the
+    /// remedy told you to re-save the draft with plain line endings, which it already had.
+    @Test("A file mixing line-break conventions blames the file, and names what it found")
+    func mixedFileNamesWhatItFound() async throws {
+        // A passage spanning two lines: a single-line one has no line break to disagree about, so it
+        // matches whatever the file's conventions are and never reaches this refusal at all.
+        let spanning = #"""
+        {"path":"SKILL.md","skill_md_lines":"7-9","current_excerpt":"Always use the rule of three.\n\nKeep replies short.",
+         "proposed_text":"Be brief.","rationale":"r","addresses":[]}
+        """#
+        let (root, draft) = try await Self.makeRepo(edits: spanning); defer { Fixture.remove(root) }
+        let file = root.appendingPathComponent("skills/demo/SKILL.md")
+        // One carriage return among plain newlines, and **not** immediately before one — a carriage
+        // return placed just before an existing newline forms the Windows pair instead, which is a
+        // different case entirely. (My first version of this fixture did exactly that.)
+        try (String(contentsOf: file, encoding: .utf8) + "Footnote.\rAnd more.\n")
+            .write(to: file, atomically: true, encoding: .utf8)
+        try await Self.run("git", ["add", "-A"], in: root)
+        try await Self.run("git", ["-c", "user.email=t@e", "-c", "user.name=t", "commit", "-qm", "mix"], in: root)
+
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "suggest", "demo", "--proposals", draft, "--apply"])
+        #expect(out.exitCode == 5)
+        #expect(out.stderr.contains("mixes line-break conventions"), "blame the file, which is the inconsistent one")
+        #expect(out.stderr.contains("classic Mac") && out.stderr.contains("Unix"),
+                "name both conventions actually present, so there is something to look for")
+        #expect(!out.stderr.contains("this edit has Windows line endings"),
+                "the edit has plain newlines; saying otherwise sends you to fix something that is already right")
+        #expect(out.stderr.contains("convert"), "the remedy must be one that changes something")
     }
 
     /// A name that is nothing but the file extension names nothing you could pick out of a folder

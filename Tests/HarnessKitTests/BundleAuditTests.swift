@@ -121,7 +121,7 @@ struct BundleAuditTests {
             try ClaudeCodeAdapter().verifySkillVisibility(SkillRef(name: "demo", path: dir.path), strategy: .discoveryPath)
             Issue.record("expected skillNotVisible")
         } catch let error as EDDError {
-            guard case let .skillNotVisible(skill, reason) = error else {
+            guard case let .skillNotVisible(skill, reason, _) = error else {
                 Issue.record("unexpected error: \(error)")
                 return
             }

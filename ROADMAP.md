@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.21.0
-**Last Updated:** 2026-08-01
+**Version:** v1.22.0
+**Last Updated:** 2026-08-17
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is
@@ -81,7 +81,9 @@ derived from `skillet-design.md` and an external best-practice cross-reference
   competitive cross-reference — **user-authored (YAML) lint rules**, real spend numbers, the
   judge↔human agreement check (F10; report-only Cohen's kappa), the general observed-seed
   synthetic generator (F64), the named aggregation catalog (F65), the test-framework
-  integration recipe (F66), and the **diagnostic model tier** (F67 — the provider-neutral
+  integration recipe (F66), **domain-specific output scorers** (F72 — a repo brings its own
+  deterministic checks over produced text, rather than baking one project's rules into the tool),
+  and the **diagnostic model tier** (F67 — the provider-neutral
   cheap-model slot that informs but never gates; macOS defaults to Apple's on-device model via
   F68, `needs-research`) — plus the explicit non-goals.
 

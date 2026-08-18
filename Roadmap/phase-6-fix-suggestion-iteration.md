@@ -2,7 +2,7 @@
 
 **Status:** IN PROGRESS
 **Horizon:** Next
-**Last Updated:** 2026-08-01
+**Last Updated:** 2026-08-16
 
 ## Goal
 
@@ -50,6 +50,11 @@ failures, never imagined ones.
      - Any regression discards the worktree and exits `1`, emitting nothing unless `--keep-worktree`.
    - Dependencies: runner (Phase 1), proposals (F41), worktree lifecycle.
    - Confidence: Medium — design §6.1 `iterate`, §10.
+   - **Under revision (2026-08-16):** the command line and the source of the "before" number above
+     are both superseded by [Specs/020](../Specs/020-prove-by-ab/plan.md) — `--edits` replaces
+     `--apply <indices>`, and both measurements are taken fresh rather than one being read from a
+     recorded run. Neither is settled: they are staged as design §14 items 22 and 23 awaiting
+     sign-off, so this entry is left as written until then rather than pre-empting it.
 
 4. **[F44]** Mark evidence proven (CLI: `skillet iterate --mark`) — PLANNED · Net-new
    - Purpose & user value: On a clean, regression-free A/B, advance the linked

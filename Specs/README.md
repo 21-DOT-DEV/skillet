@@ -40,3 +40,4 @@ roadmap re-phasing.
 | 017 | Security hardening — untrusted file-I/O audit (evidence table + tracked follow-ups) | cross-cutting | Audit complete (2026-07-21); T1–T11 tracked | [plan.md](017-security-hardening/plan.md) |
 | 018 | Draft edit proposals (`skillet suggest`) | 6 · F41 | Implemented (2026-08-01) | [plan.md](018-draft-edit-proposals/plan.md) |
 | 019 | Safe apply to the working tree (`skillet suggest --apply`) | 6 · F42 | Implemented (2026-08-04) | [plan.md](019-safe-apply/plan.md) |
+| 020 | Prove a proposal by measuring it twice (`skillet iterate`) | 6 · F43 | Planned (2026-08-16) | [plan.md](020-prove-by-ab/plan.md) |

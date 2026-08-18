@@ -2,7 +2,7 @@
 
 **Status:** FUTURE
 **Horizon:** Later
-**Last Updated:** 2026-07-07
+**Last Updated:** 2026-08-16
 
 ## Goal
 
@@ -85,7 +85,37 @@ the explicit non-goals so scope stays honest.
     - Confidence: Medium — precedent (Vale, Semgrep) + the design's §7.6 YAML usage policy; bounded by its litmus test and tripwire.
     - Notes: Governed by design §7.6; repo-local rule IDs use a reserved range (e.g. `L2xx`). Subsumes the data-expressible subset of F57.
 
-12. **[F12]** Skill-security lint rules (security tier in the `SKILL-Lxxx` catalog) — FUTURE · Net-new
+12. **[F72]** Domain-specific output scorers — the bring-your-own-check layer (`SKILL-S2xx`) — FUTURE · Net-new
+    - Purpose & user value: Let a repo add its **own** deterministic checks over a skill's
+      *produced output*, so domain rules that only make sense for one skill can run without
+      being baked into the tool. F17 shipped only the general writing-quality checks
+      (`SKILL-S001`–`S006`; `SKILL-S000` file-unreadable and `SKILL-S007` findings-file validity
+      also ship, but are coverage/infrastructure rules rather than writing-quality ones, so all
+      eight ids are taken) and deliberately deferred the predecessor's domain-specific ones —
+      citation freshness, article-shape and symbol-shape diffs, catalog-scaffold repeatability,
+      reader-test-performed, single-purpose-gate-respected. **This entry is that deferral's
+      owner**; without it those six capabilities are an orphaned regression against the
+      predecessor CLI. The output-side sibling of **F11** (user-authored rules over SKILL.md
+      *source*): F11 checks what the skill *says*, this checks what the skill *produced*.
+    - Northstar: deterministic-first (more free signal before any paid judging).
+    - Success metrics:
+      - A repo-local check emits `SKILL-S2xx` findings through the **same** SARIF emit,
+        severity banding, and `scorers.disable`/`enable` machinery as the built-in checks — no
+        second output path, no schema bump.
+      - Each ported domain check has a calibration fixture (clean input → no findings, bad
+        input → located findings), matching the evidence bar F17 held itself to.
+      - A check that needs a change-diff or skill metadata (rather than a bare folder) can
+        declare that need and is skipped — not silently wrong — when the input lacks it.
+    - Dependencies: scorers (**F17**), the evidence/corpus model (Phase 3); shares the
+      declarative-rule decisions of **F11** if that lands first.
+    - Confidence: Medium — the six predecessor scorers are working reference implementations;
+      open question is declarative-data vs. compiled-plugin (see Notes).
+    - Notes: Two candidate shapes — data-declared checks (like F11, safest: no code execution)
+      or a compiled extension point (most expressive, biggest security surface). Prefer the
+      data shape and let the compiled path stay a non-goal unless demand proves otherwise;
+      repo-local scorer IDs use a reserved `S2xx` range so they can never collide with built-ins.
+
+13. **[F12]** Skill-security lint rules (security tier in the `SKILL-Lxxx` catalog) — FUTURE · Net-new
     - Purpose & user value: Static, deterministic-first security checks over the SKILL.md file —
       prompt-injection phrasing, evaluator/judge manipulation, unicode obfuscation, YAML
       front-matter anomalies, and suspicious size — so a skill is screened for adversarial content
@@ -93,7 +123,7 @@ the explicit non-goals so scope stays honest.
     - Confidence: Medium — competitive cross-reference (Skill-Lab's 5 security checks; AWS
       `skill-eval` static security scan; SkillTester's security benchmark); design §6.1 `lint`, §13.
 
-13. **[F13]** Skill-bundle integrity lint group — FUTURE · Net-new
+14. **[F13]** Skill-bundle integrity lint group — FUTURE · Net-new
     - Purpose & user value: Static checks over a skill's *bundle*, beyond its `SKILL.md` prose —
       that bundled `scripts/` are self-contained, non-interactive, and `--help`-capable; that
       referenced script/asset paths resolve; and that no files are orphaned or outside the spec
@@ -103,7 +133,7 @@ the explicit non-goals so scope stays honest.
       AWS `skill-eval`'s skill-standard-directory scan); the agentskills.io `scripts/`/`references/`
       structure; design §6.1 `lint`, §7.1, §13.
 
-14. **[F64]** General synthetic eval generator (both axes) — FUTURE · Net-new
+15. **[F64]** General synthetic eval generator (both axes) — FUTURE · Net-new
     - Purpose & user value: Extend F63's observed-seed expansion to behavioral evals: grow
       datasets from real captured seeds under the same rules — a `synthetic` provenance marker
       naming the seed, deterministic per-sample validators with rejects tracked,
@@ -115,7 +145,7 @@ the explicit non-goals so scope stays honest.
       generator (32K context, structured trajectory output) — explicit opt-in, entitlement lane,
       never a default (§14-20).
 
-15. **[F65]** Named aggregation catalog — FUTURE · Net-new
+16. **[F65]** Named aggregation catalog — FUTURE · Net-new
     - Purpose & user value: Fixed, Swift-implemented, config-invoked aggregations over numeric
       metrics — `mean` / `min` / `max` / `stddev` / `median` / `percentile(p)` / `sum` /
       `count` / `agreement` — attachable as thresholds where a gate already exists; grows by
@@ -125,14 +155,14 @@ the explicit non-goals so scope stays honest.
     - Confidence: Medium — design §14-17 (decided 2026-07-06); mirrors F11's fixed
       code-backed *kinds* stance.
 
-16. **[F66]** Test-framework integration recipe (docs) — FUTURE · Net-new
+17. **[F66]** Test-framework integration recipe (docs) — FUTURE · Net-new
     - Purpose & user value: A short documented recipe for running skillet inside any test
       framework — Swift Testing, pytest, bare CI — by shelling `skillet run --json` and
       asserting on the payload + exit codes; the `--json` + exit-code contract *is* the
       integration surface. Companion to the declined Swift-library surface (non-goal below).
     - Confidence: High — design §14-18 (decided 2026-07-06); docs-only.
 
-17. **[F67]** Diagnostic model tier — the provider-neutral cheap-model slot (config: `models.diagnostic`) — FUTURE · Net-new
+18. **[F67]** Diagnostic model tier — the provider-neutral cheap-model slot (config: `models.diagnostic`) — FUTURE · Net-new
     - Purpose & user value: One slot and one contract (design §9.6) for every model whose output
       informs but never gates: generation (F63/F64), scoring (F62), clustering (F52), the F14
       smoke arm. Cheap/local providers may fill it; a platform default may fill it only with a
@@ -142,7 +172,7 @@ the explicit non-goals so scope stays honest.
     - Confidence: Medium — design §14-19 (decided 2026-07-07), §9.6.
     - Notes: Pulls forward to land with its first consumer (F62, Phase 4).
 
-18. **[F68]** Apple Foundation Models provider (on-device + Private Cloud Compute) — FUTURE · Net-new · `needs-research`
+19. **[F68]** Apple Foundation Models provider (on-device + Private Cloud Compute) — FUTURE · Net-new · `needs-research`
     - Purpose & user value: The first plug for F67. On macOS the unconfigured diagnostic slot
       defaults to the $0/offline on-device model — compiled behind `#if canImport(FoundationModels)`
       (an OS framework: zero new dependencies; Linux and older SDKs compile the lane out), with
@@ -174,7 +204,9 @@ the explicit non-goals so scope stays honest.
 ## Risks & Assumptions
 
 - Items here are named from the design doc's v1.x / Later columns plus the
-  cross-reference additions — F10–F13 (v0.8 competitive round) and F64–F68
+  cross-reference additions — F10, F11, F12, F13 (the v0.8 competitive round; listed
+  individually because F72 was later inserted between F11 and F12, so the range is no longer
+  contiguous) and F64–F68
   (July-2026 Apple Evaluations rounds); priorities will shift as v1 usage data
   arrives — the first real source of `High`-confidence prioritization this
   roadmap will have.
@@ -204,3 +236,7 @@ the explicit non-goals so scope stays honest.
   Roadmap → v1.14.0.
 - 2026-07-07: PATCH — risks text now names all cross-reference additions (F10–F13, F64–F68)
   instead of "one" (review finding; `needs-research` is reserved for F68). Roadmap → v1.14.1.
+- 2026-08-13: MINOR — added **F72** (domain-specific output scorers — the bring-your-own-check
+  layer, `SKILL-S2xx`). Gives an owner to the F17 deferral of the predecessor CLI's six
+  domain-specific checks, which until now was a decision no entry claimed. Output-side sibling
+  of F11. Roadmap → v1.22.0.

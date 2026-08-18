@@ -4,6 +4,23 @@ The roadmap's versioned change log, extracted from `ROADMAP.md` on 2026-07-04 (v
 stays lean. Latest first; every version is a linkable heading; historical entries are never rewritten.
 Companion: [`skillet-design-changelog.md`](skillet-design-changelog.md).
 
+## v1.22.0 — 2026-08-13
+
+MINOR — **Two predecessor-CLI capability gaps given owners**, found by auditing every command of the
+legacy `skill-eval` tool against skillet's shipped surface plus this roadmap. Both were real deferrals
+that no entry claimed, so they were drifting toward silent regressions rather than recorded decisions.
+**New [F72] — domain-specific output scorers, the bring-your-own-check layer (`SKILL-S2xx`, Phase 8):**
+F17 shipped only the general writing-quality checks and deliberately deferred the predecessor's six
+domain-specific ones (citation freshness, article/symbol diff shape, catalog-scaffold repeatability,
+reader-test-performed, single-purpose-gate-respected); F72 is now that deferral's owner and the
+output-side sibling of F11 (F11 checks what a skill *says*, F72 what it *produced*). Reserved `S2xx`
+id range; data-declared shape preferred over a compiled plugin surface. **[F23] amended** to state
+that reporting **absorbs the predecessor's per-check rollup** (its "scorecard" view) as a rendered
+*view* only — `scorecard.json` was declined in Phase 1 and stays declined; `triage` (F33) owns
+clustering, `report` owns display. No scope change beyond naming these two owners. A third audit
+finding — querying a findings file by filter — was judged a deliberate non-goal, since skillet emits
+the standard interchange format that existing editor/CI tooling already reads.
+
 ## v1.21.0 — 2026-08-01
 
 MINOR — **F41 SHIPPED: `skillet suggest` — drafted `SKILL.md` edits from observed evidence** ([Specs/018](Specs/018-draft-edit-proposals/plan.md)). Reads the evidence records you name plus the human notes sharing their sessions, sends one model request, and writes a content-anchored proposal to `.skillet/proposals/<id>.json`; it **applies nothing**. Two formats: `skillet.proposal/1` (the drafted file — provisional, graduating when the apply feature reads it back) and `skillet.suggest/1` (the command summary — stable, report-and-point). A draft is identified by a fingerprint of the whole assembled request, so re-running identical inputs is a recognised repeat rather than a duplicate, while any changed input is a genuinely different draft. Free checks run before anything is spent: the static-gate preflight, then a read-only check that the model program is usable, then the filesystem, then the one paid call. Phase 6 is now IN PROGRESS — applying proposals (F42), `iterate` (F43), marking evidence (F44) and held-out proof (F45) remain.

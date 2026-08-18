@@ -1211,6 +1211,54 @@ Two implementation notes refine this policy. (1) `swift-yaml` has **no tagged re
 
 ---
 
+22. **`iterate`'s command line: `--edits` to narrow, and no `--apply` (proposed 2026-08-16, awaiting
+    sign-off).** §6.1 above spells this command `--proposals <file|-> [--apply <indices>...]`.
+    [Specs/020](Specs/020-prove-by-ab/plan.md) D6 proposes `--proposals <name>.json` (a bare filename in
+    the drafts folder, as `suggest` already takes), `--edits 0 2` to narrow, and **no `--apply` at all**.
+
+    **Why.** `suggest --apply` already means *"write into my real files"*; using the same word here for
+    *"which subset"* makes one word mean two things across sibling commands, which the published guidance
+    for command-line tools names directly ("be consistent across subcommands; use the same flag names for
+    the same things"). There is also no mode of `iterate` that does *not* apply into its throwaway copy,
+    so a switch for it carries no information — and the review-only mode the predecessor gates with
+    `--apply` is already spelled `--dry-run` here, as it is on `run` and `suggest`.
+
+    **A contradiction this resolves.** §6.1 says omitting the subset switch applies **all** edits; the
+    predecessor's help says omitting it means **review only, no changes**
+    (`~/Developer/skills/Sources/SkillEvalCLI/IterateCommand.swift:53`). The proposal follows neither
+    literally: previewing is `--dry-run`, and omitting `--edits` applies all.
+
+    **Ripples on approval** — six places still show the old spelling and change only when the command
+    ships: §6.1's synopsis above; the **two** worked examples in Appendix A (counted separately, because
+    they are edited separately); the ships-in-v1 column of the §13 table, which spells it `iterate` (batch
+    `--apply`) and is easy to miss because a search of running text does not reach into a table row; the
+    phase-6 feature entry; and the contributor guide's command list. Nothing is edited until this is
+    signed off.
+
+23. **`iterate`'s "before" number: measured now, not read from a stored run (proposed 2026-08-16,
+    awaiting sign-off).** §6.1 above says this command prints deltas *"against the most recent recorded
+    baseline (running one first if none exists)"*. [Specs/020](Specs/020-prove-by-ab/plan.md) D2 proposes
+    measuring **both** arms fresh, in the same invocation, every time.
+
+    **Why.** The value of comparing two arms is that exactly one thing differs between them. A stored
+    measurement was taken on a different day, with different sampling, and possibly against a different
+    version of the model — folding that into a number a reader will take as *"my edit did this"* is a
+    confidently wrong answer rather than a cheap one. The accepted practice for this is to re-run
+    candidate and baseline together on the same cases precisely because model output is not
+    deterministic; storing scores is for tracking over time, not for supplying half of a comparison. The
+    predecessor measures both in one pass for the same stated reason
+    (`~/Developer/skills/Sources/SkillEvalCLI/IterateCommand.swift:175-177`).
+
+    **What it costs, stated plainly.** Roughly double a single measurement — about 36 model calls for a
+    three-test skill at three repeats each. The sanctioned way to reduce that is narrowing *which tests
+    run*, not reusing a stale half; that lever is deferred (Specs/020 §8) because narrowing also narrows
+    what the regression check can see.
+
+    **Separate from item 22 on purpose.** That one is what the flags are called; this one is what the
+    numbers mean and what a run costs, so they can be accepted or rejected independently.
+
+    **Ripple on approval:** the baseline sentence in §6.1 above. Nothing is edited until sign-off.
+
 ## Appendix A — A worked session
 
 Tuesday. You used `docc-articles` on a real package and hand-fixed the output.

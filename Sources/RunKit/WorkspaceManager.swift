@@ -99,6 +99,16 @@ public struct WorkspaceManager: Sendable {
     /// Whether `url` is itself a symbolic link (lstat semantics — does not follow the link).
     public static func isSymlink(_ url: URL) -> Bool { SafeFile.isSymlink(url) }
 
+    /// True when `url` is not a directory. A path that vanished between the walk and this check, or a
+    /// shortcut that points at nothing, answers "not a directory" and so stays in the list rather than
+    /// disappearing from it. Both walks below already did exactly this; saying it once stops them
+    /// drifting apart, and reads the "is it there" answer instead of discarding it.
+    private static func isNotDirectory(_ url: URL, _ fm: FileManager) -> Bool {
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else { return true }
+        return !isDir.boolValue
+    }
+
     /// The first symlink at or under `url` (recursively), or `nil` if the subtree is symlink-free.
     /// Used to reject symlinks in staged skill-bundle entries and directory fixtures (F7 policy).
     public static func firstSymlink(in url: URL) -> URL? { SafeFile.firstSymlink(in: url) }
@@ -124,8 +134,11 @@ public struct WorkspaceManager: Sendable {
         let fm = FileManager.default
         if isSymlink(src) { return }
         var isDir: ObjCBool = false
-        fm.fileExists(atPath: src.path, isDirectory: &isDir)
-        if isDir.boolValue {
+        // Whether it is there at all is half the answer, and dropping that half is only quiet because
+        // one platform lets you drop it. A path that has gone away leaves the directory flag untouched,
+        // so it must be read together with the flag. Missing still takes the branch below, where it is
+        // turned away for not being an ordinary file — the same outcome as before.
+        if fm.fileExists(atPath: src.path, isDirectory: &isDir), isDir.boolValue {
             try fm.createDirectory(at: dst, withIntermediateDirectories: true)
             for child in (try? fm.contentsOfDirectory(atPath: src.path)) ?? [] where !SkillBundleRules.isHidden(child) {
                 try copyFiltered(from: src.appendingPathComponent(child), to: dst.appendingPathComponent(child))
@@ -201,9 +214,7 @@ public struct WorkspaceManager: Sendable {
         let walked = Self.walk(root, cap: cap)
         let files = walked.entries.filter { rel in
             if rel == ".claude" || rel.hasPrefix(".claude/") { return false }
-            var isDir: ObjCBool = false
-            fm.fileExists(atPath: root.appendingPathComponent(rel).path, isDirectory: &isDir)
-            return !isDir.boolValue
+            return Self.isNotDirectory(root.appendingPathComponent(rel), fm)
         }
         // The produced files go in whether or not the walk reached them — they are what the checks are
         // about, and they are already bounded by the same limit, so adding them cannot run away.
@@ -458,7 +469,16 @@ public struct WorkspaceManager: Sendable {
         // complete list" tells the grader authoritatively that nothing exists, so every check of the form
         // "the run created X" fails — a fault in this tool recorded as a fault in the skill. Saying the
         // list is incomplete is the honest answer and is what stops absence being read as proof.
-        guard let walker = FileManager.default.enumerator(atPath: root.path) else { return ([], true) }
+        // **Asked directly, because the answer differs by platform.** This relied on being handed nothing
+        // when the folder cannot be read — true on one platform, and on the other a working walker is
+        // handed back that simply yields no entries. So the very case this guards against came back as
+        // "no files, and that is the complete list" on Linux: the defect this was written to fix, still
+        // live there. Checking the folder itself is the same answer everywhere.
+        let fm = FileManager.default
+        var rootIsDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: root.path, isDirectory: &rootIsDirectory), rootIsDirectory.boolValue,
+              fm.isReadableFile(atPath: root.path) else { return ([], true) }
+        guard let walker = fm.enumerator(atPath: root.path) else { return ([], true) }
         while let next = walker.nextObject() as? String {
             if entries.count >= cap { return (entries, true) }
             entries.append(next)
@@ -486,9 +506,7 @@ public struct WorkspaceManager: Sendable {
             if rel == ".claude" || rel.hasPrefix(".claude/") { return false }
             let url = root.appendingPathComponent(rel)
             if Self.isSymlink(url) { return true }
-            var isDir: ObjCBool = false
-            fm.fileExists(atPath: url.path, isDirectory: &isDir)
-            return !isDir.boolValue
+            return Self.isNotDirectory(url, fm)
         }.sorted()
     }
 

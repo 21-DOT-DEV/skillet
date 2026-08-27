@@ -89,13 +89,32 @@ struct PaidCommandSettingsParityTests {
         }
     }
 
+    /// **Whether the reading library says where in the file the fault is.** It does on one platform and not
+    /// on the other, where the message is only "the given data was not valid JSON". So the position is a
+    /// capability of the machine, not a promise this tool can keep everywhere — asserting it unconditionally
+    /// failed the whole suite on Linux. Asked here the same way the program itself asks, so the test and
+    /// the code cannot disagree about what is available.
+    private static let readerReportsPosition: Bool = {
+        do {
+            _ = try JSONSerialization.jsonObject(with: Data("{ this is not json".utf8))
+            return false
+        } catch {
+            let described = (error as NSError).userInfo["NSDebugDescription"] as? String
+            return described?.lowercased().contains("line") == true
+        }
+    }()
+
     /// The same unreadable file used to give the exact character position from one command and nothing at
-    /// all from the other. Both now say where, and neither names this program's own internals.
+    /// all from the other. Both now explain it the same way, in terms of the reader's own file, and
+    /// neither names this program's internals. Where the machine can say *where*, both say it.
     @Test("An unreadable test file is explained the same way, and in terms of the file")
     func unreadableFileExplainedTheSameWay() async throws {
         for (name, out) in try await PaidCommandFixture.answers(runs: "", evalsRaw: "{ this is not json") {
             #expect(out.exitCode == 4, "\(name)")
-            #expect(out.stderr.contains("line 1, column 4"), "\(name) must say where the fault is")
+            #expect(out.stderr.contains("evals.json"), "\(name) must name the reader's own file")
+            if Self.readerReportsPosition {
+                #expect(out.stderr.contains("line 1, column 4"), "\(name) must say where the fault is")
+            }
             for internalName in ["DecodingError", "NSCocoaErrorDomain", "NSJSONSerializationErrorIndex"] {
                 #expect(!out.stderr.contains(internalName),
                         "\(name) named this program's internals instead of the reader's file")

@@ -58,7 +58,7 @@ struct PassKTests {
         ]
         let live = try RunReport(skill: "demo", results: results)
         // Simulate reading benchmark.json: only per-eval (passed, total) survive in the committed summary.
-        let offline = try RunReport(skill: "demo", counts: results.map(EvalCounts.init))
+        let offline = RunReport(skill: "demo", counts: results.map(EvalCounts.init))
         #expect(live == offline)
     }
 

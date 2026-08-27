@@ -122,7 +122,8 @@ struct SubprocessLauncherTests {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
-        FileManager.default.createFile(atPath: dir.appendingPathComponent("MARKER.txt").path, contents: Data())
+        try #require(FileManager.default.createFile(atPath: dir.appendingPathComponent("MARKER.txt").path, contents: Data()),
+                     "if the marker was never written, the listing below would come back empty and read as a working directory that was never set")
         let out = try await SubprocessLauncher().run("/bin/ls", [], workingDirectory: dir.path, timeout: nil, environment: nil, outputLimitBytes: nil)
         #expect(out.stdout.contains("MARKER.txt"))
     }

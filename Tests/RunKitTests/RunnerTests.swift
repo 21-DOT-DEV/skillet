@@ -508,12 +508,31 @@ struct ListingTruncationTests {
     func producedFileSurvivesTheCut() throws {
         let (wm, ws, base) = try workspace(); defer { try? FileManager.default.removeItem(at: base) }
         try "result".write(to: ws.root.appendingPathComponent("report.md"), atomically: true, encoding: .utf8)
-        let cut = wm.listing(ws, cap: 1)
+        // **A cut of nothing, because which file a cut of one reaches depends on the platform.** With a
+        // limit of one the walk happened to reach `report.md` on Linux and not on macOS, so the guard that
+        // makes this test mean anything passed on one and failed on the other. A limit of zero reaches
+        // nothing anywhere, which is what the guard is actually trying to say.
+        let cut = wm.listing(ws, cap: 0)
         #expect(cut.truncated == true)
         #expect(!cut.files.contains("report.md"), "the walk alone must not reach it — otherwise this proves nothing")
-        let kept = wm.listing(ws, keeping: ["report.md"], cap: 1)
+        let kept = wm.listing(ws, keeping: ["report.md"], cap: 0)
         #expect(kept.files.contains("report.md"), "a file the run produced must be listed however short the list is")
         #expect(kept.truncated == true, "keeping it does not make the rest of the list complete")
+    }
+
+    /// A shortcut pointing at something that is no longer there answers "no" to "does this exist", and
+    /// leaves "is it a folder" untouched. Read only the second answer and it reads as a plain file; read
+    /// only the first and the entry disappears from the list entirely. It has to stay listed: it is
+    /// something the run left behind, and a list that quietly omits it is a list you cannot trust.
+    @Test("A shortcut pointing at nothing stays in the list rather than vanishing from it")
+    func brokenShortcutStaysListed() throws {
+        let (wm, ws, base) = try workspace(); defer { try? FileManager.default.removeItem(at: base) }
+        try FileManager.default.createSymbolicLink(
+            at: ws.root.appendingPathComponent("dangling.txt"),
+            withDestinationURL: ws.root.appendingPathComponent("never-written.txt"))
+        let listed = wm.listing(ws).files
+        #expect(listed.contains("dangling.txt"),
+                "the walk found it, so dropping it here would report a workspace that is missing a file it actually has")
     }
 }
 
@@ -708,7 +727,11 @@ struct ElapsedTimeTests {
         let start = ContinuousClock.now
         try await Task.sleep(for: .milliseconds(40))
         let measured = Runner.seconds(since: start)
+        // **The property is that fractions survive, not that the machine was quick.** Asserting the
+        // measurement stayed under a second failed on a loaded build machine, where a forty-millisecond
+        // wait took two seconds — the test was measuring how busy the machine was, which is not what it
+        // is for. A value carrying a fraction is what "not rounded to whole seconds" actually means.
         #expect(measured != 0, "dropping the fractional part would make every quick attempt read as zero")
-        #expect(measured < 1.0)
+        #expect(measured != measured.rounded(), "a whole number would mean the fraction was discarded")
     }
 }

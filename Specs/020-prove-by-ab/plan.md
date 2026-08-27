@@ -967,6 +967,86 @@ verifying them.
 
 ## 10. Status log
 
+- **2026-08-27 — fifty-second round: both machines now run the same checks and finish silent, and the
+  test rig no longer guesses where the program it is testing lives.**
+
+  The Linux machine passes: **1123 checks in 177 groups**, matching the Mac exactly, with no compiler
+  complaints from our own files on either.
+
+  **Five compiler complaints, four of which only one machine ever showed.** The file-system library
+  shipped on Apple's platforms marks a handful of calls "you may ignore the answer"; the separate
+  version used on Linux does not. So this code was quiet on the Mac by accident of how someone else
+  annotated a library, not because the ignored answers were unneeded. Three of them asked "does this
+  path exist, and is it a folder?" and then threw the first half away. Seeding the folder flag to *true*
+  and asking about a path that is not there shows why that matters: the flag comes back still true,
+  untouched. The two answers only mean something read together. The rule now appears once instead of
+  being written out separately in two places that could drift apart, and it keeps the behaviour that was
+  already there — a path that has gone away, or a shortcut aimed at nothing, stays in the list rather
+  than quietly disappearing from it. A new check covers exactly that: undo the fix and the dangling
+  shortcut vanishes while six real files remain listed, so the check has teeth.
+
+  **A complaint on *both* machines, which corrects an earlier claim of mine that the Mac build was
+  silent.** One test marked a call as able-to-fail when it cannot. Removed.
+
+  **A test that created a marker file and never checked that it worked.** It then asked a directory
+  listing to show that marker. Had the file never been written, the listing would have come back empty
+  and been read as "the working folder was never set" — the wrong diagnosis entirely. It now stops
+  immediately and says so.
+
+  **The rig that launches the program under test was pinned to one folder name.** Its own description
+  promised it worked whatever folder the build wrote to. That was true on the Mac, which asks the test
+  bundle where it is, and false on Linux, which had the default folder name written into it. Point a
+  build at a different folder — as anyone comparing two builds does — and it reaches into an unrelated
+  one. Here that was loud, because the program it found was built for another kind of processor and
+  refused to start, **362 times**. On a machine where both builds are for the same processor it would be
+  silent: a leftover copy answers every check with an older version's behaviour and the run still reads
+  green. It now asks the test runner where *it* is and looks next door, which is what the description
+  always claimed. Measured against the exact command that failed: **362 launch failures before, 0 after**,
+  with the other build still present and visible.
+
+  **Two things seen and deliberately left alone,** recorded here so they are not lost. First, the list of
+  files a grader is shown and the list of files the run left behind disagree about shortcuts that point at
+  a folder: the second keeps every shortcut, the first drops those. There is one caller of the first in
+  the shipped program and no demonstration of harm, so this is written down rather than changed. Second,
+  the two ways of building a run record disagree about repeated check names — the one taking full results
+  rejects them, the one taking per-check totals does not. Only tests use the second; the shipped program
+  rebuilds a record by reading it back, and that path does reject them.
+
+- **2026-08-27 — fifty-first round: the build machine running Linux failed five checks, and one of them was
+  a fix of mine that never worked there at all.**
+
+  Everything below is the theme this effort has been circling for days — safety or behaviour borrowed from
+  the machine it was written on — this time in my own work, found only because a second platform ran it.
+
+  **A fix that worked on one platform and not the other.** A folder that cannot be read must report an
+  incomplete list, never "no files, and that is all of them", because the grader is told the list is the
+  last word on whether a file exists. That relied on being handed nothing when the folder cannot be opened
+  — true on one platform; on the other a working walker is handed back that simply yields no entries. So
+  the defect the fix was written for was still live on Linux. It now asks whether the folder exists and can
+  be read, which is the same answer everywhere.
+
+  **A test that measured how busy the machine was.** A forty-millisecond wait was asserted to measure under
+  a second; on a loaded build machine it took two. The property being checked is that fractions of a second
+  survive the conversion, so it now checks that — a measurement carrying a fraction — rather than a
+  wall-clock bound that says more about the machine than the code.
+
+  **A test whose guard depended on the order files are listed in.** With a limit of one, which single file
+  the walk reaches differs by platform, so the assertion that makes the test mean anything held on one and
+  failed on the other. A limit of zero reaches nothing anywhere, which is what the guard was trying to say.
+
+  **A test asserting a capability of the machine rather than a promise of the tool.** An unreadable file's
+  message gives the exact line and column on one platform and only "not valid JSON" on the other. That is
+  the reading library's doing, not this program's. The position is now asserted where the machine can
+  supply it, asked the same way the program itself asks so the two cannot disagree — and the guarantees
+  that *are* this tool's, naming the reader's own file and never its own internals, are asserted
+  everywhere.
+
+  **Checked that conditioning the assertion had not quietly disabled it here**: breaking the position
+  extraction still fails the test on this machine, so the branch is live rather than skipped on both.
+
+  1122 tests / 177 suites green locally, zero warnings; staged, no commits. The Linux result is the one
+  that matters and is not yet known.
+
 - **2026-08-25 — fiftieth round: a row said one thing was checked and it failed, while the evidence inside
   that same row said it was never measured.**
 

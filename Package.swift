@@ -38,7 +38,11 @@ let package = Package(
         // YAML config parsing. No tagged release → pinned to a main revision (see Package.resolved).
         // Its `YAML` product needs C++ interop, so it is confined to the `ConfigYAML` target below;
         // the pure core (EDDCore) and the executable stay interop-free.
-        .package(url: "https://github.com/21-DOT-DEV/swift-yaml", revision: "473252b018cbf2e5f8d0b51f19af0a23c21592a0")
+        .package(url: "https://github.com/21-DOT-DEV/swift-yaml", revision: "473252b018cbf2e5f8d0b51f19af0a23c21592a0"),
+        // TEST-ONLY (charter 1.4.0). A clock whose time the test moves by hand, so a wait can be
+        // exercised without waiting. Attached to test targets only and to no shipped target, so it
+        // is absent from the released binary. Shipped code takes the standard library's `Clock`.
+        .package(url: "https://github.com/pointfreeco/swift-clocks", exact: "1.1.0")
     ],
     targets: [
         // MARK: Layer 0 — pure core (no I/O, no processes, no network)
@@ -129,11 +133,19 @@ let package = Package(
         .testTarget(name: "EDDCoreTests", dependencies: ["EDDCore"]),
         .testTarget(name: "TraceKitTests", dependencies: ["TraceKit"]),
         .testTarget(name: "ProjectKitTests", dependencies: ["ProjectKit"]),
-        .testTarget(name: "RenderKitTests", dependencies: ["RenderKit"]),
+        // The quoting check runs a real shell to read its own output back. It uses the one sanctioned
+        // way to start a program, like everything else here — Foundation's own way crashes the whole test
+        // binary now and then on Linux while it counts open files.
+        .testTarget(name: "RenderKitTests",
+                    dependencies: ["RenderKit",
+                                   .product(name: "Subprocess", package: "swift-subprocess"),
+                                   .product(name: "SystemPackage", package: "swift-system")]),
         .testTarget(name: "LintKitTests", dependencies: ["LintKit"]),
-        .testTarget(name: "HarnessKitTests", dependencies: ["HarnessKit"]),
+        .testTarget(name: "HarnessKitTests",
+                    dependencies: ["HarnessKit", .product(name: "Clocks", package: "swift-clocks")]),
         .testTarget(name: "JudgeKitTests", dependencies: ["JudgeKit"]),
-        .testTarget(name: "RunKitTests", dependencies: ["RunKit", "ProjectKit"]),
+        .testTarget(name: "RunKitTests",
+                    dependencies: ["RunKit", "ProjectKit", .product(name: "Clocks", package: "swift-clocks")]),
         .testTarget(name: "ScoreKitTests", dependencies: ["ScoreKit"]),
         .testTarget(name: "AnalysisKitTests", dependencies: ["AnalysisKit"]),
         .testTarget(name: "IterateKitTests", dependencies: ["IterateKit"]),

@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Clocks
 import EDDCore
 import TraceKit
 import HarnessKit
@@ -140,10 +141,44 @@ struct SubprocessLauncherTests {
         #expect(out.stdout == "fast\n")
     }
 
+    /// **The watchdog is made to fire, not raced into firing.** This used to start a child that sleeps for
+    /// three seconds and give the watchdog two tenths of a second to beat it — a fifteen-fold margin, and so
+    /// a claim that the machine would not be busy. A sibling check making the same kind of claim with an
+    /// eighty-fold margin lost it on a build machine on 2026-08-27 — written up in `Specs/020-prove-by-ab/
+    /// plan.md` §10, the round labelled fifty-three, which names the run and the figures. The clock here is
+    /// one the check moves by hand, so the watchdog's wait ends exactly when this says so, whatever else the
+    /// machine is doing.
+    ///
+    /// The ten minutes is deliberate and is what makes this check honest. It is far longer than the child
+    /// lives, so on a real clock the child would always win and this would fail — the only way it can pass
+    /// is if the watchdog really is waiting on the clock handed to it. Put the wait back on a real clock and
+    /// this stops passing rather than merely getting slower.
     @Test("A child that overruns the watchdog is killed and surfaces timedOut")
-    func overTimeoutThrows() async {
-        await #expect(throws: ProcessError.self) {
-            try await SubprocessLauncher().run("/bin/sleep", ["3"], workingDirectory: nil, timeout: .milliseconds(200), environment: nil, outputLimitBytes: nil)
+    func overTimeoutThrows() async throws {
+        let clock = TestClock()
+        async let call: ProcessOutput = SubprocessLauncher(clock: clock).run(
+            "/bin/sleep", ["3"], workingDirectory: nil, timeout: .seconds(600),
+            environment: nil, outputLimitBytes: nil)
+        // **The clock has to keep moving, not be moved once.** The watchdog sets up its wait *inside* the
+        // call, and moving the clock before that has happened moves it over an empty schedule — nothing to
+        // wake, so the real child wins the race this check exists to prevent, and the check fails for a
+        // reason that has nothing to do with the code. Seen doing exactly that on 2026-08-27. Moving the
+        // clock over and over cannot miss it: whenever the wait appears, the next turn carries the clock
+        // past it. An hour a turn, so one turn is always enough once it is there.
+        let keepTimeMoving = Task {
+            while !Task.isCancelled {
+                await clock.advance(by: .seconds(3600))
+                await Task.yield()
+            }
+        }
+        defer { keepTimeMoving.cancel() }
+        do {
+            _ = try await call
+            Issue.record("the watchdog should have ended the child, but the call came back normally")
+        } catch let error as ProcessError {
+            guard case .timedOut = error else {
+                Issue.record("expected the watchdog's own error, got \(error)"); return
+            }
         }
     }
 

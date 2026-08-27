@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Clocks
 import EDDCore
 import TraceKit
 import HarnessKit
@@ -97,8 +98,14 @@ struct ABBaselineRunKitTests {
     /// Sleeps long, then throws — the reviewed path: harness fast, judge slow AND failing.
     struct SlowThrowingJudge: Judge {
         struct Boom: Error {}
+        let clock: TestClock<Duration>
         func verdict(for criterion: String, evidence: JudgeEvidence) async throws -> Verdict {
-            try? await Task.sleep(for: .milliseconds(500))
+            // Moves the clock on rather than waiting on it. Waiting would need something else to push the
+            // clock past this point, and nothing can: the run is stopped here waiting, and a wait that has
+            // not been reached yet cannot be pushed past in advance. Moving it on directly makes the same
+            // amount of the clock's time pass while the grader works, which is all the code being checked
+            // can see, and it cannot deadlock.
+            await clock.advance(by: .milliseconds(500))
             throw Boom()
         }
     }
@@ -107,11 +114,28 @@ struct ABBaselineRunKitTests {
     func slowJudgeExcludedFromDuration() async throws {
         let skill = try makeSkill(); defer { try? FileManager.default.removeItem(at: skill) }
         let base = tempDir(); defer { try? FileManager.default.removeItem(at: base) }
-        let outcome = try await Runner(adapter: ReplayAdapter(), judge: SlowThrowingJudge())
+        // **Both the grader's wait and the timing of the attempt run on a clock this check moves by
+        // hand,** so no real time passes and there is nothing here for a busy machine to disturb. The
+        // grader burns half a second of that clock; the attempt is timed on the same clock; so the figure
+        // recorded for the attempt has to come back as exactly nothing. Judging a real wait against a
+        // fixed ceiling instead — which is what stood here — is a claim that the machine is not busy, and
+        // a sibling check making that claim lost it on a build machine on 2026-08-27 — written up in
+        // `Specs/020-prove-by-ab/plan.md` §10, the round labelled fifty-three.
+        let clock = TestClock()
+        let before = clock.now
+        let outcome = try await Runner(adapter: ReplayAdapter(), judge: SlowThrowingJudge(clock: clock), clock: clock)
             .run(skill: SkillRef(name: "demo", path: skill.path),
                  evals: [evalCase("e", expectations: ["a"])], k: 1, injection: .ambient, base: base)
+
         #expect(outcome.evals[0].trials[0].exit == .error)                  // judge threw → ungraded
-        #expect((outcome.evals[0].trials[0].durationSeconds ?? 999) < 0.4)   // the 500ms judge sleep is excluded
+        // Without this the check would also pass if the grader had taken no time at all, which would
+        // prove nothing about the recorded figure being clean.
+        #expect(before.duration(to: clock.now) == .milliseconds(500),
+                "half a second of this clock's time must actually have gone by inside the grader")
+        let recorded = try #require(outcome.evals[0].trials[0].durationSeconds,
+                                    "with no figure recorded there is nothing here to check")
+        #expect(recorded == 0,
+                "no time passed on this clock while the harness ran, so the grader's half-second is the only thing that could have leaked in: got \(recorded)")
     }
 
     @Test("The with-arm loop never trips the pollution wire (skill invocations are the point there)")

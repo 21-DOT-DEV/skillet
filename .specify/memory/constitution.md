@@ -271,7 +271,17 @@ single sanctioned way to launch processes keep the supply-chain and execution ri
   **deferred** pending that packaging infrastructure (tracked as a roadmap item — secret-scanner
   vendoring); until it lands, a resolvable `betterleaks` is a hard prerequisite for `capture`,
   which **fails closed** without it, and the resolved version is recorded in each bundle's
-  `sanitization` provenance. The cache MAY use the system SQLite library.
+  `sanitization` provenance. The cache MAY use the system SQLite library. The sanctioned **test-only**
+  deps are `swift-clocks` (MIT, Point-Free) **and the two packages it brings with it** —
+  `swift-concurrency-extras` and `xctest-dynamic-overlay` (both MIT, same authors) — linked into test
+  targets **only**, never into a shipped target, so nothing they contain reaches a released binary. It supplies a clock whose time the test
+  moves by hand, which is how a wait can be exercised without waiting: shipped code takes the standard
+  library's `Clock` and defaults to the real one, tests pass a controlled one. Justification: checks
+  that assert a real wait finished inside some bound are really asserting the machine was not busy, and
+  one such check turned the shared branch red on 2026-08-27 when a 60 ms wait took six seconds
+  (Specs/020 §10, rounds fifty-one and fifty-three). There is no standard-library or `swift-testing`
+  substitute — that proposal was still unprioritised as of December 2025.
+  *(Amended 2026-08-27 — addition only; every MUST above is unchanged.)*
   *(Amended 2026-07-10 — delivery only; the redact-before-write / fail-closed / detection-only-offline
   MUSTs above are unchanged. Rationale: `.artifactbundle` packaging not yet available.)*
 - **SHOULD** estimate paid trials up front and confirm before spending (TTY) or require `--yes`
@@ -482,11 +492,23 @@ constitution is the development-principle layer. They are kept in sync, not dupl
 
 ## Version History
 
-**Version**: 1.3.0
+**Version**: 1.4.0
 **Ratified**: 2026-06-18
-**Last Amended**: 2026-07-10
+**Last Amended**: 2026-08-27
 
 **Changelog**:
+- **1.4.0** (2026-08-27): MINOR amendment (Principle VI, dependency hygiene) — `swift-clocks` (MIT) and
+  the two packages it pulls in transitively, `swift-concurrency-extras` and `xctest-dynamic-overlay`
+  (both MIT), are sanctioned as **test-only** dependencies: three packages, not one. All three are linked
+  into test targets only and absent from every shipped target, so the released binary's dependency
+  surface is unchanged — verified by building the shipped product alone into an empty build folder:
+  their sources are fetched while the package graph is resolved, and not one of them is compiled or
+  linked, nor does any of them leave a module behind. Shipped code now accepts the standard
+  library's `Clock` and defaults to the real one; tests supply a controlled clock so a wait can be checked
+  without waiting. Rationale: a check bounding how long a real wait took is a claim about how busy the
+  machine is, and one turned the shared branch red on 2026-08-27; no standard-library equivalent exists.
+  No principle added, removed, or weakened; no MUST changed. Ripples Package.swift (test targets only),
+  RunKit's trial timer and HarnessKit's launcher timeout (both gain a defaulted clock parameter).
 - **1.3.0** (2026-07-10): MINOR amendment (Principle VI, secret-scanner **delivery only**) — the sanctioned
   `betterleaks` companion changes from *per-platform vendored* to **resolved from config/env/`PATH`**, with
   per-platform `.artifactbundle` vendoring **deferred** pending SwiftPM binary-artifact packaging (tracked as a

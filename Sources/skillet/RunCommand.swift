@@ -69,6 +69,14 @@ struct RunCommand: AsyncParsableCommand {
     var judgeSelection: String = TextJudge.id   // named `judgeSelection` (not `judge`) so it never shadows the `judge` config/param inside buildAdapterAndJudge
 
     // Hidden test-only offline wiring (ReplayAdapter + ReplayJudge); the public --record/--replay is F19.
+    //
+    // **What an offline run of `--axis trigger` does and does not measure.** That axis asks whether a
+    // model, given a prompt and a shelf of skills, reaches for the right one. No model runs here, so
+    // nothing offline can answer that. What it measures is everything around the answer: that the shelf
+    // is assembled correctly, that the skill reported as reached-for is read back correctly, that
+    // pass and fail are computed from it, and that the records merge. The answer itself is stated by the
+    // skill's own frontmatter (`replay-fires: true`), so a test asserts on something it declared rather
+    // than on a name. Checking the stand-in against a real session is separate work — `F74`.
     @Flag(name: .long, help: ArgumentHelp("Test-only offline replay wiring.", visibility: .private))
     var replay = false
     @Option(name: .customLong("replay-map"), help: ArgumentHelp("Test-only replay verdict map (criterion→bool JSON).", visibility: .private))
@@ -85,6 +93,10 @@ struct RunCommand: AsyncParsableCommand {
             if replay { try TestSeam.assertEnabled("--replay") }
             if replayMap != nil { try TestSeam.assertEnabled("--replay-map") }
             if replayBaselineMap != nil { try TestSeam.assertEnabled("--replay-baseline-map") }
+            try TestSeam.assertRecordingsUsable(
+                replay: replay,
+                provided: [replayMap.map { _ in "--replay-map" },
+                           replayBaselineMap.map { _ in "--replay-baseline-map" }])
             let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             let context = try ProjectLocator().locate(dashC: options.directory, cwd: cwd)
             guard let root = context.root.map({ URL(fileURLWithPath: $0) }) else {
@@ -95,13 +107,12 @@ struct RunCommand: AsyncParsableCommand {
             let runsCfg = config?.runs ?? .init()
             let judgeCfg = config?.judge ?? .init()
             let skillsRoot = config?.project?.skillsRoot ?? "skills"
-            let k = runs ?? runsCfg.k
-            guard k >= 1 else {
-                throw EDDError.usage(message: "--runs must be at least 1 (got \(k))", remedy: "pass --runs with a value ≥ 1, or omit it to use runs.k")
-            }
-            guard runsCfg.maxOutputBytes > 0 else {
-                throw EDDError.usage(message: "runs.max_output_bytes must be positive (got \(runsCfg.maxOutputBytes))", remedy: "set a positive byte count in skillet.yaml, or omit it for the 64 MiB default")
-            }
+            // Every number a measurement runs on, resolved and checked in the one place both paid
+            // commands call — and handed back as a value the model-wiring step demands, so neither can
+            // reach a paid call with something unchecked. Stays here, ahead of finding the skill, so a
+            // mistyped flag still answers before anything about the state of the project.
+            let approved = try SpendGate.approveSettings(runsCfg, runsFlag: runs)
+            let k = approved.k
 
             let discovered = SkillScanner().scan(skillsRoot: root.appendingPathComponent(skillsRoot))
             let skillDir = try resolveSkill(discovered, requested: skill)
@@ -125,10 +136,14 @@ struct RunCommand: AsyncParsableCommand {
                     remedy: "add cases to evaluations/evals.json and/or evaluations/trigger-eval.json (`skillet init` scaffolds both)"
                 )
             }
-            if let cases {
-                // Fail loud on a missing/out-of-skill/symlinked fixture or bundle symlink before spending.
-                try preflight(cases, skillDir: skillDir, skillName: skillName)
-            }
+            // Free-before-paid (constitution V), in ONE place both paid commands call: a missing /
+            // out-of-skill / symlinked fixture, an eval with nothing to grade, a symlink inside the
+            // bundle, and the error-tier lint catalog — all refused before any dry-run/spend/probe.
+            // Axis-aware: passing `cases` (nil on a trigger-only run) is what relaxes the has-evals rule,
+            // so the two can't disagree about whether behavioral evals are running (F14 review).
+            try SpendGate.assertFreeChecksPass(
+                cases: cases, skillDir: skillDir, skillName: skillName,
+                lintTarget: skillDir, lintConfig: config?.lint ?? .init(), renderer: renderer)
             if triggerCases != nil {
                 // The trigger axis stages a frontmatter-only stub of the target — verify the fence
                 // extracts BEFORE any spend, or every trial would be an unmeasured staging failure.
@@ -147,11 +162,6 @@ struct RunCommand: AsyncParsableCommand {
                     )
                 }
             }
-            // Free-before-paid (constitution V): refuse a lint-error skill before any dry-run/spend/probe.
-            // Axis-aware: the has-evals rule only gates runs that execute behavioral evals (F14 review).
-            try runLintPreflight(skillDir: skillDir, lintConfig: config?.lint ?? .init(), renderer: renderer,
-                                 behavioralAxisRuns: cases != nil)
-
             // F15 scope (D-4): the baseline arm is behavioral-only — activation is tested with the
             // skill present (universal practice); a run executing no behavioral evals makes --ab
             // meaningless, so refuse before anything is spent ("check early and bail").
@@ -209,8 +219,8 @@ struct RunCommand: AsyncParsableCommand {
             if dryRun {
                 let plan = RunPlan(
                     skill: skillName, evals: cases?.count ?? 0, k: k, trials: trials,
-                    confirmAboveTrials: runsCfg.confirmAboveTrials,
-                    requiresConfirmation: trials > runsCfg.confirmAboveTrials, willSpend: !replay,
+                    confirmAboveTrials: approved.confirmAboveTrials,
+                    requiresConfirmation: trials > approved.confirmAboveTrials, willSpend: !replay,
                     triggerCases: triggerCases?.count, triggerTrials: triggerCases.map { _ in triggerTrials },
                     estimatedCalls: estimatedCalls,
                     abBaselineTrials: ab ? baselineTrials : nil
@@ -225,15 +235,14 @@ struct RunCommand: AsyncParsableCommand {
                 }
                 return
             }
-            try confirmSpend(trials: trials, estimatedCalls: estimatedCalls, limit: runsCfg.confirmAboveTrials, skill: skillName)
+            try confirmSpend(trials: trials, estimatedCalls: estimatedCalls, limit: approved.confirmAboveTrials, skill: skillName)
 
             // Assemble the harness + judge; probe before spending so a missing/banned binary fails fast (3).
-            let timeout = DurationString.parse(runsCfg.timeout) ?? .seconds(600)
             // Trigger-only runs are judge-free (deterministic grading): no judge is built and
             // `judge.model`'s required-explicit rule (§14-4) doesn't apply — nothing gets judged.
             let backend = try buildAdapterAndJudge(
-                config: config, judge: judgeCfg, timeout: timeout,
-                outputLimitBytes: runsCfg.maxOutputBytes, needsJudge: cases != nil, projectRoot: root
+                config: config, judge: judgeCfg, approved: approved,
+                needsJudge: cases != nil, projectRoot: root
             )
             // The shared before-you-spend gate (F41 extracted it so a paid command cannot forget it).
             // Strict for the paid path (refuse banned/unauth before spend); replay's probe is canned and
@@ -259,8 +268,17 @@ struct RunCommand: AsyncParsableCommand {
             // One call: the shared routine confines the path, refuses a file where the folder belongs,
             // ensures the self-ignoring rule, and creates the directory.
             try ensureCacheGitignore(projectRoot: root)
-            // Second-resolution timestamp + a short uuid so two runs in the same second never share a path.
-            let stamp = "\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString.prefix(8))"
+            // **The whole identifier, not the first eight characters of it.** Eight hex characters is a
+            // birthday bound on thirty-two bits, and the second-resolution timestamp beside it narrows the
+            // window without removing it — several runs starting in the same second is ordinary on a build
+            // machine. What makes it worth removing is how a clash fails: asking for a folder that already
+            // exists succeeds silently, so the second run would write its transcripts, traces and records
+            // into the first run's folder, and preparing a workspace there deletes what is already in it.
+            // Measured: creating an existing folder returns success and leaves the earlier file in place.
+            //
+            // The throwaway-copy path already uses the whole identifier for the same reason, and it is the
+            // *safer* of the two — a clash there is refused outright rather than silently accepted.
+            let stamp = "\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString)"
             let base = root.appendingPathComponent(".skillet/runs/\(stamp)", isDirectory: true)
             let runner = Runner(adapter: backend.adapter, judge: backend.judge, evidencePolicy: backend.evidencePolicy)
             let behavioralOutcome: Runner.Outcome? = if let cases {
@@ -281,11 +299,14 @@ struct RunCommand: AsyncParsableCommand {
                 await runner.runTrigger(
                     target: skillRef,
                     corpus: discovered.map { SkillRef(name: $0.lastPathComponent, path: $0.path) },
+                    // The folder every candidate skill lives under — the point each staged file's whole
+                    // path is proved clean from, on every attempt rather than once per run.
+                    skillsRoot: root.appendingPathComponent(skillsRoot),
                     cases: triggerCases, k: k, base: base, keepWorkspace: keepWorkspace
                 )
             } else { nil }
 
-            let report = RunReport(
+            let report = try RunReport(
                 skill: skillName,
                 results: behavioralOutcome?.evals ?? [],
                 trigger: triggerResults,
@@ -300,15 +321,60 @@ struct RunCommand: AsyncParsableCommand {
             )
             try writeRecords(report: report, behavioral: behavioralOutcome, baseline: baselineResults,
                              trigger: triggerResults,
-                             skillDir: skillDir, harness: backend.adapter.id.rawValue, k: k,
+                             skillDir: skillDir, projectRoot: root, harness: backend.adapter.id.rawValue, k: k,
                              provenance: provenance, base: base)
 
             Console.emit(try renderer.renderRun(report, nextSteps: Self.nextSteps(wroteGrading: behavioralOutcome != nil)))
+            // **You asked for a comparison and did not get one.** When the switched-off arm yields no
+            // usable pairing at all — every trial failed, or a skill fired where none may exist — the
+            // comparison is void: nothing in it can be trusted, which is the settled rule for a trust
+            // check failing in a controlled experiment. Exit `3` rather than `1`, because no test failed;
+            // what failed is this machine's ability to provide a clean switched-off measurement, and
+            // that is already what `3` means here — the free pre-spend check for the same inability
+            // leaves `3` too (design §6.1). One fault, one answer, whichever check catches it.
+            if let ab = report.ab, ab.producedNoPairing {
+                throw EDDError.harnessNotFound(
+                    harness: backend.adapter.id.rawValue,
+                    reason: "the without-skill comparison produced no usable pairing"
+                        + (ab.polluted > 0
+                            ? " — \(ab.polluted) baseline trial(s) had a skill fire where none may exist, so isolation failed on this machine"
+                            : " — every baseline trial failed to run")
+                        + "; the with-skill results were still written, but no comparison can be drawn from them")
+            }
             // pass^k demands all k trials pass — on every axis that ran (exit 1 on any non-PASS).
-            let behavioralFailed = report.evals.count > report.passed
-            let triggerFailed = report.trigger.map { $0.passed < $0.evals.count } ?? false
+            // **A check that graded nothing is not a check that failed.** `passed` counts only checks
+            // where every graded attempt passed, so anything not passing used to count against the skill —
+            // including a check where nothing was ever graded, which says nothing about the skill at all.
+            // Comparing against the checks that actually produced a result keeps a genuine failure failing
+            // while stopping a rate limit from being reported as a regression.
+            let behavioralMeasured = report.evals.filter { $0.recorded > 0 }.count
+            let behavioralFailed = behavioralMeasured > report.passed
+            let triggerFailed = report.trigger.map { axis in
+                axis.passed < axis.evals.filter { $0.recorded > 0 }.count
+            } ?? false
             if behavioralFailed || triggerFailed {
                 throw SilentExit(code: ExitCode.measuredFailure.rawValue)
+            }
+            // **Nothing failed, but something could not be measured.** A measured failure above wins,
+            // because it is real information about the skill. Reaching here means every graded attempt
+            // passed and some attempt never got graded — a rate limit, a grader error, a dropped
+            // connection. That used to be recorded as the skill failing and left `1`, telling a pipeline
+            // the skill had regressed. `75` is the long-standing number for "temporary failure, try again
+            // later", and is deliberately not the environment number, which never comes right on a retry.
+            // **An unusable cost report is said out loud.** The figures are dropped so a part-read total
+            // never enters the record; saying nothing about it made that indistinguishable from a run that
+            // simply reported no figures. Not a failure — the measurement itself is unaffected — so it is
+            // a note rather than a different exit number.
+            if report.costUnreadable > 0 {
+                Console.emit(Rendering(stderr: "note: \(report.costUnreadable) attempt(s) reported what "
+                    + "they cost in a form this tool could not read, so no cost is recorded for them — the "
+                    + "measurements themselves are unaffected\n"))
+            }
+            if report.ungraded > 0 {
+                Console.emit(Rendering(stderr: "note: \(report.ungraded) attempt(s) were never graded, so "
+                    + "they are left out of the scores above rather than counted as failures — see the "
+                    + "ungraded_reason beside each attempt for why\n"))
+                throw SilentExit(code: ExitCode.temporaryFailure.rawValue)
             }
         } catch let error as EDDError {
             Console.emit(renderer.renderError(error))
@@ -358,7 +424,10 @@ struct RunCommand: AsyncParsableCommand {
         }
         let evalsFile: EvalsFile
         do { evalsFile = try JSONDecoder().decode(EvalsFile.self, from: data) }
-        catch { throw EDDError.invalidArtifact(path: "\(skillName)/evaluations/evals.json", reason: "not valid evals.json") }
+        catch {
+            throw EDDError.invalidArtifact(path: "\(skillName)/evaluations/evals.json",
+                                           reason: "not valid evals.json — \(DecodeFailure.describe(error))")
+        }
         let cases = evalsFile.cases
         guard !cases.isEmpty else {
             // Present-but-empty skips the axis under the default mode — symmetric with the trigger
@@ -366,14 +435,8 @@ struct RunCommand: AsyncParsableCommand {
             guard required else { return nil }
             throw EDDError.usage(message: "no evals to run for \(skillName)", remedy: "add at least one eval to evaluations/evals.json")
         }
-        // An eval with no expectations can't measure behavior — reject it rather than letting a
-        // verdict-less trial pass vacuously.
-        for (index, eval) in cases.enumerated() where eval.expectations.isEmpty {
-            throw EDDError.invalidArtifact(
-                path: "\(skillName)/evaluations/evals.json",
-                reason: "eval '\(eval.id ?? "#\(index)")' has no expectations to grade"
-            )
-        }
+        // The "nothing to grade" refusal moved to the shared pre-spend routine, with the fixture and
+        // bundle checks it belongs beside — see `SpendGate.assertFreeChecksPass`.
         return cases
     }
 
@@ -414,55 +477,39 @@ struct RunCommand: AsyncParsableCommand {
     /// `judge.model` is **required-explicit** (§14-4, decided): a paid run refuses (exit 2) when it's
     /// absent rather than silently picking one — the reproducibility hazard the surveyed tools carry.
     /// The replay path is exempt: no real judge is built there (canned verdicts, nothing spent).
+    /// The wiring this command needs. **The shared part is chosen elsewhere** — which program answers,
+    /// which grader marks, and the refusals that go with them all live in ``MeasurementSetup`` so a second
+    /// measuring command cannot end up disagreeing with this one. What stays here are the two branches
+    /// only this command has: a second grader for the switched-off arm, and the deterministic axis that
+    /// needs no grader at all. **The order is unchanged** — offline is decided before the grader-free
+    /// axis, exactly as before, because a replayed trigger-only run took the offline path.
     private func buildAdapterAndJudge(
-        config: SkilletConfig?, judge judgeCfg: SkilletConfig.Judge, timeout: Duration,
-        outputLimitBytes: Int, needsJudge: Bool = true, projectRoot: URL
+        config: SkilletConfig?, judge judgeCfg: SkilletConfig.Judge, approved: SpendGate.Approved,
+        needsJudge: Bool = true, projectRoot: URL
     ) throws -> (adapter: any HarnessAdapter, judge: any Judge, baselineJudge: any Judge, id: String, provider: String, model: String, promptVersion: String, evidencePolicy: EvidencePolicy) {
-        // F16: the grounded grader captures produced-file contents; its policy is set from the --judge
-        // selection and applies even under --replay (so the capture path is exercised offline; grading
-        // stays canned). `judgeSelection` is the CLI value — distinct from `judgeCfg` (the config).
-        let policy: EvidencePolicy = (judgeSelection == GroundedJudge.id) ? .groundedDefault : .listingOnly
         if replay {
-            // Arm-distinct canned verdicts (F15 A5): the baseline map defaults to fail-all, so a
-            // replayed --ab shows a deterministic positive Δ; tests override either arm's map.
-            return (ReplayAdapter(),
-                    ReplayJudge(loadReplayMap(projectRoot), defaultPass: replayMap == nil),
-                    ReplayJudge(loadBaselineReplayMap(projectRoot), defaultPass: false),
-                    "replay", "replay", "replay", "replay", policy)
+            let wiring = try MeasurementSetup.forBehaviour(
+                config: config, judge: judgeCfg, approved: approved, judgeSelection: judgeSelection,
+                offline: .init(verdicts: try loadReplayMap(projectRoot), defaultPass: replayMap == nil))
+            // The switched-off arm defaults to failing everything, so a replayed comparison shows a
+            // deterministic positive difference; a test may override either arm's recording.
+            return (wiring.adapter, wiring.judge,
+                    ReplayJudge(try loadBaselineReplayMap(projectRoot), defaultPass: false),
+                    wiring.id, wiring.provider, wiring.model, wiring.promptVersion, wiring.policy)
         }
-        // Trigger-only (F14): grading is deterministic — no judge is constructed or configured-for.
-        // The sentinel provenance ("none") stamps records honestly; the behavioral judge block in a
-        // preserved benchmark.json is carried, not overwritten, by the axis merge.
+        // Deterministic axis: grading needs no grader, and the provenance says "none" honestly.
         if !needsJudge {
             let claudePath = config?.harness?.claudeCode?.path
-            let adapter = ClaudeCodeAdapter(configPath: claudePath, timeout: timeout, outputLimitBytes: outputLimitBytes)
+            let adapter = ClaudeCodeAdapter(configPath: claudePath, timeout: approved.timeout,
+                                            outputLimitBytes: approved.outputLimitBytes)
             return (adapter, UnjudgedAxisJudge(), UnjudgedAxisJudge(), "none", "none", "none", "none", .listingOnly)
         }
-        guard judgeCfg.provider == "claude-code" else {
-            throw EDDError.usage(
-                message: "judge.provider '\(judgeCfg.provider)' is not supported in Phase 1",
-                remedy: "set judge.provider: claude-code in skillet.yaml (the only implemented provider)"
-            )
-        }
-        guard let model = judgeCfg.model?.trimmingCharacters(in: .whitespaces), !model.isEmpty else {
-            throw EDDError.usage(
-                message: "judge.model is not set — a paid run needs an explicit judge model so verdicts are reproducible across machines",
-                remedy: "add `model: <judge model>` under `judge:` in skillet.yaml (`skillet init` writes one)"
-            )
-        }
-        let claudePath = config?.harness?.claudeCode?.path
-        guard let resolved = BinaryResolver().resolve(flag: nil, envVar: "SKILLET_CLAUDE_CODE_BIN", configPath: claudePath, pathName: "claude") else {
-            throw EDDError.harnessNotFound(harness: "claude-code", reason: nil)
-        }
-        let adapter = ClaudeCodeAdapter(configPath: claudePath, timeout: timeout, outputLimitBytes: outputLimitBytes)
-        let cliRunner = ClaudeCLIJudgeRunner(binaryPath: resolved.path)
-        // F16: text (existence + claims) or grounded (reads produced-file contents). Same backend +
-        // required-explicit model; the split is prompt + evidence. Both arms share the grader (F15 A1).
-        let selected: any Judge = (judgeSelection == GroundedJudge.id)
-            ? GroundedJudge(runner: cliRunner, model: model)
-            : TextJudge(runner: cliRunner, model: model)
-        let promptVersion = (judgeSelection == GroundedJudge.id) ? GroundedJudge.promptVersion : TextJudge.promptVersion
-        return (adapter, selected, selected, judgeSelection, "claude-code", model, promptVersion, policy)
+        let wiring = try MeasurementSetup.forBehaviour(
+            config: config, judge: judgeCfg, approved: approved, judgeSelection: judgeSelection,
+            offline: nil)
+        // Both arms share one grader when it is real.
+        return (wiring.adapter, wiring.judge, wiring.judge, wiring.id, wiring.provider, wiring.model,
+                wiring.promptVersion, wiring.policy)
     }
 
     /// Validate that every declared eval fixture (`files[]`, resolved against the skill directory)
@@ -491,6 +538,19 @@ struct RunCommand: AsyncParsableCommand {
         }
     }
 
+    /// Refuse a record path that has become a link since the command started. Named separately from the
+    /// start-of-command check because it answers a different question: not "was this safe when we began"
+    /// but "is it safe in the instant before we write".
+    static func assertNoLinkOnPath(to url: URL, projectRoot: URL, label: String) throws {
+        if let link = SafeFile.firstSymlinkOnPath(from: projectRoot, to: url) {
+            throw EDDError.invalidArtifact(
+                path: label,
+                reason: "the path to this record became a link while the run was measuring: \(link.lastPathComponent)",
+                fix: "replace the link with a real folder or file — a link could send this run's results "
+                    + "outside the project, where nothing here can reach them")
+        }
+    }
+
     /// Keep the gitignored cache gitignored even when `run` is the first skillet command in a repo (no
     /// prior `init`): a self-contained `.skillet/.gitignore` of `*` ignores the whole cache — raw
     /// transcripts/forensics — from within, so a paid run's artifacts can't be accidentally committed
@@ -506,49 +566,6 @@ struct RunCommand: AsyncParsableCommand {
         try CacheSupport.prepareCacheDirectory(projectRoot: projectRoot, subdirectory: "runs")
     }
 
-    /// The free lint gate (design §6.1, constitution V): reuse the shipped error-tier catalog
-    /// (`L001`/`L003`; `L009`'s absent/corrupt-evals errors are already owned by `loadEvals` above, so
-    /// only its <3-case *warning* can reach here) and **refuse to spend** on an error-tier-invalid skill.
-    /// A refusal emits `skillet.lint/1` (under `--json`) and is **exit 2** — a pre-measurement refusal,
-    /// distinct from a *measured* non-PASS (exit 1) and from a corrupt/missing-evals artifact (exit 4/2,
-    /// which `loadEvals` already enforced). Warnings (incl. a <3-case suite) proceed. `doctor` owns the
-    /// broader Phase-2 preflight catalog; `run` only enforces the already-shipped free subset.
-    /// Delegates to the shared free pre-spend gate in `LintSupport` (F41 extracted it there so `suggest`
-    /// can use the same definition instead of copying the filter). Behavior is unchanged for `run`:
-    /// a trigger-only invocation still passes `behavioralAxisRuns: false`, which filters SKILL-L009's
-    /// missing-`evals.json` error (F14's "each axis where its file exists").
-    private func runLintPreflight(skillDir: URL, lintConfig: SkilletConfig.Lint, renderer: Renderer, behavioralAxisRuns: Bool = true) throws {
-        try runFreeLintGate(skillDir: skillDir, lintConfig: lintConfig, renderer: renderer,
-                            behavioralAxisRuns: behavioralAxisRuns)
-    }
-
-    private func preflight(_ cases: [EvalCase], skillDir: URL, skillName: String) throws {
-        // Fixtures: present + resolvable under the fixture allowlist (resolveFixture rejects absolute /
-        // `..` / symlink / hidden, and any evaluations/** that isn't evaluations/fixtures/**).
-        for eval in cases {
-            for file in eval.files {
-                guard let fixture = WorkspaceManager.resolveFixture(file, skillDir: skillDir),
-                      FileManager.default.fileExists(atPath: fixture.source.path) else {
-                    throw EDDError.invalidArtifact(
-                        path: "\(skillName)/evaluations/evals.json",
-                        reason: "eval references a fixture that is missing, out-of-skill, symlinked, hidden, or private (only fixtures/** and evaluations/fixtures/** are allowed): \(file)",
-                        fix: "point the eval at a real, readable file under the skill's own fixtures/ or evaluations/fixtures/ folder"
-                    )
-                }
-            }
-        }
-        // Skill bundle: no symlink anywhere in a staged entry (F7 treats symlinks as invalid artifacts).
-        for entry in WorkspaceManager.stagedEntries(skillDir: skillDir) {
-            if let link = WorkspaceManager.firstSymlink(in: skillDir.appendingPathComponent(entry)) {
-                throw EDDError.invalidArtifact(
-                    path: "\(skillName)",
-                    reason: "skill bundle contains a symlink (not allowed in Phase 1): \(entry)/…/\(link.lastPathComponent)",
-                    fix: "replace that link inside the skill folder with the real file, so what is measured is what is committed"
-                )
-            }
-        }
-    }
-
     /// The judge slot for a trigger-only run: nothing may be judged (the trigger loop never calls the
     /// judge). Any call is a programmer error surfaced as a thrown failure, never a silent verdict.
     private struct UnjudgedAxisJudge: Judge {
@@ -560,40 +577,65 @@ struct RunCommand: AsyncParsableCommand {
 
     // Operator-supplied replay-map paths (hidden test seam) read through the one sanctioned untrusted
     // reader (T2): bounds a pathological file and refuses a symlink / special / hard-linked path, matching
-    // every other file read. A refusal falls back to the empty map exactly as an unreadable path did.
-    private func loadReplayMap(_ projectRoot: URL) -> [String: Bool] {
-        Self.decodeVerdictMap(replayMap, projectRoot: projectRoot)
+    // every other file read. A file that was named and cannot be used is refused rather than treated as
+    // empty — see ``decodeVerdictMap(_:projectRoot:)`` for why that difference decides a verdict.
+    private func loadReplayMap(_ projectRoot: URL) throws -> [String: Bool] {
+        try Self.decodeVerdictMap(replayMap, projectRoot: projectRoot)
     }
 
-    private func loadBaselineReplayMap(_ projectRoot: URL) -> [String: Bool] {
-        Self.decodeVerdictMap(replayBaselineMap, projectRoot: projectRoot)
+    private func loadBaselineReplayMap(_ projectRoot: URL) throws -> [String: Bool] {
+        try Self.decodeVerdictMap(replayBaselineMap, projectRoot: projectRoot)
     }
 
     /// **Confined to the project**, like every other read here — unconfined, these hidden options read any
-    /// regular file on the machine. Nothing is echoed back on failure (an unusable file falls back to the
-    /// empty map, exactly as an unreadable path always did), so this closes the reach rather than a leak.
-    private static func decodeVerdictMap(_ path: String?, projectRoot: URL) -> [String: Bool] {
-        guard let path,
-              case let .success(text) = SafeFile.readConfinedRegularText(
-                  URL(fileURLWithPath: path), base: projectRoot, cap: 1 << 20)
-        else { return [:] }
-        return (try? JSONDecoder().decode([String: Bool].self, from: Data(text.utf8))) ?? [:]
+    /// regular file on the machine. Shared with the proving command, which reads the same recordings.
+    ///
+    /// **A file that was named and cannot be used is refused, not quietly treated as empty.** Falling back
+    /// to an empty set of recorded answers looks harmless and is not: with no recorded answer for any
+    /// check, every check fails, in *both* of the two measurements the proving command compares. Nothing
+    /// then scores lower than anything else, so the edit is declared proven and the command prints the
+    /// line telling you to apply it — off a run where not one check passed and the named file was never
+    /// read. Reproduced end to end: naming a file that is not there printed `0/1 → 0/1`, "no test scored
+    /// lower", and an offer to land the edit.
+    ///
+    /// **A relative name is taken as relative to the project**, the same as the draft file the proving
+    /// command reads. It used to be taken as relative to whatever folder the command was invoked from, so
+    /// running from elsewhere silently looked somewhere else — and, before the refusal above, said
+    /// nothing when it found nothing.
+    static func decodeVerdictMap(_ path: String?, projectRoot: URL) throws -> [String: Bool] {
+        guard let path else { return [:] }
+        let url = path.hasPrefix("/") ? URL(fileURLWithPath: path)
+                                      : projectRoot.appendingPathComponent(path)
+        guard case let .success(text) = SafeFile.readConfinedRegularText(url, base: projectRoot, cap: 1 << 20)
+        else {
+            throw EDDError.invalidArtifact(
+                path: path,
+                reason: "the recorded answers named here could not be read from inside the project",
+                fix: "give a path to a readable file inside the project — with none, every check fails in "
+                    + "both measurements and an edit that proves nothing reads as proven")
+        }
+        guard let decoded = try? JSONDecoder().decode([String: Bool].self, from: Data(text.utf8)) else {
+            throw EDDError.invalidArtifact(
+                path: path,
+                reason: "the recorded answers are not a set of check-name to true-or-false entries",
+                fix: #"write it as {"a criterion": true, "another": false}"#)
+        }
+        return decoded
     }
 
     // MARK: - spend gate
 
-    /// Confirm spend above the threshold (design P9). `--yes` proceeds; on a TTY we prompt; otherwise
-    /// (or `--no-input`, or a declined prompt) we refuse with a usage error carrying the estimate (exit 2).
+    /// Confirm spend above the threshold (design P9). The asking is shared (`SpendGate.confirmCost`); the
+    /// **refusal stays here**, because this command leaves `2` for a decline while the proving command
+    /// leaves `5`, and moving the error into the shared routine would have changed this one silently.
     private func confirmSpend(trials: Int, estimatedCalls: Int, limit: Int, skill: String) throws {
-        guard trials > limit, !yes else { return }
-        let estimate = "\(trials) trials (≈ \(estimatedCalls) model calls) for \(skill) exceeds confirm_above_trials=\(limit)"
-        if Console.isStdoutTTY() && Console.isStdinTTY() && !noInput {
-            FileHandle.standardError.write(Data("\(estimate). Proceed? [y/N] ".utf8))
-            let answer = (readLine() ?? "").trimmingCharacters(in: .whitespaces).lowercased()
-            guard answer == "y" || answer == "yes" else {
-                throw EDDError.usage(message: "spend not confirmed: \(estimate)", remedy: "re-run with --yes to proceed, or --dry-run to preview")
-            }
-        } else {
+        switch SpendGate.confirmCost(trials: trials, estimatedCalls: estimatedCalls, limit: limit,
+                                     skill: skill, yes: yes, noInput: noInput) {
+        case .proceed:
+            return
+        case let .declined(estimate):
+            throw EDDError.usage(message: "spend not confirmed: \(estimate)", remedy: "re-run with --yes to proceed, or --dry-run to preview")
+        case let .notAsked(estimate):
             throw EDDError.usage(message: "spend requires confirmation: \(estimate)", remedy: "re-run with --yes to proceed, or --dry-run to preview")
         }
     }
@@ -605,8 +647,19 @@ struct RunCommand: AsyncParsableCommand {
     /// `evaluations/` files (P5 — skillet never auto-commits).
     private func writeRecords(report: RunReport, behavioral: Runner.Outcome?, baseline: [EvalResult]?,
                               trigger: [TriggerEvalResult]?,
-                              skillDir: URL, harness: String, k: Int, provenance: RunProvenance, base: URL) throws {
+                              skillDir: URL, projectRoot: URL, harness: String, k: Int,
+                              provenance: RunProvenance, base: URL) throws {
         let evalDir = skillDir.appendingPathComponent("evaluations", isDirectory: true)
+        // **Checked before the folder is made, as well as before the file is written.**
+        //
+        // This narrows the gap; it does not close it, and saying otherwise would be worse than the gap.
+        // Checking a name and then acting on it can never be made safe by checking harder — the standard
+        // remedy is a single operation that refuses links as part of doing the work, which the file
+        // routines used here do not offer. Measured, the harm reported for this gap does not actually
+        // occur on this machine: making a folder whose name has been replaced by a link either fails
+        // outright or creates nothing. But that is the platform's behaviour rather than a promise this
+        // code makes, and this project builds for another platform with a separate implementation.
+        try Self.assertNoLinkOnPath(to: evalDir, projectRoot: projectRoot, label: "evaluations")
         try FileManager.default.createDirectory(at: evalDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
@@ -619,18 +672,48 @@ struct RunCommand: AsyncParsableCommand {
         // below then REPLACES the planted entry (rename, never opened): the self-healing path.
         let priorData: Data? = { if case let .success(d) = SafeFile.readPlainData(benchmarkURL, cap: 8 << 20) { return d } else { return nil } }()
         let prior = priorData.flatMap { try? JSONDecoder().decode(BenchmarkFile.self, from: $0) }
-        try encoder.encode(BenchmarkFile(
+        // **Said again here, because the file can change after it was checked.** It is read once before
+        // anything is spent — where an unreadable one is announced and an unscorable one stops the run —
+        // and again now, minutes later. Anything could have replaced it in between. Whoever did that has
+        // already destroyed whatever it held, so nothing recoverable is lost by writing over it; what
+        // would be lost is the person ever knowing, which is why it is said rather than passed over.
+        if priorData != nil, prior == nil {
+            Console.emit(Rendering(stderr: "note: evaluations/benchmark.json could not be read when this "
+                + "run went to write its results, and has been replaced — it was readable when the run "
+                + "started, so something changed it in between.\n"))
+        }
+        let encoded = try encoder.encode(BenchmarkFile(
             skill: report.skill,
             behavioral: behavioral.map { (report: report, evals: $0.evals) },
             baseline: baseline,
             trigger: trigger, harness: harness, k: k, provenance: provenance, preserving: prior
-        )).write(to: benchmarkURL, options: [.atomic])   // atomic: rename over a planted entry, never open it (F33)
+        ))
+        // **Checked immediately before writing, not only at the start of the command.** The check at the
+        // start runs before a measurement that takes minutes, which is a long and predictable window in
+        // which to plant a link. Measured on this platform, an atomic write replaces a link rather than
+        // following it — so the outcome would be safe here — but that is undocumented behaviour, it
+        // differs by platform, and this project supports one it is not tested on. An explicit guard costs
+        // nothing and does not rely on being lucky.
+        try Self.assertNoLinkOnPath(to: benchmarkURL, projectRoot: projectRoot, label: "benchmark.json")
+        try encoded.write(to: benchmarkURL, options: [.atomic])
         // grading.json is judge output — written only when the behavioral axis ran (a trigger-only
         // run has no verdicts and must not blank the committed grading record).
         if let behavioral {
+            // **The same last-instant check as the file above.** Both are committed records written into
+            // the same folder at the same moment, and only one of them was checked — so a link planted on
+            // that folder during the minutes a measurement takes was refused for one file and not for the
+            // other, in the window the note above exists to close.
+            let gradingURL = evalDir.appendingPathComponent("grading.json")
+            try Self.assertNoLinkOnPath(to: gradingURL, projectRoot: projectRoot, label: "grading.json")
             try encoder.encode(GradingFile(evals: behavioral.evals, provenance: provenance))
-                .write(to: evalDir.appendingPathComponent("grading.json"), options: [.atomic])
+                .write(to: gradingURL, options: [.atomic])
         }
+        // **This one is allowed to fail quietly, and that is the whole of the reason.** It writes a
+        // diagnostic copy of the run into the folder this tool documents as safe to delete at any time.
+        // Nothing reads it back — the committed records above are the source of truth, and the score
+        // re-derives from those. A failure here therefore costs a convenience and nothing else, which is
+        // why it does not stop a run that has already been paid for. Written down because two separate
+        // reviews have asked.
         if let runJSON = try? SkilletJSON.encode(report) {
             try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
             try? Data(runJSON.utf8).write(to: base.appendingPathComponent("run.json"), options: [.atomic])
@@ -641,9 +724,20 @@ struct RunCommand: AsyncParsableCommand {
     /// The suggestion names only files this run actually wrote — a trigger-only run produces no
     /// grading.json (nothing was judged), so it must not tell the user to commit one (round 3, P2).
     static func nextSteps(wroteGrading: Bool = true) -> [String] {
+        // **Deliberately asked of the binary rather than written down.** The list names the loop verbs a
+        // reader should reach for next, and filters to those the tool actually answers to — so a verb
+        // that has not shipped is never suggested, and one that ships later needs no edit here. `next`
+        // is in the list and is not registered today: it appears the moment it does, which is the intent
+        // rather than an oversight, and a test pins both halves.
         let registered = Set(SkilletCommand.configuration.subcommands.compactMap { $0.configuration.commandName })
         let verbs = ["next", "iterate"].filter { registered.contains($0) }.map { "skillet \($0)" }
-        guard verbs.isEmpty else { return verbs }
-        return [wroteGrading ? "commit evaluations/benchmark.json + grading.json" : "commit evaluations/benchmark.json"]
+        // **Committing comes first, and is not replaced by the loop verbs.** This used to hand over the
+        // loop verb *instead* of the commit advice the day one was registered — but a run writes its
+        // records into tracked files, so the tree is dirty, and `iterate` refuses a dirty repository.
+        // The suggested next step would have refused the moment you followed it. They are sequential,
+        // not alternatives: commit what was measured, then prove an edit against it.
+        let commit = wroteGrading ? "commit evaluations/benchmark.json + grading.json"
+                                  : "commit evaluations/benchmark.json"
+        return [commit] + verbs
     }
 }

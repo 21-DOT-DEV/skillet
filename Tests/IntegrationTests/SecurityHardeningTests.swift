@@ -211,4 +211,132 @@ struct SecurityHardeningTests {
         #expect(triage.stdout.contains("nested/skills/demo/evaluations/findings/"),
                 "the printed path must keep both parts of a multi-segment skills root")
     }
+
+    /// **A link where a record will be written is refused, and nothing outside the project is touched.**
+    ///
+    /// Planted before the run, so this exercises the check at the start of the command. The guard added
+    /// beside the write itself defends a different moment — a link appearing *during* a measurement that
+    /// takes minutes — and that window cannot be driven from a test without timing the plant against a
+    /// live run, which would make this suite flaky for a case it could only sometimes reach. What is
+    /// asserted here is the outcome that matters either way: refused, and the outside file untouched.
+    @Test("A record path that is a link is refused, and nothing outside the project is written")
+    func linkedRecordPathIsRefused() async throws {
+        let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
+        let outside = try Fixture.makeTempDirectory(); defer { Fixture.remove(outside) }
+        let stolen = outside.appendingPathComponent("stolen.json")
+        try "ORIGINAL".write(to: stolen, atomically: true, encoding: .utf8)
+
+        let record = root.appendingPathComponent("skills/demo/evaluations/benchmark.json")
+        try? FileManager.default.removeItem(at: record)
+        try FileManager.default.createSymbolicLink(at: record, withDestinationURL: stolen)
+
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay", "--yes"])
+        #expect(out.exitCode == 4, "a linked record path must be refused: \(out.stderr)")
+        #expect(out.stderr.contains("symlink"), "and must say why")
+        #expect(try String(contentsOf: stolen, encoding: .utf8) == "ORIGINAL",
+                "nothing outside the project may be written through the link")
+    }
+
+    /// **A linked *folder* for the records, where the test beside it links the record *file*.**
+    ///
+    /// That gap was real: the existing test replaces `benchmark.json` with a link, and nothing covered
+    /// replacing the folder those records live in. This closes it.
+    ///
+    /// **What it does not cover, stated so nobody mistakes it.** A check was also added immediately before
+    /// that folder is created, because the only check used to run after. This test cannot reach that
+    /// addition — measured, the run is already refused at start-up by the check that walks the skill's
+    /// path, with the message asserted below. The added check matters only if the link appears *after*
+    /// that start-up check and *before* the folder is made, which is a race no deterministic test can
+    /// produce. It is defence in depth, and it narrows the gap rather than closing it: checking a name and
+    /// then acting on it cannot be made safe by checking harder.
+    @Test("A linked records folder is refused, and nothing outside the project is created")
+    func linkedRecordsFolderIsRefused() async throws {
+        let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
+        let outside = try Fixture.makeTempDirectory(); defer { Fixture.remove(outside) }
+
+        let evaluations = root.appendingPathComponent("skills/demo/evaluations")
+        try FileManager.default.removeItem(at: evaluations)
+        // Points at a name that does not exist, which is the case where the behaviour differs.
+        try FileManager.default.createSymbolicLink(
+            at: evaluations, withDestinationURL: outside.appendingPathComponent("planted"))
+
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay", "--yes"])
+        #expect(out.exitCode == 4, "a linked records folder is a broken project layout: \(out.stderr)")
+        #expect(out.stderr.contains("symlink") || out.stderr.contains("link"),
+                "and the message must name the link rather than report a file-system fault: \(out.stderr)")
+        #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("planted").path),
+                "and nothing may be created outside the project")
+    }
+
+    /// **Both committed records get this, not one of them.** A run writes two record files into the same
+    /// folder at the same moment. Only the first was checked right before its write, so a link planted on
+    /// that folder during the minutes a measurement takes was refused for one file and followed for the
+    /// other — in exactly the window the check exists to close.
+    ///
+    /// **What this test does and does not pin, stated because the difference matters.** A link planted
+    /// before the command starts is caught by the check that runs at the start, so this passes either
+    /// way and does not by itself prove the check beside the write. That check defends a different
+    /// moment — a link appearing *during* a measurement lasting minutes — which cannot be driven from a
+    /// test without racing a plant against a live run, and a suite that sometimes loses that race is
+    /// worse than one that says what it covers. The check beside the write was verified the way its
+    /// neighbour was: by removing the start-of-command check and confirming this case is still refused,
+    /// then removing both and confirming the run finishes and writes straight through the link. What is
+    /// asserted below is the outcome that holds either way — refused, and the outside file untouched.
+    @Test("The second record's path being a link is refused too, and nothing outside is written")
+    func linkedGradingPathIsRefused() async throws {
+        let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
+        let outside = try Fixture.makeTempDirectory(); defer { Fixture.remove(outside) }
+        let stolen = outside.appendingPathComponent("stolen-grading.json")
+        try "ORIGINAL".write(to: stolen, atomically: true, encoding: .utf8)
+
+        let record = root.appendingPathComponent("skills/demo/evaluations/grading.json")
+        try? FileManager.default.removeItem(at: record)
+        try FileManager.default.createSymbolicLink(at: record, withDestinationURL: stolen)
+
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay", "--yes"])
+        #expect(out.exitCode == 4, "a linked record path must be refused: \(out.stderr)")
+        #expect(out.stderr.contains("grading.json"), "and must say which file: \(out.stderr)")
+        #expect(try String(contentsOf: stolen, encoding: .utf8) == "ORIGINAL",
+                "nothing outside the project may be written through the link")
+    }
+}
+
+/// **The file that keeps the scratch folder out of version control must be a real file.**
+///
+/// This tool writes a scratch folder for each run and drops a small file in it telling version control to
+/// ignore the whole thing, so a run's raw output is never accidentally committed. The check before that
+/// write asked whether a file exists at the path — which follows a link and answers about its
+/// destination, so a link pointing at nothing answered "no" and the write went ahead.
+///
+/// Measured on this machine, that write replaces the link instead of following it, so the outcome here
+/// was already safe. That behaviour is undocumented, differs between systems, and this project supports
+/// one it is not tested on — so it is checked rather than relied on, which is the same conclusion an
+/// earlier round reached about a different write for the same reason.
+@Suite("The scratch folder's ignore file cannot be a link", .tags(.integration))
+struct CacheIgnoreLinkTests {
+    @Test("A link where the ignore file belongs is refused, naming it and what to do")
+    func linkedIgnoreFileRefused() async throws {
+        let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
+        let elsewhere = try Fixture.makeTempDirectory(); defer { Fixture.remove(elsewhere) }
+        let cache = root.appendingPathComponent(".skillet", isDirectory: true)
+        try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(
+            at: cache.appendingPathComponent(".gitignore"),
+            withDestinationURL: elsewhere.appendingPathComponent("nothing-here.txt"))
+
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay"])
+        #expect(out.exitCode == 4, "a link where a real file belongs is a broken layout, not a failing disk")
+        #expect(out.stderr.contains(".gitignore"), "and it says which file: \(out.stderr)")
+        #expect(!FileManager.default.fileExists(atPath: elsewhere.appendingPathComponent("nothing-here.txt").path),
+                "nothing was written through the link to somewhere outside the project")
+    }
+
+    /// The ordinary case still works, so the check cannot be satisfied by refusing everything.
+    @Test("An ordinary run still writes the ignore file and proceeds")
+    func ordinaryRunStillWritesIt() async throws {
+        let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay"])
+        #expect(out.exitCode == 0, "\(out.stderr)")
+        #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent(".skillet/.gitignore").path))
+    }
 }

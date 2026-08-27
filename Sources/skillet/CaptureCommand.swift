@@ -143,7 +143,7 @@ struct CaptureCommand: AsyncParsableCommand {
             // found", whose remedy tells the user to re-run or check --target-dir.
             throw EDDError.invalidArtifact(path: ref.path, reason: stderr)
         }
-        catch { throw EDDError.invalidArtifact(path: ref.path, reason: "\(error)") }
+        catch { throw EDDError.invalidArtifact(path: ref.path, reason: DecodeFailure.describe(error)) }
         let trace = try adapter.parseTrace(raw)
 
         // 2. Assemble the artifacts (raw — scrubbed next).
@@ -284,7 +284,11 @@ struct CaptureCommand: AsyncParsableCommand {
     /// literal `"model":"` substring, which breaks the moment an emitter puts a space after the colon —
     /// `"model": "…"`) and take `message.model` (where claude-code stores it) or a top-level `model`.
     private func modelFromJSONL(_ raw: String) -> String? {
-        for line in raw.split(separator: "\n", omittingEmptySubsequences: true) {
+        // Split on any line ending: a session file saved with Windows line endings does not split at all
+        // when a single newline character is asked for, because in Swift a carriage return followed by a
+        // newline is one character — so the whole file arrives as one piece, no line parses, and the model
+        // is recorded as unknown. The reader of the same files in the harness had the same fault.
+        for line in raw.split(whereSeparator: \.isNewline) {
             guard let object = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any] else { continue }
             let value = ((object["message"] as? [String: Any])?["model"] as? String) ?? (object["model"] as? String)
             if let value, !value.isEmpty, value != "<synthetic>" { return value }

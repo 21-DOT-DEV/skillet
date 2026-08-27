@@ -339,7 +339,8 @@ struct TriageCommand: AsyncParsableCommand {
         // registered (never advertise a command that does not exist), with a concrete, copy-pasteable id.
         if reg.contains("suggest") {
             if let finding = topFindingId {
-                steps.append("draft a fix — skillet suggest \(skill) --from \(finding)")
+                steps.append("draft a fix — " + ShellWord.command("skillet suggest", skill,
+                                                                  options: [ShellWord.option("--from", finding)]))
             } else if isPreview {
                 // Don't vanish: drafting is a real next step the reader should know about — it just
                 // isn't reachable until the findings are actually written. Say what unlocks it instead

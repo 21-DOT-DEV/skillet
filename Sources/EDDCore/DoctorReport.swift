@@ -21,6 +21,13 @@ public struct DoctorReport: SchemaIdentified, Sendable, Equatable {
         /// The trigger-test file's health (added F14 review round 4 — additive): absent/usable pass,
         /// empty warns (the runner skips it), invalid/symlinked fails (the runner refuses it).
         public static let skillTriggerEvals = "skill.trigger-evals"
+        /// The numbers a measurement runs on (`runs.k`, `runs.timeout`, `runs.max_output_bytes`).
+        /// **Fails**, never warns: a setting the tool cannot read is one it silently ignores, and the
+        /// cost lands in measurements — a time limit it could not parse used to become ten minutes in
+        /// silence, so attempts were cut short and recorded as failures having nothing to do with the
+        /// skill. Here so that fault costs nothing to find, rather than surfacing when you spend.
+        public static let runSettings = "config.runs"
+
         /// The `capture` secret scanner (F32): does `betterleaks` resolve (+ version)? A **warning** when
         /// absent — `capture` fails closed at runtime, so this only surfaces the gap early, never fails.
         public static let secretScanner = "capture.secret-scanner"

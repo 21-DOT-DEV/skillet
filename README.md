@@ -34,25 +34,29 @@ flowchart LR
 
     I --> R --> D --> N --> F --> R
 
+    P["skillet iterate<br/>prove a fix by A/B"]
+    F --> P
+
     Df["skillet friction<br/>log a failure by hand"]
     Nf["skillet next<br/>the single next action"]
-    Ff["skillet iterate<br/>prove a fix by A/B"]
     D -.- Df
     N -.- Nf
-    F -.- Ff
 
     classDef planned stroke-dasharray:5 5
-    class Df,Nf,Ff planned
+    class Df,Nf planned
 ```
 
 You **adopt** skillet once (`init`), then loop: **measure** with `run` (each eval repeated *k* times
 for a `pass^k` consistency score), **discover** real failures via `capture`/`friction`, **interpret**
 them with `triage`, then **fix** with `suggest` — which drafts a minimal edit from that evidence and,
-with `--apply`, writes it into your working tree — and re-run. Free `lint` checks gate every paid
+with `--apply`, writes it into your working tree — and re-run. Before you land a draft you can **prove**
+it with `iterate`, which measures the skill as it is, applies the edit to a throwaway copy of your
+repository, measures again, and blocks if any test scored lower. Free `lint` checks gate every paid
 `run`, and `skillet doctor` preflights the whole environment for $0 — config, harness, skill
 visibility — so a misconfig never costs money. Today `skillet init`, `skillet doctor`, `skillet lint`,
-`skillet run`, `skillet score`, `skillet capture`, `skillet triage`, and `skillet suggest` ship (plus
-`skillet harness info` for setup); `friction`, `next` and `iterate` land across the roadmap phases.
+`skillet run`, `skillet score`, `skillet capture`, `skillet triage`, `skillet suggest`, and
+`skillet iterate` ship (plus `skillet harness info` for setup); `friction` and `next` land across the
+roadmap phases.
 
 ## Install
 
@@ -95,6 +99,13 @@ skillet triage [<skill>]             # interpret: cluster a skill's captured fai
 skillet triage --since <date>        # only fold in recordings on/after <date> (YYYY-MM-DD)
 skillet triage --dry-run             # preview the taxonomy + would-write findings; write nothing
 skillet triage --json                # machine-readable taxonomy (schema: skillet.triage/1)
+skillet suggest <skill>     # suggest: draft minimal SKILL.md edits from triaged evidence → .skillet/proposals/ (paid; nothing is applied)
+skillet suggest <skill> --proposals <name>.json --apply  # write a reviewed draft into your working tree (refuses a dirty tree; never commits)
+skillet suggest --json      # machine-readable draft/apply result (schema: skillet.suggest/1, skillet.apply/1)
+skillet iterate <skill> --proposals <name>.json  # prove: measure the skill before and after the edit, in a throwaway copy (paid; ~2× a run)
+skillet iterate <skill> --proposals <name>.json --edits <n>...  # prove only the numbered edits (default: all of them)
+skillet iterate <skill> --proposals <name>.json -n  # dry-run: preview what would be measured and what it costs
+skillet iterate --json      # machine-readable before/after comparison (schema: skillet.iterate/1)
 skillet harness info        # harness adapters, capabilities, probe status
 skillet harness info --json # machine-readable (schema: skillet.harness-info/1)
 ```

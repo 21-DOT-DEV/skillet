@@ -16,12 +16,12 @@ struct RunRecordMappingTests {
     )
 
     @Test("benchmark.json: per-trial viewer-shaped runs[], skillet-owned consistency, run_summary.default")
-    func benchmarkShape() {
+    func benchmarkShape() throws {
         let evals = [
             EvalResult(evalId: "a", trials: [trial(true, ["x", "y"]), trial(true, ["x", "y"])]),   // 2 trials × 2 expectations, all pass → PASS
             EvalResult(evalId: "b", trials: [trial(true, ["z"]), trial(false, ["z"])])             // 1/2 trials → FLAKY
         ]
-        let bench = BenchmarkFile(report: RunReport(skill: "demo", results: evals), evals: evals, harness: "replay", k: 2, provenance: provenance)
+        let bench = try BenchmarkFile(report: try RunReport(skill: "demo", results: evals), evals: evals, harness: "replay", k: 2, provenance: provenance)
         #expect(bench.skillName == "demo")
         #expect(bench.runs.count == 4)   // ONE ROW PER TRIAL (2 evals × 2 trials), not per eval
 
@@ -54,10 +54,10 @@ struct RunRecordMappingTests {
     }
 
     @Test("runs[].result counts EXPECTATIONS in that trial, not trials — no viewer-semantics overload")
-    func resultIsExpectationCounts() {
+    func resultIsExpectationCounts() throws {
         // One eval, one trial, 3 expectations, 2 pass → result is 2/3, NOT the trial-level 0/1 or 1/1.
         let evals = [EvalResult(evalId: "a", trials: [TrialResult(exit: .passed, verdicts: [verdict("x", true), verdict("y", true), verdict("z", false)])])]
-        let result = BenchmarkFile(report: RunReport(skill: "demo", results: evals), evals: evals, harness: "replay", k: 1, provenance: provenance)
+        let result = try BenchmarkFile(report: try RunReport(skill: "demo", results: evals), evals: evals, harness: "replay", k: 1, provenance: provenance)
             .runs.first?.objectValue?["result"]?.objectValue
         #expect(result?["passed"] == .number(2))
         #expect(result?["failed"] == .number(1))
@@ -72,12 +72,12 @@ struct RunRecordMappingTests {
             EvalResult(evalId: "b", trials: [trial(true), trial(false)]),
             EvalResult(evalId: "c", trials: [trial(false), trial(false)])
         ]
-        let live = RunReport(skill: "demo", results: evals)
+        let live = try RunReport(skill: "demo", results: evals)
         // Producer side: serialize the committed record.
-        let json = String(decoding: try JSONEncoder().encode(BenchmarkFile(report: live, evals: evals, harness: "replay", k: 2, provenance: provenance)), as: UTF8.self)
+        let json = String(decoding: try JSONEncoder().encode(try BenchmarkFile(report: live, evals: evals, harness: "replay", k: 2, provenance: provenance)), as: UTF8.self)
         // Consumer side: read it back and recompute pass^k offline from consistency — no in-memory results, no cache.
         let reloaded = try JSONDecoder().decode(BenchmarkFile.self, from: Data(json.utf8))
-        #expect(RunReport(benchmark: reloaded) == live)
+        #expect(try RunReport(benchmark: reloaded) == live)
     }
 
     @Test("Offline recompute coerces a numeric eval_id (real records use numbers) — the row is not dropped")
@@ -88,14 +88,14 @@ struct RunRecordMappingTests {
          "consistency":{"k":2,"meaningful":true,"suite_pass_power_k":1,"flaky_eval_ids":[],
            "per_eval":[{"eval_id":0,"runs":2,"perfect_passes":2,"pass_power_k":1,"flaky":false,"mean_pass_rate":1}]}}
         """
-        let report = RunReport(benchmark: try JSONDecoder().decode(BenchmarkFile.self, from: Data(json.utf8)))
+        let report = try RunReport(benchmark: try JSONDecoder().decode(BenchmarkFile.self, from: Data(json.utf8)))
         #expect(report.evals.count == 1)            // not silently dropped despite the numeric id
         #expect(report.evals.first?.id == "0")      // coerced number → string
         #expect(report.evals.first?.status == .pass)
     }
 
     @Test("grading.json: a criterion passes iff it held in EVERY trial; summary counts match")
-    func gradingShape() {
+    func gradingShape() throws {
         let evals = [
             EvalResult(evalId: "a", trials: [trial(true, ["x"]), trial(true, ["x"])]),    // x: 2/2 → passed
             EvalResult(evalId: "b", trials: [trial(true, ["y"]), trial(false, ["y"])])    // y: 1/2 → not consistent
@@ -117,7 +117,7 @@ struct RunRecordMappingTests {
     }
 
     @Test("A trial with no verdicts (errored) contributes no grading rows")
-    func gradingSkipsErroredEvals() {
+    func gradingSkipsErroredEvals() throws {
         let evals = [EvalResult(evalId: "e", trials: [TrialResult(exit: .timeout, verdicts: [])])]
         let grading = GradingFile(evals: evals, provenance: provenance)
         #expect(grading.expectations.isEmpty)
@@ -125,7 +125,7 @@ struct RunRecordMappingTests {
     }
 
     @Test("A criterion judged in only some trials (another timed out) does NOT count as passed")
-    func gradingRequiresEveryTrialJudged() {
+    func gradingRequiresEveryTrialJudged() throws {
         let evals = [EvalResult(evalId: "a", trials: [
             trial(true, ["x"]),                          // judged + passed
             TrialResult(exit: .timeout, verdicts: [])    // no verdicts for "x"

@@ -10,6 +10,17 @@ public enum OutputMode: Sendable {
 /// Turns domain payloads into a ``Rendering`` (stdout/stderr split), honoring the output mode and
 /// color policy. Pure: it returns strings rather than writing, so every branch is unit-testable.
 public struct Renderer: Sendable {
+    /// **Measurements print the same way on every machine.** A figure shown as `+0.50` here is the same
+    /// figure the saved results file records, and this table is routinely pasted into notes and issues
+    /// and compared between people — so a machine whose region writes `0,50`, or groups a four-figure
+    /// count as `1,100`, would make two readers of the same run disagree about what it said, and would
+    /// change how many characters a number takes in columns aligned by width.
+    ///
+    /// Terminal output is for people and promises nothing, so following the reader's region would be
+    /// allowed. It is not done because the one well-known command-line tool that did it withdrew the
+    /// behaviour after complaints from users in exactly those regions, whose own data used dots.
+    static let neutralNumbers = Locale(identifier: "en_US_POSIX")
+
     public let mode: OutputMode
     public let color: ColorPolicy
 
@@ -108,8 +119,87 @@ public struct Renderer: Sendable {
         }
     }
 
-    /// `skillet suggest` (F41). **Report-and-point:** the summary states what happened and names the file
-    /// written; the drafted edits themselves live in that file, never duplicated here.
+    /// `skillet iterate` (F43). The before-and-after table, the average difference with its error bar,
+    /// and the verdict.
+    ///
+    /// **Every row shows both measurements**, so a reader can see what still fails rather than trusting a
+    /// summary. A drop that sits inside run-to-run variation is marked `(varies)` — it still blocks, and
+    /// the mark exists so nobody mistakes noise for damage or damage for noise.
+    public func renderIterate(_ report: IterateReport, keptCopy: String?,
+                              landCommand: String) throws -> Rendering {
+        if case .json = mode { return Rendering(stdout: try SkilletJSON.encode(report) + "\n") }
+        // **The column grows to fit the names, rather than cutting them off.** Padding to a fixed width
+        // silently truncates anything longer, so two evals whose names share a long prefix printed as the
+        // same row — and the reader has no way to tell which is which. Bounded so one very long name
+        // cannot push the numbers off the screen; past that bound it is shortened *visibly*.
+        let idWidth = min(max(24, report.comparison.perEval.map(\.id.count).max() ?? 0), 48)
+        var lines = ["iterate — \(report.skill)",
+                     "  draft            \(report.proposals)",
+                     "  edits            \(report.edits.map(String.init).joined(separator: ", "))",
+                     "",
+                     "  " + "EVAL".padding(toLength: idWidth, withPad: " ", startingAt: 0)
+                         + "  BEFORE   AFTER    Δ"]
+        for row in report.comparison.perEval {
+            let before = "\(row.beforePasses)/\(row.beforeRecorded)"
+            let after = "\(row.afterPasses)/\(row.afterRecorded)"
+            // **A difference too small to print is not the same as no difference.** Rounding to two
+            // places turned a real change of 0.004 into `+0.00 ▲` and a real drop into `-0.00 ▼` — a
+            // number that reads as nothing beside an arrow saying otherwise. Below what two places can
+            // show, the size is written as a bound instead, and the arrow — which is never in doubt —
+            // stays.
+            let rounded = (row.delta * 100).rounded() / 100
+            let delta = row.delta == 0 ? "—"
+                : (rounded == 0 ? (row.delta > 0 ? "<+0.01" : ">-0.01") : String(format: "%+.2f", locale: Self.neutralNumbers, row.delta))
+            let mark = row.delta < 0 ? " ▼" : (row.delta > 0 ? " ▲" : "")
+            lines.append("  " + Self.fitted(row.id, to: idWidth)
+                + "  " + before.padding(toLength: 8, withPad: " ", startingAt: 0)
+                + " " + after.padding(toLength: 8, withPad: " ", startingAt: 0)
+                + " " + delta + mark + (row.noisy ? " (varies between runs)" : ""))
+        }
+        let spread = report.comparison.standardError.map { String(format: " ± %.2f", locale: Self.neutralNumbers, $0) }
+            ?? " (too few evals to state uncertainty)"
+        lines.append("")
+        // Same treatment as the rows above: an average too small to show at two places is written as a
+        // bound rather than as a zero it is not.
+        let mean = report.comparison.meanDelta
+        let meanRounded = (mean * 100).rounded() / 100
+        let meanText = mean != 0 && meanRounded == 0
+            ? (mean > 0 ? "<+0.01" : ">-0.01") : String(format: "%+.2f", locale: Self.neutralNumbers, mean)
+        // **An average over nothing is not printed as an average.** When no test ran on either side there
+        // is no change to state, and the arithmetic still yields `+0.00` — which next to a repeat count of
+        // zero reads as "measured, and it made no difference" rather than "nothing was measured". The
+        // measuring command already refuses to state its own headline figure on exactly these grounds;
+        // this said it in a way only someone who knew the code would catch. Same wording as the sibling,
+        // so the two are recognisably one rule.
+        lines.append(report.comparison.anythingMeasured
+            ? "  average change   " + meanText + spread + "  (observed k=\(report.observedK))"
+            : "  average change   unmeasurable (k=\(report.observedK)) — no test recorded a single run")
+        // **The caveat qualifies the instrument, so it travels with both answers.** It used to appear
+        // only on a proven verdict, contradicting this report's own documentation — and a blocked verdict
+        // is exactly when it matters, since an unchecked grader may be why you are being told not to
+        // ship. Parenthesised so it qualifies the grader rather than competing with the conclusion:
+        // "not proven; provisional" hedges twice and muddies both.
+        let caveat = " (\(EDDCore.iterateProvisionalNote))"
+        lines.append(report.proven
+            ? "  verdict          no test scored lower\(caveat)"
+            : "  verdict          \(report.comparison.regressed) "
+                + (report.comparison.regressed == 1 ? "test" : "tests") + " scored lower — not proven\(caveat)")
+        if let keptCopy { lines.append("  copy kept        \(keptCopy)") }
+        // Anything skipped or refused, in the same shape the other reporting commands use.
+        for disclosure in report.disclosures { lines.append("  ! \(disclosure.subject): \(disclosure.reason)") }
+        lines.append(report.proven
+            ? "→ land it: \(landCommand)"
+            : "→ nothing was changed — draft again, or apply a subset with --edits")
+        return Rendering(stdout: lines.joined(separator: "\n") + "\n")
+    }
+
+    /// A name in a fixed-width column: padded when it fits, and shortened **with a marker** when it does
+    /// not, so a cut name can never be mistaken for the whole one.
+    static func fitted(_ text: String, to width: Int) -> String {
+        guard text.count > width else { return text.padding(toLength: width, withPad: " ", startingAt: 0) }
+        return String(text.prefix(width - 1)) + "…"
+    }
+
     public func renderApply(_ result: ApplyResult, nextSteps: [String] = []) throws -> Rendering {
         switch mode {
         case .json:
@@ -136,6 +226,8 @@ public struct Renderer: Sendable {
         }
     }
 
+    /// `skillet suggest` (F41). **Report-and-point:** the summary states what happened and names the file
+    /// written; the drafted edits themselves live in that file, never duplicated here.
     public func renderSuggest(_ result: SuggestResult, nextSteps: [String] = []) throws -> Rendering {
         switch mode {
         case .json:
@@ -409,8 +501,8 @@ public struct Renderer: Sendable {
             // pass^k is only a number at observed k ≥ 2; below that, consistency is unmeasurable (§4
             // vocab). pass^1 (the mean trial pass rate, §14-11) is well-defined at any k, so it shows.
             let headline = report.measurable
-                ? String(format: "pass^k %.2f (k=%d) · pass^1 %.2f", report.passK, report.observedK, report.passOne)
-                : String(format: "consistency unmeasurable (k=%d) · pass^1 %.2f", report.observedK, report.passOne)
+                ? String(format: "pass^k %.2f (k=%d) · pass^1 %.2f", locale: Self.neutralNumbers, report.passK, report.observedK, report.passOne)
+                : String(format: "consistency unmeasurable (k=%d) · pass^1 %.2f", locale: Self.neutralNumbers, report.observedK, report.passOne)
             out += (allPass ? bold("✓ run: \(report.skill) — behavior — \(headline)") : red("✗ run: \(report.skill) — behavior — \(headline)")) + "\n"
             if let ab = report.ab {
                 // F15: both arms side by side in the STATUS passes/trials idiom, plus the paired Δ
@@ -422,7 +514,7 @@ public struct Renderer: Sendable {
                      row.baselineRecorded == 0
                          ? "— 0/0"
                          : "\(row.baselineStatus.rawValue) \(row.baselinePasses)/\(row.baselineRecorded)",
-                     row.delta.map { String(format: "%+.2f", $0) } ?? "n/a"]
+                     row.delta.map { String(format: "%+.2f", locale: Self.neutralNumbers, $0) } ?? "n/a"]
                 }
                 out += renderTable(["EVAL", "WITH", "BASELINE", "Δ"], rows).stdout
                 out += "\n\(report.passed) passed · \(report.flaky) flaky · \(report.failed) failed · observed k=\(report.observedK) (with-skill arm)\n"
@@ -437,8 +529,8 @@ public struct Renderer: Sendable {
         if let trigger = report.trigger {
             let allPass = !trigger.evals.isEmpty && trigger.passed == trigger.evals.count
             let headline = trigger.measurable
-                ? String(format: "pass^k %.2f (k=%d) · pass^1 %.2f", trigger.passK, trigger.observedK, trigger.passOne)
-                : String(format: "consistency unmeasurable (k=%d) · pass^1 %.2f", trigger.observedK, trigger.passOne)
+                ? String(format: "pass^k %.2f (k=%d) · pass^1 %.2f", locale: Self.neutralNumbers, trigger.passK, trigger.observedK, trigger.passOne)
+                : String(format: "consistency unmeasurable (k=%d) · pass^1 %.2f", locale: Self.neutralNumbers, trigger.observedK, trigger.passOne)
             out += (allPass ? bold("✓ run: \(report.skill) — trigger — \(headline)") : red("✗ run: \(report.skill) — trigger — \(headline)")) + "\n"
             let rows = trigger.evals.map { [$0.id, $0.status.rawValue, "\($0.passes)/\($0.recorded)"] }
             out += renderTable(["CASE", "STATUS", "PASSES"], rows).stdout
@@ -461,11 +553,16 @@ public struct Renderer: Sendable {
         if measured == 0 {
             effect = "unmeasured — no eval has measured trials in both arms"
         } else {
-            effect = ab.pairedSE.map { String(format: "%+.2f ± %.2f", ab.pairedMeanDelta, $0) }
-                ?? String(format: "%+.2f (too few evals for uncertainty)", ab.pairedMeanDelta)
+            effect = ab.pairedSE.map { String(format: "%+.2f ± %.2f", locale: Self.neutralNumbers, ab.pairedMeanDelta, $0) }
+                ?? String(format: "%+.2f (too few evals for uncertainty)", locale: Self.neutralNumbers, ab.pairedMeanDelta)
         }
-        let time = ab.timeDeltaSeconds.map { String(format: "%+.1fs", $0) } ?? "—"
-        out += "skill effect (paired Δ pass rate): \(effect) · flips \(ab.flipsUp)↑ \(ab.flipsDown)↓ of \(measured) · time Δ \(time) · tokens Δ —\n"
+        let time = ab.timeDeltaSeconds.map { String(format: "%+.1fs", locale: Self.neutralNumbers, $0) } ?? "—"
+        // **A dash means nothing counted, not "we do not do that yet".** This was written as a dash
+        // whatever had happened, while the saved file beside it recorded a real figure — a number the
+        // record promised and no reader could get. It now shows what was measured, and still shows a dash
+        // when one of the two sides counted nothing, which is when there is no difference to state.
+        let tokens = ab.tokenDeltaPerAttempt.map { String(format: "%+.0f", locale: Self.neutralNumbers, $0) } ?? "—"
+        out += "skill effect (paired Δ pass rate): \(effect) · flips \(ab.flipsUp)↑ \(ab.flipsDown)↓ of \(measured) · time Δ \(time) · tokens Δ \(tokens)\n"
         if ab.polluted > 0 {
             out += red("⚠ \(ab.polluted) baseline trial(s) polluted — a skill fired in the no-skill arm; excluded from every count (isolation failed on this machine)") + "\n"
         }

@@ -43,6 +43,8 @@ public struct GroundedJudge: Judge {
     struct PromptEvidence: Encodable {
         let responseText: String
         let workspaceListing: [String]
+        /// Present only when the list was cut, so a complete list reads exactly as it always did.
+        let workspaceListingTruncated: Bool?
         let producedFiles: [FileContent]
         let traceSummary: TextJudge.TraceSummary
     }
@@ -52,6 +54,7 @@ public struct GroundedJudge: Judge {
         let promptEvidence = PromptEvidence(
             responseText: evidence.responseText,
             workspaceListing: evidence.workspaceListing.sorted(),
+            workspaceListingTruncated: evidence.workspaceListingTruncated ? true : nil,
             producedFiles: produced,
             traceSummary: TextJudge.TraceSummary(
                 skillsInvoked: evidence.trace.skillInvocations.map(\.skill).sorted(),
@@ -85,7 +88,10 @@ public struct GroundedJudge: Judge {
         `sizeBytes` is its size), and `change: "deleted"` \
         each mean the contents are deliberately withheld (do NOT treat a withheld or absent file as \
         empty or wrong unless the CRITERION is about its absence). `workspaceListing` is the \
-        authoritative file-existence oracle. \
+        authoritative file-existence oracle — **unless** `workspaceListingTruncated: true` is present, in \
+        which case the list was cut short and is authoritative only for what it DOES contain: a listed \
+        file certainly exists, but a file missing from it may still exist and must NOT be judged absent \
+        on that basis. Files the run created or modified are always listed, cut or not. \
         If the CRITERION only asserts that a file EXISTS, pass on existence alone — do not fail it over \
         an opinion about the contents.
 

@@ -42,7 +42,7 @@ struct RunRecordsTests {
         let b = try roundTrips(BenchmarkFile.self, json)
         #expect(b.runs[0].objectValue?["configuration"] == .string("default"))
         #expect(b.fields["consistency"]?.objectValue?["suite_pass_power_k"] == .number(1))
-        #expect(RunReport(benchmark: b).evals.first?.id == "0")   // recompute reads consistency + coerces numeric id
+        #expect(try RunReport(benchmark: b).evals.first?.id == "0")   // recompute reads consistency + coerces numeric id
     }
 
     @Test("grading.json: text/passed/evidence + summary; round-trip")
@@ -83,5 +83,67 @@ struct RunRecordsTests {
         #expect(throws: (any Error).self) {
             _ = try JSONDecoder().decode(BenchmarkFile.self, from: Data("[1,2,3]".utf8))
         }
+    }
+}
+
+/// **Rewriting the saved results must not delete what this version does not recognise.**
+///
+/// The file is documented as keeping anything it does not understand, so that a field written by a newer
+/// version of this tool survives being rewritten by an older one. It did the opposite: rewriting built a
+/// fresh document from only the fields it knew about, and everything else vanished — measured, a field at
+/// the top level and a field inside the settings block were both handed in and both discarded. Building a
+/// new object out of the fields you understand is the named way this kind of data gets lost.
+///
+/// Nothing caught it because the existing round-trip test only covers reading a file and writing it back
+/// unchanged. Nothing covered *rewriting* one, which is the path that loses data.
+@Suite("Rewriting keeps what this version does not recognise")
+struct RewritePreservesUnknownFieldsTests {
+    private let provenance = RunProvenance(judgeProvider: "p", judgeModel: "m",
+                                           judgePromptVersion: "v", executorBinaryVersion: "x")
+    private func rewrite(over prior: BenchmarkFile) throws -> BenchmarkFile {
+        let v = Verdict(criterion: "c", passed: true, rationale: "", judgeId: "t", model: "m", judgePromptVersion: "1")
+        let arm = [EvalResult(evalId: "a", trials: [TrialResult(exit: .passed, verdicts: [v])])]
+        return try BenchmarkFile(
+            skill: "demo",
+            behavioral: (report: try RunReport(skill: "demo", results: arm), evals: arm),
+            baseline: nil, trigger: nil, harness: "replay", k: 1,
+            provenance: provenance, preserving: prior)
+    }
+
+    @Test("A field this version knows nothing about survives, wherever it sits")
+    func unknownFieldsSurvive() throws {
+        let prior = BenchmarkFile(fields: [
+            "future_top_level": .string("written by a newer version"),
+            "metadata": .object(["future_setting": .string("also newer"), "skill_name": .string("demo")]),
+            "consistency": .object(["future_figure": .number(7)]),
+            "run_summary": .object(["future_summary": .bool(true)])
+        ])
+        let written = try rewrite(over: prior)
+        #expect(written.fields["future_top_level"] == .string("written by a newer version"))
+        #expect(written.metadata?["future_setting"] == .string("also newer"),
+                "a field inside a section is exactly the case that was lost")
+        #expect(written.fields["consistency"]?.objectValue?["future_figure"] == .number(7))
+        #expect(written.fields["run_summary"]?.objectValue?["future_summary"] == .bool(true))
+    }
+
+    /// The other half: this version's own figures must win, not be shadowed by what was there before.
+    @Test("A field this version does own takes the new value")
+    func knownFieldsAreOverwritten() throws {
+        let prior = BenchmarkFile(fields: ["metadata": .object(["skill_name": .string("stale-name")])])
+        let written = try rewrite(over: prior)
+        #expect(written.metadata?["skill_name"] == .string("demo"), "the run being written decides this")
+    }
+
+    /// Attempts are a list, and a position in a list identifies nothing to merge with — so they are
+    /// replaced whole, which is the standard rule and also the only correct one here: a carried-over
+    /// entry would report an attempt that did not happen.
+    @Test("The recorded attempts are this run's, not the previous run's")
+    func attemptsAreReplacedNotMerged() throws {
+        let prior = BenchmarkFile(fields: ["runs": .array([.object(["configuration": .string("ancient")])])])
+        let written = try rewrite(over: prior)
+        let configurations = (written.fields["runs"]?.arrayValue ?? [])
+            .compactMap { $0.objectValue?["configuration"]?.stringValue }
+        #expect(!configurations.contains("ancient"), "an attempt that did not happen must not be reported")
+        #expect(!configurations.isEmpty, "and this run's attempts are there")
     }
 }

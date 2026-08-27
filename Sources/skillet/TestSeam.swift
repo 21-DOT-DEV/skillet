@@ -31,6 +31,21 @@ enum TestSeam {
 
     /// Refuse a hidden option that was not enabled. **Usage, not an internal error** — nothing is broken;
     /// the invocation asked for something that is not available, and the remedy is to drop the option.
+    /// **The recorded-answer options mean nothing on their own.** The gate below answers "is this option
+    /// allowed here"; it cannot answer "do these options make sense together", and nothing did. Passing a
+    /// recording without `--replay` therefore passed the gate, was never read, and the command went on to
+    /// launch a **real model** — so someone who believed they were offline would have spent money, with
+    /// the file they named silently ignored. Refused rather than treated as implying `--replay`: an
+    /// option that quietly does nothing and an option that quietly changes mode are both surprises, and
+    /// of the two, being told costs one retype.
+    static func assertRecordingsUsable(replay: Bool, provided: [String?]) throws {
+        guard !replay, let orphan = provided.compactMap({ $0 }).first else { return }
+        throw EDDError.usage(
+            message: "\(orphan) does nothing without --replay",
+            remedy: "add --replay to answer from recordings instead of a model, or drop \(orphan) — "
+                + "on its own it is ignored and a real model is used")
+    }
+
     static func assertEnabled(_ option: String) throws {
         guard isEnabled else {
             throw EDDError.usage(

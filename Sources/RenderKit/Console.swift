@@ -33,10 +33,25 @@ public enum Console {
         isatty(FileHandle.standardOutput.fileDescriptor) != 0
     }
 
-    /// Whether stdin is attached to a terminal — required (alongside the output stream) before an
-    /// interactive prompt, so a piped/redirected stdin fails like `--no-input` rather than blocking on
-    /// or consuming unexpected `readLine()` input.
+    /// Whether stdin is attached to a terminal — required (alongside the stream the question is written
+    /// on) before an interactive prompt, so a piped/redirected stdin fails like `--no-input` rather than
+    /// blocking on or consuming unexpected `readLine()` input.
     public static func isStdinTTY() -> Bool {
         isatty(FileHandle.standardInput.fileDescriptor) != 0
+    }
+
+    /// **Whether the stream questions and notes are written on is attached to a terminal.**
+    ///
+    /// Asking someone a question needs two things: that they can see it, and that their answer can reach
+    /// us. The first is decided by the stream the question goes out on — this one — and the second by the
+    /// stream the answer comes back on. The stream ordinary results go out on decides neither.
+    ///
+    /// It existed only for results, and was being used to decide both. So saving results to a file while
+    /// watching the screen — `skillet run demo | tee log.txt` — made the tool conclude nobody was there
+    /// and stop, refusing to ask a question that would have appeared on screen and could have been
+    /// answered. A well-known project fixed the same mistake in a change titled "Check stdin rather than
+    /// stdout for interactive terminals".
+    public static func isStderrTTY() -> Bool {
+        isatty(FileHandle.standardError.fileDescriptor) != 0
     }
 }

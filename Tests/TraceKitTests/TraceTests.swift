@@ -34,7 +34,13 @@ struct TraceTests {
         #expect(json.contains(#""skill_invocations":"#))
         #expect(json.contains(#""workspace_diff":"#))
         #expect(json.contains(#""turn_index":1"#))
-        #expect(!json.contains("usage")) // nil optional omitted
+        // **What this means is "no cost figures", not "no key containing the letters usage".** The looser
+        // spelling caught an added field that says *why* figures are absent — which is the opposite of
+        // what it was guarding. A diagnostic record is where being explicit is worth most, so that field
+        // is stated rather than left to be inferred, and this now checks the thing it meant to check.
+        #expect(!json.contains(#""usage":"#), "no cost figures were reported, so none are written")
+        #expect(json.contains(#""usage_state":"absent""#),
+                "and the record says that none were offered, rather than leaving a reader to work it out")
     }
 
     @Test("Round-trips through --json with the schema intact")

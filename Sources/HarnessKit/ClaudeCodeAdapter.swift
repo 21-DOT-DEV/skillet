@@ -24,10 +24,22 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
     /// false failure — see F7 review round 7.
     let outputLimitBytes: Int?
 
+    /// **`environment` is what this adapter reads to make its own decisions** — which program to run, and
+    /// where the session it wrote can be found. It is *not* handed to the program itself: that inherits
+    /// this process's environment, which is what the default here is, so the two agree unless a caller
+    /// deliberately supplies something else. Handing a caller's map to the program instead would be a
+    /// trap: a caller that supplies one variable would leave the program with only that one, and no way
+    /// to find anything on the search path.
+    ///
+    /// **The part that finds the program now reads the same environment.** It used to be built with its
+    /// own default whatever this was given, so a caller naming a program through a variable in a supplied
+    /// environment was silently ignored and the real one was consulted instead — two components deciding
+    /// the same thing from two different sources. Passing one explicitly still overrides, for a caller
+    /// that wants exactly that.
     public init(
         configPath: String? = nil,
         launcher: any ProcessLauncher = SubprocessLauncher(),
-        resolver: BinaryResolver = BinaryResolver(),
+        resolver: BinaryResolver? = nil,
         denylist: Denylist = .claudeCodeSeed,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         timeout: Duration = .seconds(600),
@@ -35,7 +47,7 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
     ) {
         self.configPath = configPath
         self.launcher = launcher
-        self.resolver = resolver
+        self.resolver = resolver ?? BinaryResolver(environment: environment)
         self.denylist = denylist
         self.environment = environment
         self.timeout = timeout
@@ -57,7 +69,17 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         }
         guard output.exitCode == 0 else { throw EDDError.harnessNotFound(harness: "claude-code", reason: nil) }
         let version = Self.parseVersion(output.stdout)
-        let bypassed = environment["SKILLET_ALLOW_BANNED_CLAUDE_CODE"] != nil
+        // **Only an explicit `1` turns the check off, which is what the message below offers.** Any value
+        // at all used to do it, so setting it to `0` — the natural way to write "no, leave the check on" —
+        // switched the check off. This is the one switch that lets a version through that is known to
+        // produce wrong measurements, so it takes exactly the word the message tells you to use, and
+        // anything else leaves the guard in place.
+        //
+        // Deliberately stricter than the switch that enables the hidden test options, which treats any
+        // non-empty value as yes: that one exists so the test harness can turn it *off*, and a harness
+        // that overlays variables onto the environment cannot remove one, so it needs empty to mean no.
+        // Turning off a safety check is a different kind of decision from enabling a test seam.
+        let bypassed = environment["SKILLET_ALLOW_BANNED_CLAUDE_CODE"] == "1"
         var warnings: [String] = []
         var bannedVersion: String?
         switch denylist.check(version: version, pinned: resolved.isPinned, bypassed: bypassed) {
@@ -332,8 +354,23 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         var version = "unknown"
         var startedAt: Date?
         var endedAt: Date?
+        var counted: TokenCounts?
+        /// A reply reported counts this parser could not read. The session total would be short, so it
+        /// reports nothing rather than something incomplete that looks complete.
+        var countsUnreadable = false
 
-        for line in jsonl.split(separator: "\n", omittingEmptySubsequences: true) {
+        // **Split on any line ending, not on one particular character.** A file saved with Windows line
+        // endings does not degrade line by line here — it does not split at all. In Swift a carriage
+        // return followed by a newline is a *single* character, so asking to split on a newline never
+        // matches it, and the entire session arrives as one piece that is not valid on its own. Measured:
+        // a two-reply session read this way yields no conversation at all and no counts. The grader then
+        // reads an empty conversation and fails every expectation — a measured failure produced by how a
+        // file was saved, with nothing anywhere saying so.
+        //
+        // This project already documents the same trap where it stages a skill file; that reader
+        // normalises first. This one did not, which is the same rule holding in one place and missing
+        // from another.
+        for line in jsonl.split(whereSeparator: \.isNewline) {
             guard let object = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
                   let type = object["type"] as? String, type == "user" || type == "assistant" else { continue }
 
@@ -355,6 +392,61 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
             }
 
             let message = object["message"] as? [String: Any]
+            // **The token counts were already on these lines and were being thrown away.** Each reply the
+            // model sends reports what it read and wrote for that reply; adding them up over the session
+            // gives what the whole attempt read and wrote. Re-sent context is counted again each time,
+            // which is right — the model did read it again, and that is what a provider bills on.
+            //
+            // Read field by field, never by summing something already summed: the provider's own
+            // `input_tokens` holds *only* the part that missed its cache, so the other two are separate
+            // additions rather than a breakdown of it. Getting that backwards is the doubling bug this
+            // project's ``TokenCounts`` documentation names.
+            // **Only the model's own replies are read for counts.** Both kinds of line reach this point,
+            // and both used to be read, while the note above says the counts come from each reply the
+            // model sends. Measured across every session on this machine — 24,598 lines of ten kinds —
+            // only the model's replies carry a count block, 11,246 of them. More to the point, tokens
+            // spent on results handed back from a tool are already inside the *next* reply's input
+            // figure, because that is what the model then reads. So the replies are the whole of the
+            // accounting rather than part of it, and a count found anywhere else could only be those same
+            // tokens stated a second time — the roughly-doubling fault this file already documents.
+            if type == "assistant", let usage = message?["usage"] as? [String: Any] {
+                // **All four or the whole session counts nothing.** Substituting zero for a field that is
+                // missing turns a half-reported reply into a confident under-count — the same invented
+                // number this file stopped writing, arriving by a different door. And a single unreadable
+                // reply makes the *session* total short, so it poisons the whole answer rather than only
+                // its own line: an under-count presented as complete is worse than no count, because
+                // nothing about it looks wrong.
+                //
+                // Every one of the 10,833 replies across the sessions on this machine carries all four,
+                // so this cannot be reached today. That is the reason to enforce it rather than describe
+                // it: an invariant the code does not check is prose, and the next change to what a
+                // provider sends decides whether it was ever true.
+                //
+                // **Only the counting is abandoned — the reply itself is kept.** Skipping ahead here also
+                // skipped the code below that turns this line into part of the conversation, so a reply
+                // whose counts were unreadable vanished from the transcript entirely. The automatic
+                // grader reads that transcript, so losing the model's last reply could turn a pass into a
+                // failure with nothing anywhere recording that a line had gone missing. One unreadable
+                // number must not cost a whole reply.
+                if let uncached = usage["input_tokens"] as? Int,
+                   let cacheRead = usage["cache_read_input_tokens"] as? Int,
+                   let cacheWrite = usage["cache_creation_input_tokens"] as? Int,
+                   let output = usage["output_tokens"] as? Int,
+                   // A count below none is refused where the value is built, and a reply reporting one is
+                   // no more usable than a reply missing a field — so it takes the same path.
+                   let turnCounts = TokenCounts(uncachedInput: uncached, cacheRead: cacheRead,
+                                                cacheWrite: cacheWrite, output: output) {
+                    // A running total too large to record takes the same path as an unreadable reply:
+                    // the session's counts are withheld rather than stated wrongly.
+                    if let running = counted {
+                        if let sum = running + turnCounts { counted = sum } else { countsUnreadable = true }
+                    } else {
+                        counted = turnCounts
+                    }
+                } else {
+                    countsUnreadable = true
+                }
+            }
             let role: Turn.Role = (message?["role"] as? String) == "assistant" ? .assistant : .user
             let content = message?["content"] as? [[String: Any]] ?? []
 
@@ -397,10 +489,21 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
             turns: turns,
             skillInvocations: skillInvocations,
             workspaceDiff: WorkspaceDiff(added: added, modified: modified, deleted: []),
-            usage: nil
+            // `nil` when no reply reported counts, and also when one reported counts that could not be
+            // read — a short total presented as a whole one is the fault this replaced.
+            usage: countsUnreadable ? nil : counted,
+            // **Which of those two it was.** Both come out as no figures, deliberately; only one is a
+            // problem worth telling someone about, and until now nothing recorded which had happened.
+            usageState: countsUnreadable ? .unreadable : (counted == nil ? .absent : .counted)
         )
     }
 
+    /// **The second argument is "the line being read", not "the end of the session".** It is reassigned on
+    /// every line as the file is walked, and each turn is stamped at the moment it is added — so a turn
+    /// gets *its own* line's time. The name reads as the session's final stamp, which is only what it
+    /// holds once the walk is over, and that has now been reported twice as a bug where each turn
+    /// supposedly gets the session's end time. It does not: `ParseTraceTests` covers exactly this, under
+    /// the name "Each turn carries ITS OWN line timestamp, not the session's final one".
     private static func stampOrEpoch(_ started: Date?, _ ended: Date?) -> Date {
         ended ?? started ?? Date(timeIntervalSince1970: 0)
     }

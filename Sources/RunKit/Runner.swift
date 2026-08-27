@@ -40,7 +40,7 @@ public struct Runner {
     public func run(skill: SkillRef, evals: [EvalCase], k: Int, injection: SkillSet, base: URL, keepWorkspace: Bool = false) async throws -> Outcome {
         var results: [EvalResult] = []
         for (index, eval) in evals.enumerated() {
-            let id = eval.id ?? "eval-\(index)"
+            let id = EvalName.resolve(id: eval.id, prompt: eval.prompt, position: index)
             guard let prompt = eval.prompt else {
                 results.append(EvalResult(evalId: id, trials: []))   // no prompt → can't run → FAILs (0 passes)
                 continue
@@ -55,7 +55,7 @@ public struct Runner {
             }
             results.append(EvalResult(evalId: id, trials: trials))
         }
-        return Outcome(report: RunReport(skill: skill.name, results: results), evals: results)
+        return Outcome(report: try RunReport(skill: skill.name, results: results), evals: results)
     }
 
     /// The F15 baseline arm: every eval `k` times under `SkillSet.none` — nothing staged
@@ -65,7 +65,7 @@ public struct Runner {
     public func runBaseline(skill: SkillRef, evals: [EvalCase], k: Int, base: URL, keepWorkspace: Bool = false) async -> [EvalResult] {
         var results: [EvalResult] = []
         for (index, eval) in evals.enumerated() {
-            let id = eval.id ?? "eval-\(index)"
+            let id = EvalName.resolve(id: eval.id, prompt: eval.prompt, position: index)
             guard let prompt = eval.prompt else {
                 results.append(EvalResult(evalId: id, trials: []))   // no prompt → can't run → FAILs (0 passes)
                 continue
@@ -91,8 +91,15 @@ public struct Runner {
         do {
             workspace = try workspaces.prepare(skill: skill, files: eval.files, base: trialDir, label: "workspace", stageSkill: stageSkill)
         } catch {
-            writeForensics(trialDir: trialDir, evalId: evalId, raw: nil, trace: nil, verdicts: [], exit: .failed)   // couldn't stage → infra failure
-            return TrialResult(exit: .failed, verdicts: [])
+            // **Recorded as never graded, which is what the old comment here already called it.** This
+            // line said "couldn't stage → infra failure" while writing down that the skill had been
+            // measured and had failed. So a scratch folder that could not be prepared — a missing input,
+            // a permission problem, a full disk — lowered the skill's score, and in a before-and-after
+            // comparison could make a working skill look broken.
+            let why = "the workspace for this attempt could not be prepared"
+            writeForensics(trialDir: trialDir, evalId: evalId, raw: nil, trace: nil, verdicts: [],
+                           exit: .error, ungradedReason: why)
+            return TrialResult(exit: .error, verdicts: [])
         }
         defer { if !keepWorkspace { try? workspaces.destroy(workspace) } }
         // F16: hash the staged inputs BEFORE the run, so post-run we can capture only what the skill
@@ -115,7 +122,7 @@ public struct Runner {
         var trace: Trace?
         var verdicts: [Verdict] = []
         var fileContents: [FileContent]?   // F16: hoisted so it is persisted for replay/re-grade on every exit path
-        let started = Date()
+        let started = ContinuousClock.now
         // Wall-clock of the harness execution ONLY (F15 → the canonical `time_seconds` stats):
         // stamped immediately after adapter.run returns and reused on the parse/judge error paths,
         // so grader/parser time never leaks into the arms' time Δ (review round 2). When
@@ -124,7 +131,7 @@ public struct Runner {
         do {
             let produced = try await adapter.run(TaskSpec(query: prompt, files: eval.files), in: workspace, skills: injection)
             raw = produced
-            harnessSeconds = Date().timeIntervalSince(started)
+            harnessSeconds = Self.seconds(since: started)
             let executionSeconds = harnessSeconds
             let parsed = try adapter.parseTrace(produced)
             trace = parsed
@@ -137,28 +144,59 @@ public struct Runner {
             // (no spend on an ungradeable trial), and the report surfaces it loudly.
             if pollutionTripwire && !parsed.skillInvocations.isEmpty {
                 writeForensics(trialDir: trialDir, evalId: evalId, raw: produced.raw, trace: parsed, verdicts: [], exit: .polluted, fileContents: fileContents)
-                return TrialResult(exit: .polluted, verdicts: [], durationSeconds: executionSeconds)
+                return TrialResult(exit: .polluted, verdicts: [], durationSeconds: executionSeconds,
+                                   tokens: parsed.usage, tokensUnreadable: parsed.usageState == .unreadable)
             }
             let response = parsed.turns.last(where: { $0.role == .assistant })?.text ?? ""
-            let listing = (try? workspaces.listing(workspace)) ?? []
-            let evidence = JudgeEvidence(responseText: response, trace: parsed, workspaceListing: listing, fileContents: fileContents)
+            // The files the run produced are handed over so they survive any cut — they are what the
+            // checks are about, and a check about a file the run made must never fail because the list
+            // of files was too long.
+            let seen = workspaces.listing(workspace, keeping: (fileContents ?? []).map(\.path))
+            let evidence = JudgeEvidence(responseText: response, trace: parsed, workspaceListing: seen.files,
+                                         workspaceListingTruncated: seen.truncated, fileContents: fileContents)
             for criterion in eval.expectations {
                 verdicts.append(try await judge.verdict(for: criterion, evidence: evidence))
             }
             writeForensics(trialDir: trialDir, evalId: evalId, raw: produced.raw, trace: parsed, verdicts: verdicts, exit: .passed, fileContents: fileContents)
-            return TrialResult(exit: .passed, verdicts: verdicts, durationSeconds: executionSeconds)
+            // What the attempt read and wrote, when the tool that ran it said so. **The failure exits below
+            // carry it too, whenever it exists.** They used to carry nothing, on the reasoning that a
+            // failure happens before there is a session to read — which is true of one of them and false
+            // of the other: an attempt whose grading fails has already had its reply back and read, so its
+            // counts are real and were being thrown away. That is money spent and not recorded, and a
+            // failed attempt is exactly where spending goes unnoticed, since providers charge for what a
+            // request consumed whether or not it succeeded.
+            return TrialResult(exit: .passed, verdicts: verdicts, durationSeconds: executionSeconds,
+                               tokens: parsed.usage, tokensUnreadable: parsed.usageState == .unreadable)
         } catch let error as ProcessError {
-            let exit: TrialExit = { if case .timedOut = error { return .timeout } else { return .failed } }()
+            // **Out of time is a result; anything else here never got graded.** A run that exceeded its
+            // limit did tell you something about the skill. A program that could not be started, crashed,
+            // or died some other way tells you nothing about the skill — the check never ran, which is an
+            // error rather than a failure. This used to record both as the skill failing.
+            let exit: TrialExit = { if case .timedOut = error { return .timeout } else { return .error } }()
+            let why: String? = exit == .error ? "\(error)" : nil
             // On a pre-capture failure (harness/parse threw before the post-parse capture), snapshot the
             // live workspace now so grounded evidence still survives; `?? ` keeps an already-captured
             // set (e.g. a judge failure captured before it threw).
-            writeForensics(trialDir: trialDir, evalId: evalId, raw: raw?.raw, trace: trace, verdicts: verdicts, exit: exit, fileContents: fileContents ?? captureEvidence())
-            return TrialResult(exit: exit, verdicts: [], durationSeconds: harnessSeconds ?? Date().timeIntervalSince(started))
+            writeForensics(trialDir: trialDir, evalId: evalId, raw: raw?.raw, trace: trace, verdicts: verdicts, exit: exit, fileContents: fileContents ?? captureEvidence(), ungradedReason: why)
+            // `nil` here in practice — this exit is reached when the program running the model failed or
+            // timed out, so there is usually no session to have counted. Written as the session's own
+            // counts rather than as nothing, so that if a session *is* readable the spending is recorded
+            // instead of being decided by which exit happened to be taken.
+            return TrialResult(exit: exit, verdicts: [], durationSeconds: harnessSeconds ?? Self.seconds(since: started),
+                               tokens: trace?.usage, tokensUnreadable: trace?.usageState == .unreadable)
         } catch {
-            // HarnessError.executionFailed / parse / judge failure → the trial couldn't be measured, but
-            // persist the raw output + partial verdicts (+ the produced-file evidence) collected so far.
-            writeForensics(trialDir: trialDir, evalId: evalId, raw: raw?.raw, trace: trace, verdicts: verdicts, exit: .failed, fileContents: fileContents ?? captureEvidence())
-            return TrialResult(exit: .failed, verdicts: [], durationSeconds: harnessSeconds ?? Date().timeIntervalSince(started))
+            // **Recorded as never-graded, which is what the line below always said it was.** This comment
+            // read "the trial couldn't be measured" while writing down that the skill had been measured
+            // and failed — so a rate limit, a grader error or a dropped connection was reported as the
+            // skill getting worse. The reason was also thrown away entirely; it is now said out loud.
+            let why = (error as? EDDError)?.message ?? "\(error)"
+            writeForensics(trialDir: trialDir, evalId: evalId, raw: raw?.raw, trace: trace, verdicts: verdicts, exit: .error, fileContents: fileContents ?? captureEvidence(), ungradedReason: why)
+            // **This is the one that was losing real numbers.** Grading runs after the reply is back and
+            // read, so a grading failure leaves a fully readable session whose counts are a true record of
+            // what was spent. The file kept beside the attempt for inspection already had them; what the
+            // run adds up did not, so that spending vanished from every total.
+            return TrialResult(exit: .error, verdicts: [], durationSeconds: harnessSeconds ?? Self.seconds(since: started),
+                               tokens: trace?.usage, tokensUnreadable: trace?.usageState == .unreadable)
         }
     }
 
@@ -170,7 +208,7 @@ public struct Runner {
     /// *target* firing counts for `should_trigger: true`; a sibling fire on a near-miss is correct
     /// routing (recorded in `firedOther` forensics either way).
     public func runTrigger(
-        target: SkillRef, corpus: [SkillRef],
+        target: SkillRef, corpus: [SkillRef], skillsRoot: URL,
         cases: [(id: String, query: String, shouldTrigger: Bool)],
         k: Int, base: URL, keepWorkspace: Bool = false
     ) async -> [TriggerEvalResult] {
@@ -181,7 +219,7 @@ public struct Runner {
                 // Index-based cache path (hostile-id defense, same rule as the behavioral loop).
                 let trialDir = base.appendingPathComponent("trigger-\(index)/trial-\(trial)", isDirectory: true)
                 trials.append(await runTriggerTrial(
-                    target: target, corpus: corpus, triggerCase: triggerCase,
+                    target: target, corpus: corpus, skillsRoot: skillsRoot, triggerCase: triggerCase,
                     trialDir: trialDir, keepWorkspace: keepWorkspace
                 ))
             }
@@ -194,17 +232,22 @@ public struct Runner {
     }
 
     private func runTriggerTrial(
-        target: SkillRef, corpus: [SkillRef],
+        target: SkillRef, corpus: [SkillRef], skillsRoot: URL,
         triggerCase: (id: String, query: String, shouldTrigger: Bool),
         trialDir: URL, keepWorkspace: Bool
     ) async -> TriggerTrialResult {
         let staging: WorkspaceManager.TriggerStaging
         do {
-            staging = try workspaces.prepareTrigger(corpus: corpus, base: trialDir, label: "workspace")
+            staging = try workspaces.prepareTrigger(corpus: corpus, skillsRoot: skillsRoot,
+                                                    base: trialDir, label: "workspace")
         } catch {
+            // Same as the behaviour check above: nothing about the skill was measured, so this is not a
+            // result about the skill. Both were changed together, because a rule holding on one of these
+            // two and not the other is how most of the defects here were made.
+            let result = TriggerTrialResult(exit: .error, firedTarget: false)
             writeTriggerForensics(trialDir: trialDir, triggerCase: triggerCase, raw: nil, trace: nil,
-                                  result: TriggerTrialResult(exit: .failed, firedTarget: false), skipped: [])
-            return TriggerTrialResult(exit: .failed, firedTarget: false)
+                                  result: result, skipped: [])
+            return result
         }
         defer { if !keepWorkspace { try? workspaces.destroy(staging.workspace) } }
 
@@ -212,7 +255,9 @@ public struct Runner {
         // a false "not fired" (and a false PASS for every should_trigger:false near-miss). Record an
         // infrastructure failure instead: unmeasured never counts as a pass (review round 1, finding 3).
         guard staging.staged.contains(target.name) else {
-            let result = TriggerTrialResult(exit: .failed, firedTarget: false)
+            // The comment above already calls this an infrastructure failure; it was written down as a
+            // measured one.
+            let result = TriggerTrialResult(exit: .error, firedTarget: false)
             writeTriggerForensics(trialDir: trialDir, triggerCase: triggerCase, raw: nil, trace: nil,
                                   result: result, skipped: staging.skipped)
             return result
@@ -238,13 +283,15 @@ public struct Runner {
                                   trace: trace, result: result, skipped: staging.skipped)
             return result
         } catch let error as ProcessError {
-            let exit: TrialExit = { if case .timedOut = error { return .timeout } else { return .failed } }()
+            // The same rule as the behaviour check above. Both were changed together on purpose: a rule
+            // that holds in one of these and not the other is how most of the defects here were made.
+            let exit: TrialExit = { if case .timedOut = error { return .timeout } else { return .error } }()
             let result = TriggerTrialResult(exit: exit, firedTarget: false)
             writeTriggerForensics(trialDir: trialDir, triggerCase: triggerCase, raw: raw?.raw,
                                   trace: nil, result: result, skipped: staging.skipped)
             return result
         } catch {
-            let result = TriggerTrialResult(exit: .failed, firedTarget: false)
+            let result = TriggerTrialResult(exit: .error, firedTarget: false)
             writeTriggerForensics(trialDir: trialDir, triggerCase: triggerCase, raw: raw?.raw,
                                   trace: nil, result: result, skipped: staging.skipped)
             return result
@@ -285,7 +332,27 @@ public struct Runner {
     /// mirroring the record writes' S6 fix). Path-injection is otherwise already precluded: the cache root
     /// is `<timestamp>-<random-uuid>` (unguessable, so a hostile repo can't pre-plant an entry) and its
     /// `.skillet/runs` prefix is symlink-verified up front by `assertCacheNotSymlinked`.
-    private func writeForensics(trialDir: URL, evalId: String, raw: String?, trace: Trace?, verdicts: [Verdict], exit: TrialExit, fileContents: [FileContent]? = nil) {
+    /// **How long something took, measured on a clock that cannot go backwards.**
+    ///
+    /// Elapsed time was worked out by subtracting two readings of the wall clock — the one that says what
+    /// time of day it is. That clock is adjusted: a time-sync correction, a daylight-saving change,
+    /// somebody setting it by hand. An adjustment landing mid-measurement stretches, shrinks, or reverses
+    /// the answer, and this project publishes the difference between how long a run takes with a skill and
+    /// without it, so a distorted reading is a distorted result rather than a cosmetic wobble. A backwards
+    /// adjustment could also record a duration below zero, which nothing here refuses — the sibling
+    /// measurement, the count of tokens, was given exactly that refusal earlier.
+    ///
+    /// The clock used here only ever counts forward and keeps counting while the machine sleeps, which is
+    /// what "how long did this take" means for a run someone is waiting on. The standing advice is that a
+    /// wall-clock reading used to *measure* an interval rather than to *record a moment* should be this
+    /// instead. It is slower to read than the alternatives by a wide margin, which does not matter: it is
+    /// read twice per attempt, around work that takes seconds.
+    static func seconds(since start: ContinuousClock.Instant) -> Double {
+        let elapsed = ContinuousClock.now - start
+        return Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
+    }
+
+    private func writeForensics(trialDir: URL, evalId: String, raw: String?, trace: Trace?, verdicts: [Verdict], exit: TrialExit, fileContents: [FileContent]? = nil, ungradedReason: String? = nil) {
         let fm = FileManager.default
         try? fm.createDirectory(at: trialDir, withIntermediateDirectories: true)
         let encoder = JSONEncoder()
@@ -303,10 +370,19 @@ public struct Runner {
         if let fileContents, let data = try? encoder.encode(fileContents) {
             try? data.write(to: trialDir.appendingPathComponent("file_contents.json"), options: .atomic)
         }
-        if let data = try? encoder.encode(TrialMeta(evalId: evalId, exit: exit, verdicts: verdicts.count)) {
+        if let data = try? encoder.encode(TrialMeta(evalId: evalId, exit: exit, verdicts: verdicts.count,
+                                                    ungradedReason: ungradedReason)) {
             try? data.write(to: trialDir.appendingPathComponent("metadata.json"), options: .atomic)
         }
     }
 
-    private struct TrialMeta: Codable { let evalId: String; let exit: TrialExit; let verdicts: Int }
+    /// **`ungradedReason` is why nothing was graded, and it exists because that used to be discarded.**
+    /// The failure paths caught the error without even binding it, so a run could turn a rate limit into a
+    /// recorded skill failure and leave nothing anywhere saying what had happened. Written beside the
+    /// attempt it belongs to, which is where someone looks when a number seems wrong. Absent on every
+    /// attempt that was graded, so an ordinary record is unchanged.
+    private struct TrialMeta: Codable {
+        let evalId: String; let exit: TrialExit; let verdicts: Int
+        var ungradedReason: String?
+    }
 }

@@ -121,3 +121,64 @@ struct LinterTests {
         #expect(Linter().lint(src, config: config).isEmpty)
     }
 }
+
+/// **A skill's folder name has to be a legal name, and has to survive being typed into a command.**
+///
+/// The published rule for a skill's name is lowercase letters, digits and hyphens, no hyphen at either
+/// end, no doubled hyphen, at most 64 characters. Nothing here checked the name at all, so a folder
+/// called `-demo` was reported as having no problems — and the command this tool prints for it,
+/// `skillet run -demo`, fails when pasted because the word is read as a switch.
+///
+/// The **folder** name is what is checked, not the name written inside SKILL.md, because the folder name
+/// is what gets pasted into commands and because the two are allowed to disagree here: the reproduction
+/// was a folder called `-demo` whose SKILL.md said `name: demo`, which passed everything.
+@Suite("SKILL-L012 — the folder name is a legal, typable skill name")
+struct NameShapeTests {
+    private func source(name: String) -> SkillSource {
+        SkillSource(name: name, frontmatter: SkillFrontmatter(name: "demo", description: "ok"),
+                    body: "# demo\n", evals: nil, evalsPresent: false)
+    }
+
+    private func nameFindings(_ name: String) -> [Diagnostic] {
+        Linter().lint(source(name: name)).filter { $0.id == "SKILL-L012" }
+    }
+
+    /// The measured break: this exact name made the tool print a command that fails when pasted.
+    @Test("A name starting with a hyphen is an error, because commands naming it do not run",
+          arguments: ["-demo", "-x", "--demo"])
+    func leadingHyphenIsAnError(name: String) throws {
+        let found = try #require(nameFindings(name).first { $0.tier == .error })
+        #expect(found.message.contains(name))
+    }
+
+    /// Off-spec but harmless to anything you can run, so it must not stop a build.
+    @Test("Names that break the published rule without breaking a command only warn",
+          arguments: ["Demo", "my_skill", "demo-", "a--b", String(repeating: "a", count: 65)])
+    func otherViolationsWarn(name: String) {
+        let found = nameFindings(name)
+        #expect(!found.isEmpty, "'\(name)' breaks the published name rule and should be reported")
+        #expect(found.allSatisfy { $0.tier == .warn },
+                "'\(name)' runs fine, so an error tier would fail a build over a name that works")
+    }
+
+    @Test("Ordinary names are reported as nothing at all",
+          arguments: ["demo", "tidy-notes", "review-pull-request", "a1", String(repeating: "a", count: 64)])
+    func legalNamesAreSilent(name: String) {
+        #expect(nameFindings(name).isEmpty)
+    }
+
+    /// One rename should settle the whole name, rather than fixing one fault and being told the next.
+    @Test("Several faults in one name are reported together")
+    func faultsReportedTogether() throws {
+        let found = try #require(nameFindings("Bad--Name-").first { $0.tier == .warn })
+        #expect(found.message.contains("lowercase"))
+        #expect(found.message.contains("end with a hyphen"))
+        #expect(found.message.contains("two hyphens in a row"))
+    }
+
+    @Test("Suppressing the rule silences it, which is what keeps a dash-named skill usable")
+    func suppressible() {
+        let quiet = Linter().lint(source(name: "-demo"), config: .init(disable: ["SKILL-L012"]))
+        #expect(quiet.allSatisfy { $0.id != "SKILL-L012" })
+    }
+}

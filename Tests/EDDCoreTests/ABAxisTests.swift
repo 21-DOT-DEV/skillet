@@ -15,7 +15,7 @@ struct ABAxisTests {
     // MARK: - paired-difference math
 
     @Test("pairedStats is honest at the edges: empty (0, nil), single (d, nil), Bessel SE at n ≥ 2")
-    func pairedStats() {
+    func pairedStats() throws {
         let empty = ABComparison.pairedStats([])
         #expect(empty.mean == 0)
         #expect(empty.se == nil)
@@ -31,7 +31,7 @@ struct ABAxisTests {
     }
 
     @Test("ABComparison: flips, paired deltas, flaky-untrusted, pollution exclusion, time Δ")
-    func liveComparison() {
+    func liveComparison() throws {
         let withArm = [
             EvalResult(evalId: "flip-up", trials: [trial(true, seconds: 3), trial(true, seconds: 3)]),      // PASS 2/2
             EvalResult(evalId: "flip-down", trials: [trial(false, seconds: 3), trial(false, seconds: 3)]),  // FAIL 0/2
@@ -42,7 +42,7 @@ struct ABAxisTests {
             EvalResult(evalId: "flip-down", trials: [trial(true, seconds: 1), trial(true, seconds: 1)]),    // PASS 2/2
             EvalResult(evalId: "shaky", trials: [trial(false, seconds: 1), trial(false, exit: .polluted)])  // 0/1 measured + 1 polluted
         ]
-        let ab = ABComparison(withArm: withArm, baseline: baseline)
+        let ab = ABComparison(withArm: try UniqueByName(withArm, name: \.evalId), baseline: try UniqueByName(baseline, name: \.evalId))
         #expect(ab.flipsUp == 1)
         #expect(ab.flipsDown == 1)
         #expect(ab.polluted == 1)
@@ -58,8 +58,10 @@ struct ABAxisTests {
     }
 
     @Test("A baseline eval that never ran is an UNMEASURED pair — no Δ, no flip, never a fabricated +1.00")
-    func missingBaselinePairIsUnmeasured() {
-        let ab = ABComparison(withArm: [EvalResult(evalId: "only-with", trials: [trial(true)])], baseline: [])
+    func missingBaselinePairIsUnmeasured() throws {
+        let ab = ABComparison(
+            withArm: try UniqueByName([EvalResult(evalId: "only-with", trials: [trial(true)])], name: \.evalId),
+            baseline: try UniqueByName([EvalResult](), name: \.evalId))
         #expect(ab.perEval[0].baselineRecorded == 0)
         #expect(ab.perEval[0].delta == nil)
         #expect(ab.unmeasuredEvalIds == ["only-with"])
@@ -69,10 +71,10 @@ struct ABAxisTests {
     }
 
     @Test("An entirely polluted baseline manufactures NO skill effect (review finding, 2026-07-07)")
-    func allPollutedBaselineNoFakeEffect() {
+    func allPollutedBaselineNoFakeEffect() throws {
         let withArm = [EvalResult(evalId: "e", trials: [trial(true)])]
         let baseline = [EvalResult(evalId: "e", trials: [trial(false, exit: .polluted), trial(false, exit: .polluted)])]
-        let ab = ABComparison(withArm: withArm, baseline: baseline)
+        let ab = ABComparison(withArm: try UniqueByName(withArm, name: \.evalId), baseline: try UniqueByName(baseline, name: \.evalId))
         #expect(ab.polluted == 2)
         #expect(ab.unmeasuredEvalIds == ["e"])
         #expect(ab.perEval[0].delta == nil)
@@ -87,23 +89,23 @@ struct ABAxisTests {
     func reportJSON() throws {
         let withArm = [EvalResult(evalId: "e", trials: [trial(true)])]
         let baseline = [EvalResult(evalId: "e", trials: [trial(false)])]
-        let ab = try SkilletJSON.encode(RunReport(skill: "demo", results: withArm, baseline: baseline))
+        let ab = try SkilletJSON.encode(try RunReport(skill: "demo", results: withArm, baseline: baseline))
         #expect(ab.contains(#""ab":"#))
         #expect(ab.contains(#""paired_mean_delta""#))
         #expect(ab.contains(#""flips_up""#))
         #expect(ab.contains(#""pass_1""#))
-        let single = try SkilletJSON.encode(RunReport(skill: "demo", results: withArm))
+        let single = try SkilletJSON.encode(try RunReport(skill: "demo", results: withArm))
         #expect(!single.contains(#""ab":"#))
     }
 
     // MARK: - benchmark.json producer
 
     @Test("--ab benchmark: canonical with_skill/without_skill rows, arm-marked per_eval, arm summaries + signed delta")
-    func benchmarkTwoArms() {
+    func benchmarkTwoArms() throws {
         let withArm = [EvalResult(evalId: "a", trials: [trial(true, seconds: 3.0), trial(true, seconds: 3.0)])]
         let baseline = [EvalResult(evalId: "a", trials: [trial(false, seconds: 1.0), trial(false, exit: .polluted)])]
-        let report = RunReport(skill: "demo", results: withArm, baseline: baseline)
-        let bench = BenchmarkFile(skill: "demo", behavioral: (report: report, evals: withArm), baseline: baseline,
+        let report = try RunReport(skill: "demo", results: withArm, baseline: baseline)
+        let bench = try BenchmarkFile(skill: "demo", behavioral: (report: report, evals: withArm), baseline: baseline,
                                   trigger: nil, harness: "replay", k: 2, provenance: provenance, preserving: nil)
         let configs = bench.runs.compactMap { $0.objectValue?["configuration"]?.stringValue }
         #expect(configs.filter { $0 == "with_skill" }.count == 2)
@@ -122,17 +124,21 @@ struct ABAxisTests {
         #expect(summary?["without_skill"]?.objectValue?["pass_rate"]?.objectValue?["mean"] == .number(0))
         #expect(summary?["delta"]?.objectValue?["pass_rate"] == .string("+1.00"))
         #expect(summary?["delta"]?.objectValue?["time_seconds"] == .string("+2.0"))
-        #expect(summary?["delta"]?.objectValue?["tokens"] == .string("+0"))
+        // **Nothing counted tokens, so the file says nothing about them.** This used to assert a zero
+        // difference — a made-up observation sitting where a real one would go, in a file whose own rule
+        // is that a key appears only when the quantity was measured. Elapsed time has always followed
+        // that rule by being left out; tokens were the lone exception.
+        #expect(summary?["delta"]?.objectValue?["tokens"] == nil)
 
         // Recompute separation: the with-arm never mixes with the baseline arm.
-        #expect(bench.evalCounts.map(\.recorded) == [2])
-        #expect(bench.baselineCounts.map(\.recorded) == [1])
-        #expect(bench.abPolluted == 1)
+        #expect(try bench.evalCounts.map(\.graded) == [2])
+        #expect(try bench.baselineCounts.map(\.graded) == [1])
+        #expect(try bench.abPolluted == 1)
         #expect(bench.abTimeDelta == 2.0)
     }
 
     @Test("benchmark delta.pass_rate uses the PAIRED estimator, not pooled trial means (review finding)")
-    func unevenMeasuredCountsPairedDelta() {
+    func unevenMeasuredCountsPairedDelta() throws {
         // Uneven measured baseline counts (pollution hit only e2): paired and pooled diverge.
         //   e1: with 2/2 (rate 1.0) vs baseline 1/2 (rate 0.5) → Δ +0.5
         //   e2: with 1/2 (rate 0.5) vs baseline 0/1 measured (rate 0.0; 1 polluted) → Δ +0.5
@@ -146,9 +152,9 @@ struct ABAxisTests {
             EvalResult(evalId: "e1", trials: [trial(true), trial(false)]),
             EvalResult(evalId: "e2", trials: [trial(false), trial(false, exit: .polluted)])
         ]
-        let report = RunReport(skill: "demo", results: withArm, baseline: baseline)
+        let report = try RunReport(skill: "demo", results: withArm, baseline: baseline)
         #expect(abs((report.ab?.pairedMeanDelta ?? 0) - 0.5) < 1e-9)
-        let bench = BenchmarkFile(skill: "demo", behavioral: (report: report, evals: withArm), baseline: baseline,
+        let bench = try BenchmarkFile(skill: "demo", behavioral: (report: report, evals: withArm), baseline: baseline,
                                   trigger: nil, harness: "replay", k: 2, provenance: provenance, preserving: nil)
         #expect(bench.runSummary?["delta"]?.objectValue?["pass_rate"] == .string("+0.50"))   // paired, matches skillet.run/1
     }
@@ -165,11 +171,11 @@ struct ABAxisTests {
             EvalResult(evalId: "b", trials: [trial(false), trial(false)]),
             EvalResult(evalId: "c", trials: [trial(false, exit: .polluted)])   // unmeasured pair
         ]
-        let live = RunReport(skill: "demo", results: withArm, baseline: baseline)
-        let bench = BenchmarkFile(skill: "demo", behavioral: (report: live, evals: withArm), baseline: baseline,
+        let live = try RunReport(skill: "demo", results: withArm, baseline: baseline)
+        let bench = try BenchmarkFile(skill: "demo", behavioral: (report: live, evals: withArm), baseline: baseline,
                                   trigger: nil, harness: "replay", k: 2, provenance: provenance, preserving: nil)
         let data = try JSONEncoder().encode(bench)   // round-trip through bytes like the real reader
-        let rebuilt = RunReport(benchmark: try JSONDecoder().decode(BenchmarkFile.self, from: data))
+        let rebuilt = try RunReport(benchmark: try JSONDecoder().decode(BenchmarkFile.self, from: data))
         #expect(rebuilt.ab != nil)
         #expect(rebuilt.ab?.pairedMeanDelta == live.ab?.pairedMeanDelta)
         #expect(rebuilt.ab?.pairedSE == live.ab?.pairedSE)
@@ -185,50 +191,133 @@ struct ABAxisTests {
     func unmeasuredArmOmitsTimeAndDelta() throws {
         let withArm = [EvalResult(evalId: "e", trials: [trial(true, seconds: 3.0)])]
         let baseline = [EvalResult(evalId: "e", trials: [trial(false, exit: .polluted)])]   // every trial polluted
-        let live = RunReport(skill: "demo", results: withArm, baseline: baseline)
+        let live = try RunReport(skill: "demo", results: withArm, baseline: baseline)
         #expect(live.ab?.timeDeltaSeconds == nil)
-        let bench = BenchmarkFile(skill: "demo", behavioral: (report: live, evals: withArm), baseline: baseline,
+        let bench = try BenchmarkFile(skill: "demo", behavioral: (report: live, evals: withArm), baseline: baseline,
                                   trigger: nil, harness: "replay", k: 1, provenance: provenance, preserving: nil)
-        #expect(bench.runSummary?["without_skill"]?.objectValue?["pass_rate"] != nil)
+        // **The score is absent too, and this line used to assert the opposite.** The test is named for
+        // the rule that an average of nothing is not a measurement, and then required the score to be
+        // written anyway — so a run whose every attempt was disqualified recorded a score of zero,
+        // indistinguishable from one that genuinely got everything wrong, and reading as the most
+        // flattering possible result for the skill: "without it, nothing worked."
+        #expect(bench.runSummary?["without_skill"]?.objectValue?["pass_rate"] == nil)
         #expect(bench.runSummary?["without_skill"]?.objectValue?["time_seconds"] == nil)   // unmeasured arm: key absent
         #expect(bench.runSummary?["delta"] == nil)   // no measured pair, no measured durations → no delta block
         #expect(bench.abTimeDelta == nil)
         let data = try JSONEncoder().encode(bench)
-        let rebuilt = RunReport(benchmark: try JSONDecoder().decode(BenchmarkFile.self, from: data))
+        let rebuilt = try RunReport(benchmark: try JSONDecoder().decode(BenchmarkFile.self, from: data))
         #expect(rebuilt.ab?.timeDeltaSeconds == nil)   // the old code rebuilt a fabricated non-nil delta here
         #expect(rebuilt.ab?.unmeasuredEvalIds == ["e"])
     }
 
     @Test("A trigger-only run carries the prior AB record intact (rows, arm entries, summaries, delta)")
-    func triggerOnlyCarriesABRecord() {
+    func triggerOnlyCarriesABRecord() throws {
         let withArm = [EvalResult(evalId: "a", trials: [trial(true)])]
         let baseline = [EvalResult(evalId: "a", trials: [trial(false)])]
-        let report = RunReport(skill: "demo", results: withArm, baseline: baseline)
-        let prior = BenchmarkFile(skill: "demo", behavioral: (report: report, evals: withArm), baseline: baseline,
+        let report = try RunReport(skill: "demo", results: withArm, baseline: baseline)
+        let prior = try BenchmarkFile(skill: "demo", behavioral: (report: report, evals: withArm), baseline: baseline,
                                   trigger: nil, harness: "replay", k: 1, provenance: provenance, preserving: nil)
         let trigger = [TriggerEvalResult(evalId: "t0", query: "q", shouldTrigger: true,
                                          trials: [TriggerTrialResult(exit: .passed, firedTarget: true)])]
-        let merged = BenchmarkFile(skill: "demo", behavioral: nil, trigger: trigger,
+        let merged = try BenchmarkFile(skill: "demo", behavioral: nil, trigger: trigger,
                                    harness: "replay", k: 1, provenance: provenance, preserving: prior)
         let configs = merged.runs.compactMap { $0.objectValue?["configuration"]?.stringValue }
         #expect(configs.contains("with_skill"))
         #expect(configs.contains("without_skill"))
         #expect(configs.contains("trigger"))
-        #expect(merged.baselineCounts.count == 1)
+        #expect(try merged.baselineCounts.count == 1)
         #expect(merged.runSummary?["with_skill"] != nil)
         #expect(merged.runSummary?["without_skill"] != nil)
         #expect(merged.runSummary?["delta"] != nil)
     }
 
     @Test("Single-arm runs keep configuration 'default' and run_summary.default (F7 shape unchanged)")
-    func singleArmUnchanged() {
+    func singleArmUnchanged() throws {
         let evals = [EvalResult(evalId: "a", trials: [trial(true)])]
-        let bench = BenchmarkFile(report: RunReport(skill: "demo", results: evals), evals: evals,
+        let bench = try BenchmarkFile(report: try RunReport(skill: "demo", results: evals), evals: evals,
                                   harness: "replay", k: 1, provenance: provenance)
         #expect(bench.runs.first?.objectValue?["configuration"] == .string("default"))
         #expect(bench.runSummary?["default"] != nil)
         #expect(bench.runSummary?["with_skill"] == nil)
-        #expect(bench.baselineCounts.isEmpty)
-        #expect(RunReport(benchmark: bench).ab == nil)
+        #expect(try bench.baselineCounts.isEmpty)
+        #expect(try RunReport(benchmark: bench).ab == nil)
+    }
+
+    /// **A run with one arm summarises the same fields as a run with two.** How long trials took is
+    /// measured either way, and used to be recorded either way in the per-trial rows — but the aggregate
+    /// dropped it whenever there was no second arm to compare against. So a chart of how long a suite
+    /// takes got its numbers from comparison runs and nothing at all from plain ones, with no signal that
+    /// anything was missing. One builder now produces every arm block, so a field cannot be present on
+    /// one and quietly absent from its sibling.
+    @Test("A single-arm summary reports the same fields as a two-arm one")
+    func singleArmSummaryHasTheSameFields() throws {
+        let evals = [EvalResult(evalId: "a", trials: [trial(true, seconds: 1.5), trial(true, seconds: 2.5)])]
+        let bench = try BenchmarkFile(report: try RunReport(skill: "demo", results: evals), evals: evals,
+                                      harness: "replay", k: 2, provenance: provenance)
+        let single = try #require(bench.runSummary?["default"]?.objectValue)
+
+        let baseline = [EvalResult(evalId: "a", trials: [trial(false, seconds: 1.0)])]
+        let paired = try BenchmarkFile(
+            skill: "demo",
+            behavioral: (report: try RunReport(skill: "demo", results: evals, baseline: baseline), evals: evals),
+            baseline: baseline, trigger: nil, harness: "replay", k: 2, provenance: provenance, preserving: nil)
+        let withArm = try #require(paired.runSummary?["with_skill"]?.objectValue)
+        #expect(Set(single.keys) == Set(withArm.keys),
+                "one arm or two, the same measurements were taken — so the same fields are reported")
+        #expect(!single.keys.contains("tokens"),
+                "nothing counted tokens on this run, so the file claims nothing about them")
+
+        // Named directly as well, so the agreement above cannot be satisfied by both sides losing it.
+        #expect(single["time_seconds"]?.objectValue?["mean"] == .number(2.0),
+                "the average of a 1.5-second trial and a 2.5-second one")
+    }
+}
+
+/// **Every figure in one report must count the same attempts.**
+///
+/// An attempt that was never graded stopped counting toward the headline score, but six other places went
+/// on treating it as a graded attempt worth zero. Measured, for a check with two passing attempts and one
+/// never graded: the headline said the skill passed outright while the before-and-after comparison said
+/// two-thirds, reported three attempts where two were graded, and — worst — **did not notice the skill had
+/// fixed the check at all**, because a two-thirds rate no longer counts as passing.
+///
+/// The rule now lives in one place and every score is built from a record rather than from numbers passed
+/// by hand, so a caller cannot supply the total by mistake. This test exists because the failure was not
+/// that anyone misunderstood the rule — it was that nothing noticed when two places disagreed.
+@Suite("Every figure in a report counts the same attempts")
+struct SameAttemptsEverywhereTests {
+    private func verdict(_ passed: Bool) -> Verdict {
+        Verdict(criterion: "a", passed: passed, rationale: "", judgeId: "t", model: "m", judgePromptVersion: "1")
+    }
+    private func attempt(_ exit: TrialExit, passed: Bool) -> TrialResult {
+        TrialResult(exit: exit, verdicts: passed ? [verdict(true)] : (exit == .error ? [] : [verdict(false)]),
+                    durationSeconds: 1, tokens: TokenCounts(uncachedInput: 10, output: 10))
+    }
+
+    @Test("Two passing attempts and one never graded read the same everywhere")
+    func oneUngradedAttemptAgreesEverywhere() throws {
+        let withSkill = [EvalResult(evalId: "e", trials: [
+            attempt(.passed, passed: true), attempt(.passed, passed: true), attempt(.error, passed: false)])]
+        let without = [EvalResult(evalId: "e", trials: [attempt(.failed, passed: false)])]
+        let report = try RunReport(skill: "demo", results: withSkill, baseline: without)
+        let comparison = try #require(report.ab)
+
+        #expect(report.passK == 1.0, "every graded attempt passed")
+        #expect(comparison.perEval[0].withRecorded == 2, "two attempts were graded, not three")
+        #expect(comparison.pairedMeanDelta == 1.0, "the comparison must agree with the headline, not say 0.667")
+        #expect(comparison.flipsUp == 1,
+                "the skill turned a failing check into a passing one, which used to go unnoticed")
+        #expect(report.ungraded == 1, "and the attempt that was lost is still stated")
+    }
+
+    /// The softer average used to give a check that measured nothing a flat zero while still dividing by
+    /// every check, so one unmeasurable check dragged a working skill down.
+    @Test("A check that measured nothing leaves the softer average, and the basis is published")
+    func unmeasuredCheckLeavesTheAverage() throws {
+        let measured = EvalResult(evalId: "a", trials: [attempt(.passed, passed: true)])
+        let ungraded = EvalResult(evalId: "b", trials: [attempt(.error, passed: false)])
+        let report = try RunReport(skill: "demo", results: [measured, ungraded])
+        #expect(report.passOne == 1.0, "the one check that was measured passed")
+        #expect(report.passOneEvals == 1, "and the figure says how many checks it covers")
     }
 }

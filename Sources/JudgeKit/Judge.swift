@@ -15,15 +15,23 @@ public struct JudgeEvidence: Sendable, Equatable {
     public let trace: Trace
     /// Repo-relative paths actually present in the workspace after the run — the ground truth.
     public let workspaceListing: [String]
+    /// **Whether that list was cut short.** The grading instructions call the list the answer to whether
+    /// a file exists, and it stops after a fixed number of entries. Without this the grader was told an
+    /// incomplete list was complete, so a missing entry read as proof a file was absent — recording a
+    /// limit of this tool as a fault in the skill. Files the run produced are kept whatever else is
+    /// dropped, so what a cut can still hide is a file the run never touched.
+    public let workspaceListingTruncated: Bool
     /// The **produced/changed** files' bounded contents (F16 grounded judge) — created + modified vs
     /// what the runner staged, deleted/skipped/cut all disclosed. `nil` on the text-judge path (never
     /// captured, no cost). The grounded judge grades against these; the text judge ignores them.
     public let fileContents: [FileContent]?
 
-    public init(responseText: String, trace: Trace, workspaceListing: [String], fileContents: [FileContent]? = nil) {
+    public init(responseText: String, trace: Trace, workspaceListing: [String],
+                workspaceListingTruncated: Bool = false, fileContents: [FileContent]? = nil) {
         self.responseText = responseText
         self.trace = trace
         self.workspaceListing = workspaceListing
+        self.workspaceListingTruncated = workspaceListingTruncated
         self.fileContents = fileContents
     }
 }

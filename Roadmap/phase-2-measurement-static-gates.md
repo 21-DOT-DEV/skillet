@@ -2,7 +2,7 @@
 
 **Status:** IN PROGRESS
 **Horizon:** Now
-**Last Updated:** 2026-08-01
+**Last Updated:** 2026-08-16
 
 ## Goal
 
@@ -115,7 +115,17 @@ believable before the workflow layer starts acting on it.
      - An eval with `0 < passes < observed k` is reported FLAKY and excluded from trusted deltas.
      - A no-terminal-event failure is retried up to `infra_retries`; a judged FAIL is never retried (both stamped in trial metadata).
      - A per-trial timeout escalates SIGTERM → 10s grace → SIGKILL, destroying the workspace either way.
-   - Dependencies: runner (Phase 1).
+     - Output cut short by the size cap is detected and the attempt is recorded as never graded, rather
+       than graded on a session missing its ending. Today a cut-off session silently loses its final reply
+       and that reply's token count, and the run reports as though the session were complete — so a score
+       is written from partial evidence with nothing said (decided 2026-08-24, design §14-23).
+     - A write that carries evidence the run depends on says so when it fails. Today those writes discard
+       the error entirely, so on a full disk the recorded reason an attempt was never graded disappears
+       without trace. Genuine tidying-up stays silent, as it already does (decided 2026-08-24, §14-23).
+   - Dependencies: runner (Phase 1). The two items above need the process-capture step to report that it
+     truncated, and a way for the module that writes per-attempt records to report a failure — it cannot
+     reach the module that prints today, which is a deliberate layering choice, so this is design work
+     rather than a patch.
    - Confidence: Medium — design §8, §10.
 
 7. **[F19]** Record / replay (CLI: `skillet run --record <dir>` / `--replay <dir>`) — PLANNED · Net-new
@@ -169,8 +179,15 @@ believable before the workflow layer starts acting on it.
     - Success metrics:
       - `report` summarizes runs in TTY and `--html` renders from `benchmark.json` with no harness in the loop.
       - Re-aggregation matches the live run's numbers exactly.
-    - Dependencies: boundary codecs (Phase 1), runs.
+      - **Absorbs the predecessor CLI's per-check rollup** (its "scorecard" view): a
+        per-scorer score table for a run/corpus, rendered on demand from the frozen files.
+        This is the *view* only — deliberately **not** a new saved artifact, since
+        `scorecard.json` was declined in Phase 1 and stays declined. `triage` (F33) owns
+        clustering; `report` owns display.
+    - Dependencies: boundary codecs (Phase 1), runs; scorer findings (F17) for the rollup view.
     - Confidence: Medium — design §6.1 `report`.
+    - Notes: The rollup is named here so it has an owner — after `scorecard.json` was declined
+      it was the one predecessor-CLI capability covered only by assumption.
 
 12. **[F24]** Configuration & CLI ergonomics (CLI: `skillet config get|set|list --origins`, `skillet completions`) — PLANNED · Net-new
     - Purpose & user value: Make the precedence chain inspectable and the CLI
@@ -285,3 +302,7 @@ believable before the workflow layer starts acting on it.
   features renumbered to F14–F25 (roadmap v1.8.0 scheme reconciliation; see
   ROADMAP.md › Feature identifiers). No scope change beyond the `doctor` move and
   the frontmatter re-home.
+- 2026-08-13: MINOR — **F23** amended to state that reporting absorbs the predecessor CLI's
+  per-check rollup (its "scorecard" view) as a rendered view only; `scorecard.json` stays
+  declined (Phase 1), `triage` owns clustering. Names an owner for a capability that was
+  previously covered only by assumption. Roadmap → v1.22.0.

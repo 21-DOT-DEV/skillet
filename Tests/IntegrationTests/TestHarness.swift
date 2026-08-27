@@ -74,8 +74,16 @@ struct SkilletHarness {
         for bundle in Bundle.allBundles where bundle.bundlePath.hasSuffix(".xctest") {
             return bundle.bundleURL.deletingLastPathComponent()
         }
+        #else
+        // The test runner is itself a binary sitting in whatever folder the build actually wrote to,
+        // next to the one under test. Ask it where it is rather than assuming the default folder name:
+        // point a build at a different folder and the assumption reaches into an unrelated one, where
+        // a leftover binary answers every check with an older version's behaviour and still reads green.
+        if let runner = Bundle.main.executableURL {
+            return runner.deletingLastPathComponent()
+        }
         #endif
-        // Fallback: <package root>/.build/debug (swift test runs from the package root).
+        // Last resort: <package root>/.build/debug (swift test runs from the package root).
         return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent(".build/debug", isDirectory: true)
     }

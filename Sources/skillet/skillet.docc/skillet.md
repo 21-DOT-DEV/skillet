@@ -37,6 +37,7 @@ what they will cost before they do it.
 | `triage` | Group recorded failures into categories. | free |
 | `run` | Run the skill's tests and report the score. | paid |
 | `suggest` | Draft a minimal skill edit from evidence. | paid |
+| `iterate` | Prove a reviewed edit by measuring the skill before and after it. | paid |
 
 `skillet --help` is authoritative for the current surface, including flags.
 

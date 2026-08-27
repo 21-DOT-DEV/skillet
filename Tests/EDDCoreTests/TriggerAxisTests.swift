@@ -11,7 +11,7 @@ struct TriggerAxisTests {
     }
 
     @Test("A trial passes iff it ran cleanly and firing matched should_trigger")
-    func passSemantics() {
+    func passSemantics() throws {
         #expect(result("t", should: true, fires: [true, true]).passes == 2)
         #expect(result("t", should: true, fires: [true, false]).passes == 1)      // flaky trigger
         #expect(result("t", should: false, fires: [false, false]).passes == 2)    // correct non-fire
@@ -24,7 +24,7 @@ struct TriggerAxisTests {
         let behavioral = [EvalResult(evalId: "b1", trials: [])]
         let trigger = [result("trigger-0", should: true, fires: [true, true]),
                        result("trigger-1", should: false, fires: [true, false])]
-        let report = RunReport(skill: "demo", results: behavioral, trigger: trigger)
+        let report = try RunReport(skill: "demo", results: behavioral, trigger: trigger)
         #expect(report.evals.count == 1)
         #expect(report.trigger?.evals.count == 2)
         #expect(report.trigger?.passed == 1)
@@ -33,14 +33,14 @@ struct TriggerAxisTests {
         #expect(encoded.contains(#""trigger":{"#))
         #expect(encoded.contains(#""pass_1""#))
         // Absent axis ⇒ absent key (additive contract).
-        let plain = try SkilletJSON.encode(RunReport(skill: "demo", results: behavioral))
+        let plain = try SkilletJSON.encode(try RunReport(skill: "demo", results: behavioral))
         #expect(!plain.contains(#""trigger""#))
     }
 
     @Test("Benchmark: trigger rows ride configuration \"trigger\" with axis-marked per_eval entries")
     func benchmarkTriggerMapping() throws {
         let trigger = [result("trigger-0", should: false, fires: [false])]
-        let file = BenchmarkFile(
+        let file = try BenchmarkFile(
             skill: "demo",
             behavioral: nil, trigger: trigger, harness: "replay", k: 1,
             provenance: RunProvenance(judgeProvider: "none", judgeModel: "none", judgePromptVersion: "none", executorBinaryVersion: "replay-1"),
@@ -51,8 +51,8 @@ struct TriggerAxisTests {
         #expect(rows[0]["configuration"]?.stringValue == "trigger")
         #expect(rows[0]["expectations"]?.arrayValue?.first?.objectValue?["text"]?.stringValue == "skill does not trigger")
         #expect(file.skillName == "demo")   // never "unknown" on a trigger-only first run
-        #expect(file.triggerCounts.map(\.id) == ["trigger-0"])
-        #expect(file.evalCounts.isEmpty)   // the behavioral recompute never mixes axes
+        #expect(try file.triggerCounts.map(\.id) == ["trigger-0"])
+        #expect(try file.evalCounts.isEmpty)   // the behavioral recompute never mixes axes
     }
 
     @Test("Round-trip: both axes re-derive offline from one committed benchmark.json (P2/D3)")
@@ -60,9 +60,9 @@ struct TriggerAxisTests {
         let behavioral = [EvalResult(evalId: "b1", trials: [TrialResult(exit: .passed, verdicts: [
             Verdict(criterion: "c", passed: true, rationale: "r", judgeId: "j", model: "m", judgePromptVersion: "v2")
         ])])]
-        let report = RunReport(skill: "demo", results: behavioral)
+        let report = try RunReport(skill: "demo", results: behavioral)
         let trigger = [result("trigger-0", should: true, fires: [true, true])]
-        let file = BenchmarkFile(
+        let file = try BenchmarkFile(
             skill: "demo",
             behavioral: (report: report, evals: behavioral), trigger: trigger, harness: "replay", k: 2,
             provenance: RunProvenance(judgeProvider: "p", judgeModel: "m", judgePromptVersion: "v", executorBinaryVersion: "e"),
@@ -70,7 +70,7 @@ struct TriggerAxisTests {
         )
         let data = try JSONEncoder().encode(file)
         let reread = try JSONDecoder().decode(BenchmarkFile.self, from: data)
-        let recomputed = RunReport(benchmark: reread)
+        let recomputed = try RunReport(benchmark: reread)
         #expect(recomputed.evals.map(\.id) == ["b1"])
         #expect(recomputed.trigger?.evals.map(\.id) == ["trigger-0"])
         #expect(recomputed.trigger?.passed == 1)
@@ -83,21 +83,21 @@ struct TriggerAxisTests {
             Verdict(criterion: "c", passed: true, rationale: "r", judgeId: "j", model: "m", judgePromptVersion: "v2")
         ])])]
         let provenance = RunProvenance(judgeProvider: "p", judgeModel: "m", judgePromptVersion: "v", executorBinaryVersion: "e")
-        let first = BenchmarkFile(
+        let first = try BenchmarkFile(
             skill: "demo",
-            behavioral: (report: RunReport(skill: "demo", results: behavioral), evals: behavioral),
+            behavioral: (report: try RunReport(skill: "demo", results: behavioral), evals: behavioral),
             trigger: nil, harness: "replay", k: 3, provenance: provenance, preserving: nil
         )
         // Trigger-only second run (different k + harness), preserving the behavioral axis.
-        let second = BenchmarkFile(
+        let second = try BenchmarkFile(
             skill: "demo",
             behavioral: nil, trigger: [result("trigger-0", should: true, fires: [true])],
             harness: "replay2", k: 1,
             provenance: RunProvenance(judgeProvider: "none", judgeModel: "none", judgePromptVersion: "none", executorBinaryVersion: "e2"),
             preserving: first
         )
-        #expect(second.evalCounts.map(\.id) == ["b1"])            // behavioral carried
-        #expect(second.triggerCounts.map(\.id) == ["trigger-0"])  // trigger fresh
+        #expect(try second.evalCounts.map(\.id) == ["b1"])            // behavioral carried
+        #expect(try second.triggerCounts.map(\.id) == ["trigger-0"])  // trigger fresh
         #expect(second.metadata?["judge"]?.objectValue?["model"]?.stringValue == "m")   // judge provenance carried
         // Behavioral-owned metadata follows the same carry rule (round 2, finding 3): a k=1
         // trigger-only run must not relabel a k=3 behavioral record at the top level.
@@ -105,12 +105,12 @@ struct TriggerAxisTests {
         #expect(second.metadata?["runs_per_configuration"]?.numberValue == 3)
         #expect(second.metadata?["harness"]?.stringValue == "replay")
         // Behavioral-only third run, preserving the trigger axis.
-        let third = BenchmarkFile(
+        let third = try BenchmarkFile(
             skill: "demo",
-            behavioral: (report: RunReport(skill: "demo", results: behavioral), evals: behavioral),
+            behavioral: (report: try RunReport(skill: "demo", results: behavioral), evals: behavioral),
             trigger: nil, harness: "replay", k: 1, provenance: provenance, preserving: second
         )
-        #expect(third.triggerCounts.map(\.id) == ["trigger-0"])   // trigger carried
-        #expect(third.evalCounts.map(\.id) == ["b1"])
+        #expect(try third.triggerCounts.map(\.id) == ["trigger-0"])   // trigger carried
+        #expect(try third.evalCounts.map(\.id) == ["b1"])
     }
 }

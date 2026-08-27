@@ -150,7 +150,12 @@ struct ApplyIntegrationTests {
         let out = try await SkilletHarness().run(
             ["-C", root.path, "suggest", "demo", "--proposals", draft, "--apply", "--edits", "7"])
         #expect(out.exitCode == 2)
-        #expect(out.stderr.contains("no edit 7"))
+        // Asserted on what the refusal must *carry* rather than on one phrasing: the flag that held the
+        // mistake, and how many edits there actually are. The wording is shared with the proving command
+        // now (Specs/020 D13) and human text carries no compatibility promise (design P7), so pinning a
+        // sentence would break on a rewording that lost nothing.
+        #expect(out.stderr.contains("--edits 7"), "names the flag that carried the mistake")
+        #expect(out.stderr.contains("(it has 1)"), "and says how many edits the draft has")
     }
 
     @Test("A draft written for another skill is refused")
@@ -377,7 +382,7 @@ struct ApplyIntegrationTests {
         let out = try await SkilletHarness().run(
             ["-C", root.path, "suggest", "demo", "--proposals", draft, "--apply", "--edits", "7"])
         #expect(out.exitCode == 2, "the typo is the user's mistake and answers first")
-        #expect(out.stderr.contains("no edit 7"))
+        #expect(out.stderr.contains("--edits 7"), "and the answer is about the typo")
         #expect(!out.stderr.contains("uncommitted"), "the unrelated file must not mask the typo")
     }
 
@@ -627,6 +632,31 @@ struct ApplyIntegrationTests {
             ["-C", root.path, "suggest", "demo", "--proposals", name, "--apply"])
         #expect(out.exitCode == 2, "a mistake in what you typed")
         #expect(out.stderr.contains(says), "say which rule it broke")
+    }
+
+    /// **A draft name starting with a hyphen is refused, for the same reason a space is.** The name is
+    /// handed back inside `--proposals <name>`, and a value beginning with a hyphen is taken for the next
+    /// switch — measured, the spaced form fails with "Missing value for '--proposals'" before the command
+    /// starts. It has to be passed joined by `=` to reach the name rule at all, which is also the only way
+    /// such a name could have been created in the first place.
+    @Test("A draft name starting with a hyphen is refused", arguments: ["-x.json", "--out.json"])
+    func hyphenLeadingDraftNameRefused(_ name: String) async throws {
+        let (root, _) = try await Self.makeRepo(); defer { Fixture.remove(root) }
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "suggest", "demo", "--proposals=\(name)", "--apply"])
+        #expect(out.exitCode == 2, "a mistake in what you typed")
+        #expect(out.stderr.contains("must not start with a hyphen"), "say which rule it broke")
+    }
+
+    /// The spaced form never even reaches the rule above — the argument reader refuses it first. Recorded
+    /// so the two routes are not confused: closing only the reachable one would leave the rule untested.
+    @Test("The spaced form is refused by the argument reader before the name rule is reached")
+    func hyphenLeadingDraftNameRefusedEarlier() async throws {
+        let (root, _) = try await Self.makeRepo(); defer { Fixture.remove(root) }
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "suggest", "demo", "--proposals", "-x.json", "--apply"])
+        #expect(out.exitCode == 2)
+        #expect(out.stderr.contains("Missing value"))
     }
 
     @Test("A hidden draft name is still allowed")

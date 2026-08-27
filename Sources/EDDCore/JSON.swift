@@ -53,9 +53,36 @@ public enum SkilletJSON {
     /// the frozen boundary formats) lands with F8.
     public static func decoder() -> JSONDecoder {
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.keyDecodingStrategy = .custom { path in
+            DynamicCodingKey(Self.swiftName(forPublishedKey: path[path.count - 1].stringValue))
+        }
         decoder.dateDecodingStrategy = .iso8601
         return decoder
+    }
+
+    /// **A published key, turned back into the name the type spells it with.**
+    ///
+    /// Written out because the built-in conversion cannot express one thing this format needs. Two of the
+    /// published names carry a digit as a word — `pass_1`, `pass_1_evals` — and the built-in rule turns
+    /// those into `pass1` and `pass1Evals`, which match nothing, so the whole payload failed to read back.
+    /// Measured: encoding produced the right text and decoding it returned nothing at all.
+    ///
+    /// So a name whose parts include a bare number is handed back exactly as written, and everything else
+    /// gets the ordinary treatment. The written-out rule below is checked against the built-in one for
+    /// every key this project publishes, so "the ordinary treatment" cannot quietly drift from what the
+    /// encoder does.
+    static func swiftName(forPublishedKey key: String) -> String {
+        let parts = key.split(separator: "_", omittingEmptySubsequences: false)
+        // A part that is only digits is a word here, not a separator artefact; such names are published
+        // exactly as spelled and must be read back the same way.
+        guard !parts.contains(where: { !$0.isEmpty && $0.allSatisfy(\.isNumber) }) else { return key }
+        // Leading and trailing underscores are preserved by the built-in rule; keep them.
+        let leading = String(repeating: "_", count: key.prefix(while: { $0 == "_" }).count)
+        let trailing = String(repeating: "_", count: key.reversed().prefix(while: { $0 == "_" }).count)
+        let words = parts.filter { !$0.isEmpty }
+        guard let first = words.first else { return key }
+        let rest = words.dropFirst().map { $0.prefix(1).uppercased() + $0.dropFirst() }
+        return leading + first.lowercased() + rest.joined() + (key == leading ? "" : trailing)
     }
 
     /// Decode a value from a JSON string using the shared decoder.

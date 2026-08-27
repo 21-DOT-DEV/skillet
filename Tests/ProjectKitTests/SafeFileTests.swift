@@ -228,3 +228,92 @@ struct SafeFileTests {
         #expect(SafeFile.noSymlink(at: link.appendingPathComponent("sub"), under: root) == false)
     }
 }
+
+/// **A name that becomes part of a folder name must not be able to become a route out of it.**
+///
+/// Several places build a working folder by pasting a name into a larger folder name. A name carrying a
+/// path separator stops being one name at that point: combined with a step upwards it leaves the folder
+/// it was meant to stay in. Measured with the shape that prompted this — `a/../../b` pasted into a name
+/// under the machine's temporary folder resolves *beside* that folder, not inside it.
+///
+/// Two checks, deliberately. Refusing spellings depends on having listed them, and a lone `..` stays
+/// inside — which is exactly what led one review to test that case and conclude escape was impossible.
+/// Confirming where the finished path landed does not depend on anyone having anticipated the spelling.
+@Suite("A name used as one folder name cannot become a route out")
+struct SafeComponentTests {
+    @Test("Names that are not a single plain name are refused",
+          arguments: ["a/b", "a/../../b", "../../etc", "..", ".", "", "/absolute"])
+    func unsafeNamesRefused(name: String) {
+        #expect(!SafeFile.isSingleSafeComponent(name))
+    }
+
+    /// A backslash is an ordinary character in a name here, not a separator, so it is accepted — and
+    /// anything that genuinely escapes is caught by where the finished path lands, however it was spelled.
+    @Test("Ordinary names are accepted",
+          arguments: ["demo", "tidy-notes", "a.b.c", "後方互換", "a..b", #"a\b"#])
+    func ordinaryNamesAccepted(name: String) {
+        #expect(SafeFile.isSingleSafeComponent(name))
+    }
+
+    /// **The second check, and the case the first one alone would miss.** This is the measured escape:
+    /// pasted into a longer name, the separator makes the step upwards its own segment.
+    @Test("A path built from an unsafe name is caught by where it lands")
+    func escapeCaughtByResolvedPath() {
+        let base = FileManager.default.temporaryDirectory
+        let escaping = base.appendingPathComponent("prefix-a/../../b-suffix", isDirectory: true)
+        #expect(!SafeFile.isConfined(escaping, to: base), "it resolves outside, and must be seen to")
+        let ordinary = base.appendingPathComponent("prefix-demo-suffix", isDirectory: true)
+        #expect(SafeFile.isConfined(ordinary, to: base))
+    }
+
+    /// **A path built under one folder must not be judged against another.** Where a builder fetches its
+    /// own base instead of using the one it was handed, this check compares a path against the very thing
+    /// it was built from — true by construction rather than by checking, and wrong the moment anything
+    /// passes a different folder.
+    @Test("A path built under one folder is not confined to a different one")
+    func differentBaseIsNotConfined() {
+        let a = FileManager.default.temporaryDirectory.appendingPathComponent("base-a", isDirectory: true)
+        let b = FileManager.default.temporaryDirectory.appendingPathComponent("base-b", isDirectory: true)
+        #expect(SafeFile.isConfined(a.appendingPathComponent("x"), to: a))
+        #expect(!SafeFile.isConfined(a.appendingPathComponent("x"), to: b))
+    }
+
+    /// A folder is not inside itself — otherwise "confined to" would accept the base as its own child.
+    @Test("The folder itself does not count as being inside itself")
+    func baseIsNotInsideItself() {
+        let base = FileManager.default.temporaryDirectory
+        #expect(!SafeFile.isConfined(base, to: base))
+    }
+}
+
+/// **"Inside what?" has to work for every folder, including the whole filesystem.**
+///
+/// The check appended a separator to the folder you are confining to. That is right for every ordinary
+/// folder and wrong for exactly one: the root of the filesystem is already spelled `/`, so appending gave
+/// `//` — which no path starts with, so every path in existence came back as "outside". It failed safe
+/// rather than open, so nothing was ever wrongly allowed through; it simply made this unusable for a base
+/// nobody currently passes. It is offered for anyone to call, so it should be right for any base.
+@Suite("Confinement works for any folder, including the filesystem root")
+struct ConfinementRootTests {
+    @Test("A path is inside the filesystem root")
+    func rootContainsEverything() {
+        #expect(SafeFile.isConfined(URL(fileURLWithPath: "/tmp/anything"), to: URL(fileURLWithPath: "/")))
+        #expect(SafeFile.isConfined(URL(fileURLWithPath: "/var/folders/x/y"), to: URL(fileURLWithPath: "/")))
+    }
+
+    @Test("The root is not strictly inside itself")
+    func rootIsNotInsideItself() {
+        #expect(!SafeFile.isConfined(URL(fileURLWithPath: "/"), to: URL(fileURLWithPath: "/")))
+    }
+
+    /// The ordinary cases must keep working — this is the half that was already right.
+    @Test("An ordinary folder still confines as before")
+    func ordinaryFolderUnchanged() {
+        let base = URL(fileURLWithPath: "/tmp/project")
+        #expect(SafeFile.isConfined(URL(fileURLWithPath: "/tmp/project/inside.txt"), to: base))
+        #expect(!SafeFile.isConfined(URL(fileURLWithPath: "/tmp/elsewhere/out.txt"), to: base))
+        #expect(!SafeFile.isConfined(base, to: base), "the folder is not strictly inside itself")
+        #expect(!SafeFile.isConfined(URL(fileURLWithPath: "/tmp/project-sibling/x"), to: base),
+                "a name that merely starts the same is not inside")
+    }
+}

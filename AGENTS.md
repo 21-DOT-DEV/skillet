@@ -63,10 +63,30 @@ Contributing, security disclosure, and code of conduct are handled at the org le
   `skillet run [<skill>] [--axis behavior|trigger|all] [--ab] [--judge text-judge|grounded-judge] [--runs <k>] [--dry-run] [--yes] [--no-input] [--keep-workspace]` (paid: shells `claude`, resolved via `SKILLET_CLAUDE_CODE_BIN` env → `harness.claude-code.path` in `skillet.yaml` → `PATH` — behavioral trials add the judge; trigger trials are judge-free single calls; `--ab` doubles behavioral trials with a provably skill-free baseline arm, both arms judged; `--judge grounded-judge` reads produced-file contents to catch created-but-wrong, larger grading requests — gated by the combined spend estimate),
   `skillet triage [<skill>] [--since <YYYY-MM-DD>] [--dry-run] [--json]` (free: reads the recorded session bundles under a skill's `evaluations/sessions/`, groups their findings into a failure taxonomy, and writes one evidence file per cluster under `evaluations/findings/` — never overwrites an existing file, reports what it skipped, and exits 0 even when it finds problems: it is a reporter, not a gate),
   `skillet suggest <skill> --from <evidence-id>... [--out <name>.json] [-n|--dry-run] [--yes] [--json]` (paid: one model call that **drafts** minimal `SKILL.md` edits from the evidence records you name plus the human notes sharing their sessions, and writes them to `.skillet/proposals/<id>.json`; **applying is a separate, opt-in step** (`--proposals <name>.json --apply`, free — no model call — which writes your working tree all-or-nothing, refuses a dirty repository, and never commits or stages); free static gates and a read-only check that the model program is usable run first, `-n` previews the request and its size without spending, an over-ceiling request refuses unless `--yes`, and a name already held by a different draft exits 2 without overwriting),
+  `skillet iterate <skill> --proposals <name>.json [--edits <n>...] [--runs <k>] [--judge <id>] [-n|--dry-run] [--yes] [--no-input] [--keep-worktree] [--json]` (paid: two measurements, so roughly double a run — measures the skill, applies the edits to a throwaway copy, measures again, and reports the difference with a strict, provisional verdict; never commits, never changes your files).
   `skillet capture --skill <s> --slug <x> [--session <ref>] [--target-dir <path>] [--date <YYYY-MM-DD>] [--force] [--fail-on-secret] [--secret-scanner-path <p>]` (records the newest claude-code session — or `--session` — as a **secret-scrubbed**, scored evidence bundle under `<skills_root>/<skill>/evaluations/sessions/`; **always redacts** — there is no `--no-sanitize` — and **fails closed** if `betterleaks` can't run; `--fail-on-secret` exits 1 for CI, the bundle still written scrubbed),
-  `skillet --help`, `skillet --version`. Hidden test seams on `run`: `--replay` (offline adapter+judge),
-  `--replay-map <json>` (with-arm canned verdicts), `--replay-baseline-map <json>` (baseline-arm canned
-  verdicts; defaults to fail-all so a replayed `--ab` shows a deterministic positive Δ).
+  `skillet --help`, `skillet --version`. Hidden test seams, per command: `run` and `iterate` both take
+  `--replay` (offline adapter+judge) and `--replay-map <json>` (canned verdicts, keyed
+  `<criterion>` or `<criterion> @ <marker>`); **`--replay-baseline-map <json>` is `run`-only** (baseline-arm
+  canned verdicts; defaults to fail-all so a replayed `--ab` shows a deterministic positive Δ). `iterate`
+  has no baseline-arm map because one grader serves both of its measurements — they are told apart by the
+  skill's `replay-marker:` line, not by a second recording.
+- **The hidden test options ship in the released binary, deliberately.** `--replay`, `--replay-map`,
+  `--replay-baseline-map` and `--reply-file` are hidden from help and refused unless `SKILLET_TEST_SEAMS`
+  is set, but they are compiled in — because the suite exercises the *built* binary rather than a
+  test-only build, which is what makes those tests worth having. Using one requires both an environment
+  variable and a command line, and every file they read goes through the same confined reader as any
+  other untrusted path. If a stricter posture is ever wanted, the shape is a build-time switch around the
+  option declarations plus a test-flavoured build target — recorded so the trade-off is a decision rather
+  than an accident.
+- `SKILLET_LIVE_SMOKE=1 SKILLET_CLAUDE_CODE_BIN=<claude> swift test --filter liveSmoke` — the **paid**
+  opt-in checks (~4 model calls each), skipped by every ordinary run. One per paid command: the measuring
+  command's proves a real run end-to-end; the proving command's checks that both measurements really ran
+  and that the skill actually reached the model. It does **not** require the edit to improve anything: an
+  earlier version did, went red against a real model, and was removed — whether a model follows an edited
+  instruction is a fact about the model, not about this program, and asserting it makes the suite fail for
+  something it does not control. Run before a release, or after changing how a model is launched or an
+  answer is graded.
 - `swift package generate-manual` / `generate-docc-reference` — regenerate the command reference from the parser.
 - `SKILLET_TEST_BINARY=<path> swift test` — point the integration harness at a specific binary.
 - CI: `.github/workflows/ci.yml` runs the free suite on macOS (`macos-26`, `DEVELOPER_DIR` pinned to
@@ -187,10 +207,21 @@ frozen writer) and `SanitizerKit` (betterleaks-backed secret redaction) are the 
 
 ### Command surface (design §6) — lights up across phases
 
-`init`, `doctor`, `lint`, `run` (behavior + trigger axes, `--ab`, `--matrix`), `capture`
-(`--from-checkpoint`, `--preserve-feedback`), `friction`, `triage`, `next` (`--strict`), `suggest`
-(`--apply`), `iterate` (`--apply`), `baseline compare|matrix`, `report` (TTY + HTML), `migrate`,
-`grade`, `score`, `bundle`, `hooks install`, `harness` (`info`, `which --search`).
+**Answers today:** `init`, `doctor`, `lint`, `run` (behavior + trigger axes, `--ab`, `--matrix†`),
+`capture` (`--from-checkpoint†`, `--preserve-feedback†`), `triage`, `suggest` (`--apply`), `iterate`
+(`--edits`), `score`, `harness info`.
+
+**Planned, not yet accepted:** `friction` (planned), `next` (planned, `--strict`), `baseline
+compare|matrix` (planned), `report` (planned, TTY + HTML), `migrate` (planned), `grade` (planned),
+`bundle` (planned), `hooks install` (planned), `harness which --search` (planned).
+
+A `†` marks a switch that is planned but not yet accepted, and `(planned)` marks a whole command that
+is. Nine commands here were listed as available while the tool refused them — a reader learning from
+this page was sent to verbs that do not exist. A test now checks every name in this section against what
+the binary actually registers, so the two cannot drift apart again. The list mixed the two without saying which, and said the proving command takes `--apply` when it
+takes `--edits` — so a reader learning the tool from this page was sent to a switch the parser refuses.
+A test now compares every switch named here against what the parser actually accepts, skipping the
+marked ones, so this cannot drift again unnoticed.
 
 ### Adapters (v1)
 

@@ -47,14 +47,24 @@ struct ABIsolationTests {
         }
     }
 
-    @Test("ReplayAdapter is arm-aware: .none serves a skill-free trace; the with-arm still fires demo")
+    /// The two arms of the comparison: one run with the skill available, one deliberately without it.
+    /// The without-skill arm must report that nothing was used, or the check that throws out a
+    /// contaminated arm disqualifies every offline measurement.
+    ///
+    /// **The with-skill arm loads an actual skill.** It used to load none and still expect a skill named
+    /// `demo` to be reported — so it read as a test of arm-awareness while actually resting on a name the
+    /// stand-in had baked in. Loading nothing and being told a skill was used is the contamination this
+    /// very check exists to catch.
+    @Test("The stand-in tells the two arms apart: without-skill uses nothing, with-skill uses what it was given")
     func replayArmAware() async throws {
         let replay = ReplayAdapter()
         let ws = Workspace(root: FileManager.default.temporaryDirectory)
         let baseline = try replay.parseTrace(try await replay.run(TaskSpec(query: "q"), in: ws, skills: SkillSet.none))
         #expect(baseline.skillInvocations.isEmpty)
-        let with = try replay.parseTrace(try await replay.run(TaskSpec(query: "q"), in: ws, skills: .only(load: [])))
-        #expect(with.skillInvocations.map(\.skill) == ["demo"])
+        let loaded = SkillRef(name: "tidy-notes", path: ws.root.appendingPathComponent("tidy-notes").path)
+        let with = try replay.parseTrace(try await replay.run(TaskSpec(query: "q"), in: ws, skills: .only(load: [loaded])))
+        #expect(with.skillInvocations.map(\.skill) == ["tidy-notes"],
+                "the arm reports the skill it was handed, not one the stand-in decided on")
     }
 
     @Test("An adapter without the capability refuses baseline isolation loudly (declare-cannot, §9.2)")

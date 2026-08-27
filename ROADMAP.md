@@ -1,7 +1,7 @@
 # Product Roadmap — skillet
 
-**Version:** v1.21.0
-**Last Updated:** 2026-08-01
+**Version:** v1.22.0
+**Last Updated:** 2026-08-17
 
 `skillet` is the SKILL.md Evaluation Toolkit — eval-driven development (EDD)
 for agent skills, as a public, multi-harness Swift CLI. This roadmap is
@@ -72,8 +72,10 @@ derived from `skillet-design.md` and an external best-practice cross-reference
   prove them by A/B in a throwaway worktree before a human lands them. `skillet
   suggest` (F41) shipped 2026-08-01 — it drafts and writes proposals — and
   `suggest --apply` (F42) shipped 2026-08-04, which writes a draft you have read
-  into your working tree, all of it or none, never committing. Proving a fix by
-  A/B (F43) is still to come.
+  into your working tree, all of it or none, never committing — and `skillet
+  iterate` (F43) shipped 2026-08-19, which proves a reviewed edit by measuring the
+  skill before and after it in a throwaway copy. Marking evidence proven (F44) and
+  held-out proof (F45) are still to come.
 - **Phase 7 (Next):** Run the same suite across multiple agents and print a
   per-harness `pass^k` portability table.
 - **Phase 8 (Later):** Track B axial coding, more adapters, the remaining lint
@@ -81,7 +83,9 @@ derived from `skillet-design.md` and an external best-practice cross-reference
   competitive cross-reference — **user-authored (YAML) lint rules**, real spend numbers, the
   judge↔human agreement check (F10; report-only Cohen's kappa), the general observed-seed
   synthetic generator (F64), the named aggregation catalog (F65), the test-framework
-  integration recipe (F66), and the **diagnostic model tier** (F67 — the provider-neutral
+  integration recipe (F66), **domain-specific output scorers** (F72 — a repo brings its own
+  deterministic checks over produced text, rather than baking one project's rules into the tool),
+  and the **diagnostic model tier** (F67 — the provider-neutral
   cheap-model slot that informs but never gates; macOS defaults to Apple's on-device model via
   F68, `needs-research`) — plus the explicit non-goals.
 
@@ -194,6 +198,12 @@ process-assertions — decided 2026-07-06 via the Apple Evaluations cross-refere
 - **Ablation arms** → design **§14-10**. Partial-skill A/B (drop a section / reference / rule) to
   isolate which part of a skill earns its tokens — feeds *evidence-to-edit ratio*. Touches the
   Phase 6 `run --ab` / `SkillSet`.
+- **Proving the tests would notice a break** → design **§14-24**. Establishing that a test fails when
+  the code it covers is broken — three tests here passed for reasons unrelated to what they claimed to
+  cover, each caught only by undoing the fix by hand. The established tool for this language was tried and
+  does not complete on this project (two defects in it, measured); the open choice is contributing those
+  fixes, building a small equivalent, or continuing by hand on the code that matters. Development tooling
+  only — touches nothing shipped.
 - **Automatic per-criterion grounded routing** → design **§14-21**. Auto-send file-content criteria
   to the grounded judge (vs today's explicit `--judge grounded-judge`); a fallible classifier vs an
   author-declared per-criterion field — deferred, revisit on mixed-criterion demand.

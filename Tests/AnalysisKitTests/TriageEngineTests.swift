@@ -60,13 +60,13 @@ struct TriageEngineTests {
         #expect(result.clusters[0].worstLevel == "error")
     }
 
-    @Test func allUnknownLevelsSurviveVerbatimNeverEmpty() {
+    @Test func allUnknownLevelsSurviveVerbatimNeverEmpty() throws {
         // Round 1: `-1 > -1` never set `worst`, so an all-unknown cluster reported "" everywhere.
         let result = run([bundle("2026-06-01-a", results: [
             hit("SKILL-S001", level: "catastrophic"), hit("SKILL-S001", level: "catastrophic"),
         ])])
         #expect(result.clusters[0].worstLevel == "catastrophic")
-        #expect(try! #require(result.newFindings.first).finding.signal
+        #expect(try #require(result.newFindings.first).finding.signal
             == "hits=2 recordings=1/1 worst=catastrophic")   // the signal carries it too, never ""
     }
 
@@ -130,7 +130,7 @@ struct TriageEngineTests {
         #expect(result.newFindings.isEmpty)   // no auto-reopen, no duplicate (GitHub-dismissal model)
     }
 
-    @Test func synthesizesTheFindingPerA6() {
+    @Test func synthesizesTheFindingPerA6() throws {
         let result = run([
             bundle("2026-06-02-b", skillVersion: "1.2.0", model: "opus",
                    results: [hit("SKILL-S004", level: "error", message: "rule-of-three over-use")]),
@@ -138,7 +138,7 @@ struct TriageEngineTests {
                    results: [hit("SKILL-S004", level: "warning")]),
             bundle("2026-06-03-c", results: []),   // non-contributing: not in sessions
         ])
-        let new = try! #require(result.newFindings.first)
+        let new = try #require(result.newFindings.first)
         let f = new.finding
         #expect(f.header.id == "2026-07-19-rule-of-three")
         #expect(f.header.domain == "s")                       // skill-name sentinel (H)
@@ -154,12 +154,12 @@ struct TriageEngineTests {
         #expect(new.body.contains("hypothesis, not a verdict"))
     }
 
-    @Test func mixedProvenanceFallsBackToUnknown() {
+    @Test func mixedProvenanceFallsBackToUnknown() throws {
         let result = run([
             bundle("2026-06-01-a", skillVersion: "1.0.0", model: "m1", results: [hit("SKILL-S001")]),
             bundle("2026-06-02-b", skillVersion: "1.1.0", model: nil, results: [hit("SKILL-S001")]),
         ])
-        let f = try! #require(result.newFindings.first).finding
+        let f = try #require(result.newFindings.first).finding
         #expect(f.header.skillVersion == "unknown")   // disagreement → sentinel
         #expect(f.header.model == "unknown")          // a nil vote → sentinel
     }

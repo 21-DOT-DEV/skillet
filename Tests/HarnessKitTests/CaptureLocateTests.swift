@@ -4,6 +4,22 @@ import Foundation
 
 @Suite("ClaudeCodeAdapter — session locate/export")
 struct CaptureLocateTests {
+    /// **Whether this machine's temporary area supports hard links, worked out once and up front.**
+    ///
+    /// The test below needs one to build the situation it checks. It used to try, and simply return when
+    /// the attempt failed — and returning is how a test reports success, so on a filesystem without hard
+    /// links the run said it passed while nothing was checked. Declared as a condition on the test
+    /// instead, so the run says *skipped* and gives the reason.
+    static let hardLinksSupported: Bool = {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        guard (try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)) != nil
+        else { return false }
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let a = dir.appendingPathComponent("a"), b = dir.appendingPathComponent("b")
+        guard (try? Data().write(to: a)) != nil else { return false }
+        return (try? FileManager.default.linkItem(at: a, to: b)) != nil
+    }()
+
     @Test("Encodes the workspace path like claude-code: every non-[A-Za-z0-9] → -")
     func encoding() {
         #expect(ClaudeCodeAdapter.claudeProjectDirName(for: URL(fileURLWithPath: "/Users/x/Developer/skillet"))
@@ -86,12 +102,13 @@ struct CaptureLocateTests {
         }
     }
 
-    @Test("exportSession refuses a hard-linked session file (linkCount > 1 — no read of another inode) — T10")
+    @Test("exportSession refuses a hard-linked session file (linkCount > 1 — no read of another inode) — T10",
+          .enabled(if: hardLinksSupported, "this filesystem does not support hard links"))
     func exportRefusesHardLink() async throws {
         let (root, ws) = try makeStore(); defer { try? FileManager.default.removeItem(at: root) }
         let real = try session(root, ws, stem: "real", contents: "{}", mtime: Date(timeIntervalSince1970: 1))
         let hard = root.appendingPathComponent(ClaudeCodeAdapter.claudeProjectDirName(for: ws)).appendingPathComponent("hard.jsonl")
-        guard (try? FileManager.default.linkItem(at: real, to: hard)) != nil else { return }   // same-fs hard link
+        try FileManager.default.linkItem(at: real, to: hard)   // same filesystem, so this must succeed
         await #expect(throws: HarnessError.self) {
             _ = try await ClaudeCodeAdapter().exportSession(NativeSessionRef(id: "hard", path: hard.path))
         }

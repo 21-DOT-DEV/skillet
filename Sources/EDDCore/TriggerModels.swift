@@ -33,6 +33,12 @@ public struct TriggerEvalResult: Codable, Sendable, Equatable {
     }
 
     public var recorded: Int { trials.count }
+    /// Trials where nothing was ever graded — see ``TrialExit/error``. Sibling of the same count on the
+    /// behaviour check; both were added together, because a rule holding on one of these two and not the
+    /// other is how most of the defects in this project were made.
+    public var errored: Int { trials.filter { $0.exit == .error }.count }
+    /// Trials that actually produced a result.
+    public var measured: Int { recorded - errored }
     public var passes: Int {
         trials.filter { $0.exit == .passed && $0.firedTarget == shouldTrigger }.count
     }

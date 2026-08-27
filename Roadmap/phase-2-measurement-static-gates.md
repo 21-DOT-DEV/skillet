@@ -115,7 +115,17 @@ believable before the workflow layer starts acting on it.
      - An eval with `0 < passes < observed k` is reported FLAKY and excluded from trusted deltas.
      - A no-terminal-event failure is retried up to `infra_retries`; a judged FAIL is never retried (both stamped in trial metadata).
      - A per-trial timeout escalates SIGTERM → 10s grace → SIGKILL, destroying the workspace either way.
-   - Dependencies: runner (Phase 1).
+     - Output cut short by the size cap is detected and the attempt is recorded as never graded, rather
+       than graded on a session missing its ending. Today a cut-off session silently loses its final reply
+       and that reply's token count, and the run reports as though the session were complete — so a score
+       is written from partial evidence with nothing said (decided 2026-08-24, design §14-23).
+     - A write that carries evidence the run depends on says so when it fails. Today those writes discard
+       the error entirely, so on a full disk the recorded reason an attempt was never graded disappears
+       without trace. Genuine tidying-up stays silent, as it already does (decided 2026-08-24, §14-23).
+   - Dependencies: runner (Phase 1). The two items above need the process-capture step to report that it
+     truncated, and a way for the module that writes per-attempt records to report a failure — it cannot
+     reach the module that prints today, which is a deliberate layering choice, so this is design work
+     rather than a patch.
    - Confidence: Medium — design §8, §10.
 
 7. **[F19]** Record / replay (CLI: `skillet run --record <dir>` / `--replay <dir>`) — PLANNED · Net-new

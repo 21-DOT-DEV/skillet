@@ -65,6 +65,13 @@ enum Fixture {
         skill: String = "demo",
         evals: [(id: String, expectations: [String])] = [("e1", ["did the thing"])],
         harnessPath: String? = nil,
+        /// States in the skill's own frontmatter that the offline stand-in reports this skill as the one
+        /// reached for — what the routing measurement (`--axis trigger`) grades on. It must sit inside
+        /// the fence: that measurement stages the fence and withholds the body, so a line below it never
+        /// arrives. Defaults to yes because the trigger tests here expect the skill to be reached for;
+        /// a test about *not* being reached for turns it off. Before this, the stand-in always reported a
+        /// skill named `demo`, so those tests passed on the name rather than on anything they said.
+        firesOnTrigger: Bool = true,
         judgeProvider: String? = nil,
         judgeModel: String? = "claude-sonnet-4-6",   // required-explicit (§14-4); nil = omit the key
         evalsRaw: String? = nil
@@ -78,7 +85,8 @@ enum Fixture {
 
         let dir = root.appendingPathComponent("skills/\(skill)", isDirectory: true)
         try FileManager.default.createDirectory(at: dir.appendingPathComponent("evaluations"), withIntermediateDirectories: true)
-        try "---\nname: \(skill)\ndescription: a demo skill for run integration tests\n---\nBody.\n"
+        let fires = firesOnTrigger ? "replay-fires: true\n" : ""
+        try "---\nname: \(skill)\ndescription: a demo skill for run integration tests\n\(fires)---\nBody.\n"
             .write(to: dir.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
 
         let evalsJSON: String

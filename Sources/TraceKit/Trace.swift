@@ -19,6 +19,25 @@ public struct Trace: SchemaIdentified, Codable, Sendable, Equatable {
     public var skillInvocations: [SkillInvocation]
     public var workspaceDiff: WorkspaceDiff
     public var usage: Usage?
+    /// **Why ``usage`` is absent, when it is.** Absent covers two different situations that used to be
+    /// indistinguishable: nothing was reported at all, and something was reported that could not be
+    /// trusted — a missing field, a figure below none. The counts are discarded either way, deliberately,
+    /// so that a part-read figure never enters a total; but the second is a problem worth telling someone
+    /// about and the first is not. Defaults to counted-or-absent so records written before this, and every
+    /// stand-in that reports nothing, read back unchanged.
+    public var usageState: UsageState
+
+    /// What is known about a session's cost figures.
+    public enum UsageState: String, Codable, Sendable, Equatable {
+        /// Figures were reported and are usable — ``Trace/usage`` holds them.
+        case counted
+        /// No figures were offered. Not a fault: an offline stand-in reports none, and so does a tool
+        /// that does not publish them.
+        case absent
+        /// Figures were offered and could not be used, so the whole session's counts were dropped rather
+        /// than partly believed.
+        case unreadable
+    }
 
     public init(
         harness: HarnessID,
@@ -28,7 +47,8 @@ public struct Trace: SchemaIdentified, Codable, Sendable, Equatable {
         turns: [Turn],
         skillInvocations: [SkillInvocation],
         workspaceDiff: WorkspaceDiff,
-        usage: Usage? = nil
+        usage: Usage? = nil,
+        usageState: UsageState? = nil
     ) {
         self.harness = harness
         self.harnessVersion = harnessVersion
@@ -38,6 +58,8 @@ public struct Trace: SchemaIdentified, Codable, Sendable, Equatable {
         self.skillInvocations = skillInvocations
         self.workspaceDiff = workspaceDiff
         self.usage = usage
+        // Not stated: infer it, so every existing construction site keeps its meaning without change.
+        self.usageState = usageState ?? (usage == nil ? .absent : .counted)
     }
 }
 
@@ -94,15 +116,7 @@ public struct WorkspaceDiff: Codable, Sendable, Equatable {
     }
 }
 
-/// Token / cost usage where the harness reports it. All optional — structurally `nil` until usage
-/// parsing lands (Phase 8).
-public struct Usage: Codable, Sendable, Equatable {
-    public var inputTokens: Int?
-    public var outputTokens: Int?
-    public var costUSD: Double?
-    public init(inputTokens: Int? = nil, outputTokens: Int? = nil, costUSD: Double? = nil) {
-        self.inputTokens = inputTokens
-        self.outputTokens = outputTokens
-        self.costUSD = costUSD
-    }
-}
+/// What a session cost in tokens, where the tool that ran it reports them; `nil` means nothing counted.
+/// The counts themselves live in ``EDDCore/TokenCounts``, which explains why none of its fields is
+/// called `inputTokens`.
+public typealias Usage = TokenCounts

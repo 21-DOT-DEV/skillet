@@ -305,7 +305,8 @@ struct SuggestCommand: AsyncParsableCommand {
             // The apply flag takes the draft's **name**, while this line prints its path — so hand over
             // the whole command rather than something the reader has to edit before it works.
             steps = ["review the excerpt → proposed text in \(path)",
-                     "then apply it: skillet suggest \(skill) --proposals \(draftName) --apply"]
+                     "then apply it: " + ShellWord.command("skillet suggest", skill,
+                        options: [ShellWord.option("--proposals", draftName), "--apply"])]
         case let .identicalDraftExists(path, existing, refreshed):
             // You are already in the desired state, and the file worth reading is right there — so it is
             // that file being described. Two things genuinely drift here: a re-run's reply can contain a
@@ -400,39 +401,28 @@ struct SuggestCommand: AsyncParsableCommand {
         }
         let set: ProposalSet
         do { set = try SkilletJSON.decode(ProposalSet.self, from: text) }
-        catch { throw EDDError.invalidArtifact(path: relativeDraft, reason: "not a readable draft — \(error)") }
+        catch {
+            throw EDDError.invalidArtifact(path: relativeDraft,
+                                           reason: "not a readable draft — \(DecodeFailure.describe(error))")
+        }
 
         // A draft written for one skill must never be applied to another; the file records which.
         guard set.skill == skill else {
             throw EDDError.usage(
                 message: "\(relativeDraft) is a draft for '\(set.skill)', not '\(skill)'",
-                remedy: "apply it to the skill it was drafted for: skillet suggest \(set.skill) --proposals \(name) --apply")
+                remedy: "apply it to the skill it was drafted for: "
+                    + ShellWord.command("skillet suggest", set.skill,
+                                        options: [ShellWord.option("--proposals", name), "--apply"]))
         }
         guard !set.edits.isEmpty else {
             throw EDDError.usage(message: "\(relativeDraft) contains no edits",
                                  remedy: "draft again — there is nothing here to apply")
         }
 
-        // **The edit numbers are checked here — the first moment the valid range exists**, because the
-        // draft is what defines it. Checking it later meant an unrelated uncommitted file answered first:
-        // the same typo produced a clear "no edit 7" on a clean working copy and an unhelpful "you have
-        // uncommitted changes" otherwise, so you fixed the wrong thing and came back to the real mistake
-        // on a second run. A mistake in what you typed is reported before anything about your machine.
-        if let outOfRange = edits.first(where: { !set.edits.indices.contains($0) }) {
-            throw Self.refusalError([.unknownIndex(outOfRange, available: set.edits.count)],
-                                    draft: relativeDraft, editCount: set.edits.count)
-        }
-        // Naming the same edit twice is a slip in the command, and almost always a fumbled second
-        // number. Left unchecked it reached the overlap test, which then reported that edit 0 overlapped
-        // edit 0 — an edit cannot overlap itself — and advised applying them "one at a time with --edits",
-        // the very flag just used. Refusing costs one retype; quietly applying it once would write the
-        // file having done less than was asked, and undoing a write costs more than retyping.
-        var seenIndices = Set<Int>()
-        if let repeated = edits.first(where: { !seenIndices.insert($0).inserted }) {
-            throw EDDError.usage(
-                message: "--edits names edit \(repeated) more than once",
-                remedy: "list each edit at most once — for two edits that is `--edits 0 1`")
-        }
+        // Range, repeats, and canonical order — the one routine every command that narrows a draft
+        // calls, so a check cannot be present in one and missing in the other (see `EditSelection`).
+        let chosen = try EditSelection.resolve(edits, in: relativeDraft, count: set.edits.count,
+                                               verb: .apply)
 
         // ---- everything below is free; a preview stops before the write and nothing else ------------
         // `--dry-run` means one thing throughout this tool: do all the free work, say what would happen,
@@ -477,7 +467,7 @@ struct SuggestCommand: AsyncParsableCommand {
                 skill: skill,
                 reason: "\(ProposalDrafter.editableFileName) could not be read — \(refusal.reason)")
         }
-        let selection = edits.isEmpty ? nil : edits
+        let selection = EditSelection.planSelection(chosen, count: set.edits.count)
         let plan = EditApply.plan(set.edits, selecting: selection, in: before,
                                   editableFileName: ProposalDrafter.editableFileName)
         let placements: [EditApply.Placement]
@@ -528,7 +518,7 @@ struct SuggestCommand: AsyncParsableCommand {
                         path: relativeSkillFile,
                         applied: placements.map { $0.index }, lines: placements.map { $0.lines }),
             nextSteps: ["review the change (git diff) and commit it yourself",
-                        "then re-measure: skillet run \(skill)"]))
+                        "then re-measure: " + ShellWord.command("skillet run", skill)]))
     }
 
     /// One refusal kind is a mistake in what you asked for; the rest are the world having changed since
@@ -632,7 +622,14 @@ struct SuggestCommand: AsyncParsableCommand {
             // an unparseable reply is quoted back in the error, so it printed the first 200 bytes of
             // whatever it was aimed at. Quoting a real model reply stays: that is the model's own output
             // and it makes a failure diagnosable without paying twice.
-            switch SafeFile.readConfinedRegularText(URL(fileURLWithPath: replyFile),
+            // **A relative name means "inside the project", the same as every other file this command
+            // takes.** It used to mean "relative to wherever you happened to be standing", while the check
+            // beside it requires the file to be inside the project — so running from another folder looked
+            // somewhere else and then refused what it found there, or found nothing. The equivalent switch
+            // on the measuring command was corrected earlier; this is its twin.
+            let replyURL = replyFile.hasPrefix("/") ? URL(fileURLWithPath: replyFile)
+                                                    : projectRoot.appendingPathComponent(replyFile)
+            switch SafeFile.readConfinedRegularText(replyURL,
                                                    base: projectRoot, cap: Self.replyCap) {
             case let .success(text): return text
             case let .failure(refusal):
@@ -831,6 +828,18 @@ struct SuggestCommand: AsyncParsableCommand {
             throw EDDError.usage(
                 message: "\(flag) '\(name)' must not contain spaces",
                 remedy: "use dashes instead — a name with a space breaks the apply command printed for you to paste")
+        }
+        // **A leading hyphen breaks the same printed command, for a neighbouring reason.** A name is
+        // handed back to you inside `--proposals <name>`, and a value starting with a hyphen is taken for
+        // the next switch: measured, `--proposals -fix.json` fails with "Missing value for
+        // '--proposals'" before the command starts. Refused here rather than worked around, because this
+        // is a name the tool is being asked to create — the rule directly above refuses whitespace on the
+        // same grounds. A name that already exists on disk is a different matter and is repaired instead.
+        guard !name.hasPrefix("-") else {
+            throw EDDError.usage(
+                message: "\(flag) '\(name)' must not start with a hyphen",
+                remedy: "start the name with a letter or a digit — a leading hyphen is read as a switch, "
+                    + "so the apply command printed for you to paste would not run")
         }
         // A name that is *nothing but* the extension, or nothing but dots before it, names no file a
         // person could recognise in a folder listing. Hidden names stay allowed: an earlier round removed

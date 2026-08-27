@@ -15,6 +15,46 @@ import Glibc
 /// (F17) from `SkillBundleRules`/`WorkspaceManager`; those keep thin delegating wrappers so their
 /// callers don't churn.
 public enum SafeFile {
+    /// **Whether a name is usable as one folder or file name, and nothing more.**
+    ///
+    /// A name carrying a path separator stops being one name and becomes a route: pasted into a larger
+    /// name it can add folders, and combined with a step upwards it can leave the folder it was meant to
+    /// stay in. Measured: `a/../../b` used as part of a folder name resolves beside the machine's
+    /// temporary area rather than inside it. `.` and `..` are refused because they name a folder's self
+    /// and its parent rather than a folder; an empty name is not a name.
+    ///
+    /// **The first of two checks, never the only one.** Refusing spellings depends on having thought of
+    /// them — a lone `..` stays inside, which is what led one review to conclude escape was impossible —
+    /// so callers also confirm where the finished path landed, with ``isConfined(_:to:)``. That check does
+    /// not depend on anyone having anticipated the spelling.
+    /// A backslash is deliberately *not* refused: on the systems this runs on it is an ordinary character
+    /// in a name, not a separator, so refusing it would reject a legal folder name for no gain. Anything
+    /// that genuinely escapes is caught by ``isConfined(_:to:)`` regardless of how it was spelled.
+    public static func isSingleSafeComponent(_ name: String) -> Bool {
+        !name.isEmpty && !name.contains("/") && name != "." && name != ".."
+    }
+
+    /// Whether `url`, once resolved, still sits strictly inside `base` — the check that catches a route
+    /// out that no list of forbidden spellings anticipated.
+    ///
+    /// **The whole filesystem is a valid answer to "inside what?".** Appending a separator to the base
+    /// works for every ordinary folder and breaks for exactly one: the root of the filesystem is already
+    /// spelled `/`, so appending gives `//`, which nothing starts with — and the answer came back "outside"
+    /// for every path in existence. That failed safe rather than open, so nothing was ever let through
+    /// wrongly; it simply made this unusable for a base nobody happens to pass today. Since it is offered
+    /// for anyone to call, it should be right for any base rather than for the ones currently in use.
+    public static func isConfined(_ url: URL, to base: URL) -> Bool {
+        let path = url.standardizedFileURL.path
+        let root = base.standardizedFileURL.path
+        // **Strictly inside means not the folder itself.** Appending a separator used to enforce that on
+        // its own; with the root already ending in one, it stopped doing so and the root came back as
+        // inside itself. Said outright now, so it holds for every base rather than as a side effect of
+        // how the text happened to be joined.
+        guard path != root else { return false }
+        let boundary = root.hasSuffix("/") ? root : root + "/"
+        return path.hasPrefix(boundary)
+    }
+
     /// Whether `url` is itself a symbolic link (lstat semantics — does not follow the link).
     /// Symlinks are the escape/leak guard: staging drops them; scoring never follows them.
     public static func isSymlink(_ url: URL) -> Bool {

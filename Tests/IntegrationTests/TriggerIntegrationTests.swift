@@ -101,7 +101,10 @@ struct TriggerIntegrationTests {
         try "project:\n  skills_root: skills\n".write(to: root.appendingPathComponent("skillet.yaml"), atomically: true, encoding: .utf8)
         let dir = root.appendingPathComponent("skills/demo/evaluations", isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try "---\nname: demo\ndescription: a trigger-only demo skill\n---\nBody.\n"
+        // The declaration sits inside the fence because this measurement stages the fence and withholds
+        // the body — a line below it never reaches the offline stand-in, and the skill reaches for
+        // nothing. The one case here expects to be reached for.
+        try "---\nname: demo\ndescription: a trigger-only demo skill\nreplay-fires: true\n---\nBody.\n"
             .write(to: root.appendingPathComponent("skills/demo/SKILL.md"), atomically: true, encoding: .utf8)
         try #"[{"query":"fire","should_trigger":true}]"#
             .write(to: dir.appendingPathComponent("trigger-eval.json"), atomically: true, encoding: .utf8)

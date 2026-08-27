@@ -55,7 +55,9 @@ struct ScoreCommand: AsyncParsableCommand {
 
             // Progress note (clig.dev): a one-line status on stderr for the human table only, never when
             // piped or emitting machine output.
-            let showProgress = fmt == .tty && Console.isStdoutTTY()
+            // The note below is written to the error stream, so that is the stream that decides whether
+        // anyone will see it.
+        let showProgress = fmt == .tty && Console.isStderrTTY()
             let output = ScoreRunner(toolVersion: SkilletVersion.current).run(path: url, config: scorers) { count in
                 guard showProgress else { return }
                 let noun = count == 1 ? "file" : "files"

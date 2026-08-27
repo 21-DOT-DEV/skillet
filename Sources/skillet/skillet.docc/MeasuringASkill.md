@@ -92,6 +92,7 @@ precisely.
 | `3` | environment — Claude missing, not signed in, a refused version, or a machine problem |
 | `4` | a broken file in your project — unreadable tests, or a fixture outside the skill |
 | `5` | a gate refused — for example a request over the size ceiling without `--yes` |
+| `75` | nothing could be measured and trying again may work — attempts never got graded, and nothing that did get graded failed |
 | `70` | a defect in skillet itself, not in your input or environment |
 
 ## When something fails

@@ -110,7 +110,7 @@ struct ABBaselineRunKitTests {
         let outcome = try await Runner(adapter: ReplayAdapter(), judge: SlowThrowingJudge())
             .run(skill: SkillRef(name: "demo", path: skill.path),
                  evals: [evalCase("e", expectations: ["a"])], k: 1, injection: .ambient, base: base)
-        #expect(outcome.evals[0].trials[0].exit == .failed)                  // judge threw → ungraded
+        #expect(outcome.evals[0].trials[0].exit == .error)                  // judge threw → ungraded
         #expect((outcome.evals[0].trials[0].durationSeconds ?? 999) < 0.4)   // the 500ms judge sleep is excluded
     }
 

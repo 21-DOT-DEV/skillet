@@ -196,7 +196,12 @@ public enum EDDError: Error, Sendable, Equatable {
             "run from inside a skills repository, or initialize one with `skillet init`"
         case let .harnessNotFound(harness, reason):
             reason == nil
-                ? "install \(harness), or set its path via --harness-path, SKILLET_\(Self.envID(harness))_BIN, or harness.\(harness).path"
+                // **Only routes that exist.** This used to name `--harness-path` first — the top rung of
+                // the resolution chain in `skillet-design.md:895` — but no command declares that flag, so
+                // the first thing this suggested to someone already stuck was a way to fix it that was
+                // never built. Building it is tracked separately; until then the message names the two
+                // that work.
+                ? "install \(harness), or set its path via SKILLET_\(Self.envID(harness))_BIN or harness.\(harness).path"
                 : Self.whenTheProgramFailed(harness)
         case let .harnessBanned(harness, _):
             "pin a non-banned version, or set SKILLET_ALLOW_BANNED_\(Self.envID(harness))=1 to override deliberately"

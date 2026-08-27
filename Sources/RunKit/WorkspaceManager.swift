@@ -71,6 +71,22 @@ public struct WorkspaceManager: Sendable {
         // Confinement + no symlink anywhere in the source chain or nested inside it.
         guard source.path == base.path || source.path.hasPrefix(base.path + "/"),
               noSymlink(at: source, under: base) else { return nil }
+        // **An ordinary file or a folder, and nothing else.** A named input that is a pipe, a socket or a
+        // device is not something to hand a model, and what happens if you try depends on which
+        // implementation of the file routines the machine has: measured on this one, copying a pipe fails
+        // straight away with "operation not supported" — a message that explains nothing — and the
+        // behaviour is not guaranteed to be that elsewhere. The check that removes the guesswork already
+        // exists and is used by three other readers here, each citing the same rule about opening a file
+        // whose kind you have not established.
+        //
+        // **Absence is still allowed through.** This decides whether a path is *permitted*, not whether it
+        // is there — a missing input is the caller's to report, and requiring existence here broke three
+        // cases that legitimately resolve a path before anything has been written. So the rule is only
+        // about what is found if something is: a folder or an ordinary file passes, anything else does not.
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: source.path, isDirectory: &isDir) {
+            guard isDir.boolValue || SafeFile.isRegularFile(source) else { return nil }
+        }
         return ResolvedFixture(source: source, sandboxRelativePath: entry)
     }
 
@@ -115,6 +131,11 @@ public struct WorkspaceManager: Sendable {
                 try copyFiltered(from: src.appendingPathComponent(child), to: dst.appendingPathComponent(child))
             }
         } else {
+            // Checked here as well as where a named input is resolved, because this walks *into* folders
+            // and so meets files nobody named. Skipped the same way a link is, rather than refused: this
+            // is staging a folder's contents, and one odd entry inside it is not a reason to abandon a
+            // run. A file the caller named explicitly is a different matter and is refused there.
+            guard SafeFile.isRegularFile(src) else { return }
             try fm.copyItem(at: src, to: dst)
         }
     }
@@ -156,17 +177,37 @@ public struct WorkspaceManager: Sendable {
 
     /// Repo-relative paths of regular files present after the run — the judge's ground truth. Excludes
     /// the injected `.claude/` infrastructure (the staged skill is not something the run "produced").
-    /// Uses `subpathsOfDirectory` so paths are already root-relative (no symlink/prefix canonicalization).
-    public func listing(_ workspace: Workspace) throws -> [String] {
+    /// Paths come back already relative to the workspace, so nothing has to be trimmed or canonicalised.
+    /// **What was cut is reported, and the files the run produced are never the ones cut.**
+    ///
+    /// The grader is told this list answers whether a file exists. It stops after a fixed number of
+    /// entries, and until now said nothing when it did — so a run that installed dependencies or built
+    /// something could push the file it actually made off the end, and a check like "the run created
+    /// report.md" would be marked failed with the file sitting right there. That records a limitation of
+    /// this tool as a fault in the skill being measured, which is the one thing a measuring tool must
+    /// never do.
+    ///
+    /// Two changes. `keeping` names the files the run produced, and those are kept whatever else is
+    /// dropped, so the realistic case is correct by construction rather than by the grader being careful.
+    /// And when anything was still dropped it is said so, which is what lets the grader stop treating a
+    /// gap in the list as proof of absence.
+    /// `cap` is a parameter rather than a constant so the cut can be exercised by a test with a handful
+    /// of files instead of the fifty thousand the shipped limit would need — an untested limit is one
+    /// nobody knows the behaviour of.
+    public func listing(_ workspace: Workspace, keeping produced: [String] = [],
+                        cap: Int = WorkspaceManager.producedEntryCap) -> (files: [String], truncated: Bool) {
         let fm = FileManager.default
         let root = workspace.root
-        let all = (try? fm.subpathsOfDirectory(atPath: root.path)) ?? []
-        return all.filter { rel in
+        let walked = Self.walk(root, cap: cap)
+        let files = walked.entries.filter { rel in
             if rel == ".claude" || rel.hasPrefix(".claude/") { return false }
             var isDir: ObjCBool = false
             fm.fileExists(atPath: root.appendingPathComponent(rel).path, isDirectory: &isDir)
             return !isDir.boolValue
-        }.sorted()
+        }
+        // The produced files go in whether or not the walk reached them — they are what the checks are
+        // about, and they are already bounded by the same limit, so adding them cannot run away.
+        return (Array(Set(files).union(produced)).sorted(), walked.truncated)
     }
 
     // MARK: - Trigger-axis staging (F14)
@@ -200,7 +241,13 @@ public struct WorkspaceManager: Sendable {
     /// Create a trigger-trial sandbox: every corpus skill staged as a **frontmatter stub** under the
     /// discovery path (`.only(load: [], visible: corpus)` — §9.3's whole-corpus selection menu, D-3).
     /// No eval fixtures: a trigger case is a bare query. Unstageable siblings are skipped and named.
-    public func prepareTrigger(corpus: [SkillRef], base: URL, label: String) throws -> TriggerStaging {
+    /// `skillsRoot` is the folder every candidate skill lives under, and it is the point every path is
+    /// proved clean *from*. Without it, the read below could only refuse a shortcut — a file entry that
+    /// silently points somewhere else — at the very last step of the path, so a shortcut planted on any
+    /// folder along the way was followed and whatever it pointed at was staged and shown to the model.
+    /// That gap has a name, `CWE-59` ("link following"), and the fix it prescribes is to prove every step,
+    /// which needs a folder to start proving from — hence this argument.
+    public func prepareTrigger(corpus: [SkillRef], skillsRoot: URL, base: URL, label: String) throws -> TriggerStaging {
         let fm = FileManager.default
         let root = base.appendingPathComponent(label, isDirectory: true)
         if fm.fileExists(atPath: root.path) { try fm.removeItem(at: root) }   // no leaked state
@@ -221,7 +268,12 @@ public struct WorkspaceManager: Sendable {
                   // SKILL.md swapped for a FIFO in that window hung the old unguarded
                   // `String(contentsOf:)` mid-run (the TOCTOU variant of the F33 hang class). A
                   // refusal skips the stub exactly like a missing frontmatter fence.
-                  case let .success(markdown) = SafeFile.readPlainText(source, cap: 1 << 20),
+                  //
+                  // **Every step of the path is proved, not just the last one.** The two checks above
+                  // cover the skill's own folder and the file; the reader used here covers everything
+                  // between the skills folder and them, which is the part a once-per-run check cannot
+                  // keep true — this runs again on every attempt, and a folder can be swapped in between.
+                  case let .success(markdown) = SafeFile.readConfinedRegularText(source, base: skillsRoot, cap: 1 << 20),
                   let stub = Self.frontmatterStub(markdown: markdown) else {
                 skipped.append(skill.name)
                 continue
@@ -380,12 +432,56 @@ public struct WorkspaceManager: Sendable {
     /// non-continuation invalid byte and fails to binary.
     static func decodeText(_ data: Data, truncated: Bool) -> String? { SafeFile.decodeText(data, truncated: truncated) }
 
+    /// The most entries one attempt's folder is walked for. A model given a folder to work in can create
+    /// as many files as it likes, and listing them builds the whole list in memory before anything is
+    /// filtered — so a runaway one could exhaust memory during the very step meant to record what it did.
+    /// Every individual file was already bounded; the *number* of them was not. Far above any real run:
+    /// a skill producing more than this has gone wrong in a way worth stopping on rather than recording.
+    public static let producedEntryCap = 50_000
+
+    /// **One walk, used by everything that lists a finished workspace.** There were two, written
+    /// separately, and they drifted: one counted its entries and stopped, the other read the whole folder
+    /// into memory in a single call and never looked at the limit — while its own description said it did.
+    /// The one without the limit was the one the grading path actually used, so a run that produced tens
+    /// of thousands of files could exhaust memory during the step meant to record what it produced.
+    ///
+    /// **Shortcuts are listed, never walked into.** A shortcut is a file entry that silently points
+    /// somewhere else; the tree on the other side belongs to somebody else, and descending into one means
+    /// walking whatever is there. Confirmed by the test that a shortcut to a folder is reported and its
+    /// contents are not.
+    ///
+    /// Reports whether it stopped early, so a caller can say so rather than presenting a short list as a
+    /// complete one.
+    static func walk(_ root: URL, cap: Int) -> (entries: [String], truncated: Bool) {
+        var entries: [String] = []
+        // **A directory that cannot be read is not an empty one.** Answering "no entries, and that is the
+        // complete list" tells the grader authoritatively that nothing exists, so every check of the form
+        // "the run created X" fails — a fault in this tool recorded as a fault in the skill. Saying the
+        // list is incomplete is the honest answer and is what stops absence being read as proof.
+        guard let walker = FileManager.default.enumerator(atPath: root.path) else { return ([], true) }
+        while let next = walker.nextObject() as? String {
+            if entries.count >= cap { return (entries, true) }
+            entries.append(next)
+        }
+        return (entries, false)
+    }
+
     /// Non-`.claude` file-or-symlink entries under the workspace (dirs excluded), sorted. Symlink
     /// entries are kept (to be disclosed, never read); real directories are skipped.
+    ///
+    /// **Bounded by count as well as by size.** Stops after ``producedEntryCap`` entries rather than
+    /// building an unbounded list.
+    ///
+    /// **This one does not report what it dropped, and that is on purpose.** Its sibling above feeds the
+    /// grader's answer to "does this file exist", where a silent gap can turn a limitation of this tool
+    /// into a recorded fault in the skill; it says what it cut for that reason. This one feeds the
+    /// captured contents, where a file that is missing is simply not offered as evidence and nothing
+    /// concludes anything from its absence. The comment here used to claim the caller disclosed the cut —
+    /// no caller did.
     private func producedWalk(_ workspace: Workspace) -> [String] {
         let fm = FileManager.default
         let root = workspace.root
-        let all = (try? fm.subpathsOfDirectory(atPath: root.path)) ?? []
+        let all = Self.walk(workspace.root, cap: Self.producedEntryCap).entries
         return all.filter { rel in
             if rel == ".claude" || rel.hasPrefix(".claude/") { return false }
             let url = root.appendingPathComponent(rel)

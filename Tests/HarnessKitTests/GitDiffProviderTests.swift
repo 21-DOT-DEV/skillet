@@ -5,9 +5,16 @@ import Foundation
 @Suite("GitDiffProvider — tolerant workspace diff")
 struct GitDiffProviderTests {
     private let launcher = SubprocessLauncher()
-    private var gitPath: String? {
+    /// **Available to the test's own condition, so a missing program reports as *not run*.**
+    ///
+    /// These tests need version control installed. They used to check for it and return, and returning is
+    /// how a test reports success — so on a machine without it the run said they passed while nothing was
+    /// checked. Every comparable framework has a first-class "did not run" outcome for exactly this, and
+    /// this one spells it as a condition attached to the test; the same form is already used correctly
+    /// elsewhere here. Being a type-level value is what lets that condition see it.
+    static let gitPath: String? =
         BinaryResolver().resolve(flag: nil, envVar: "SKILLET_GIT_BIN", configPath: nil, pathName: "git")?.path
-    }
+    private var gitPath: String? { Self.gitPath }
     @discardableResult
     private func git(_ args: [String], in dir: URL) async throws -> Int32 {
         guard let g = gitPath else { return -1 }
@@ -45,9 +52,9 @@ struct GitDiffProviderTests {
         #expect(diff.isEmpty && touched.isEmpty)
     }
 
-    @Test("Includes a STAGED new file (diff HEAD), not just working-tree changes")
+    @Test("Includes a STAGED new file (diff HEAD), not just working-tree changes",
+          .enabled(if: gitPath != nil, "needs version control installed"))
     func staged() async throws {
-        guard gitPath != nil else { return }
         let dir = try await repo(); defer { try? FileManager.default.removeItem(at: dir) }
         try write(dir, "base.txt", "one\n")
         _ = try await git(["add", "."], in: dir)
@@ -59,9 +66,9 @@ struct GitDiffProviderTests {
         #expect(diff.contains("staged.txt") && diff.contains("secret-token"))
     }
 
-    @Test("Unborn branch (no HEAD): staged files come via the --cached fallback")
+    @Test("Unborn branch (no HEAD): staged files come via the --cached fallback",
+          .enabled(if: gitPath != nil, "needs version control installed"))
     func unbornBranch() async throws {
-        guard gitPath != nil else { return }
         let dir = try await repo(); defer { try? FileManager.default.removeItem(at: dir) }
         try write(dir, "first.txt", "hello\n")
         _ = try await git(["add", "first.txt"], in: dir)           // staged, but NO commit → no HEAD
@@ -70,18 +77,18 @@ struct GitDiffProviderTests {
         #expect(diff.contains("first.txt") && diff.contains("hello"))
     }
 
-    @Test("Includes untracked files")
+    @Test("Includes untracked files",
+          .enabled(if: gitPath != nil, "needs version control installed"))
     func untracked() async throws {
-        guard gitPath != nil else { return }
         let dir = try await repo(); defer { try? FileManager.default.removeItem(at: dir) }
         try write(dir, "new.txt", "brand new\n")                    // never added
         let (_, touched) = await GitDiffProvider(git: gitPath, launcher: launcher).diff(workspace: dir, excludePrefix: nil)
         #expect(touched.contains("new.txt"))
     }
 
-    @Test("excludePrefix drops the sessions-dir subtree from diff + touched")
+    @Test("excludePrefix drops the sessions-dir subtree from diff + touched",
+          .enabled(if: gitPath != nil, "needs version control installed"))
     func exclude() async throws {
-        guard gitPath != nil else { return }
         let dir = try await repo(); defer { try? FileManager.default.removeItem(at: dir) }
         try write(dir, "keep.txt", "keep\n")
         try write(dir, "evals/sessions/old.txt", "prior bundle\n")

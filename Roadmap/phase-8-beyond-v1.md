@@ -56,10 +56,28 @@ the explicit non-goals so scope stays honest.
    - Purpose & user value: Auto-apply mechanical lint fixes. Confidence: Medium —
      design §13.
 
-9. **[F60]** Real spend numbers — `Trace.usage` parsing in the claude-code adapter — FUTURE · Net-new
-   - Purpose & user value: Parse the stream's per-message usage / `total_cost_usd`
-     (discarded today) into `Trace.usage` so estimates and the spend column show
-     real numbers instead of trial-count fallbacks. Confidence: Medium — design §9.3.
+9. **[F60]** Real spend numbers — token counting in the claude-code adapter — **PARTLY DONE** 2026-08-21
+   - Purpose & user value: read the token counts the session reports, so estimates and the spend
+     column show real numbers instead of standing in for them with a count of attempts.
+     Confidence: Medium — design §9.3.
+   - **Done 2026-08-21 — the counting half.** Every reply a session reports carries what it read and
+     wrote; those lines were already being read and the counts thrown away. They are now read per kind
+     and totalled: `total_tokens` plus `input_uncached_tokens`, `input_cache_read_tokens`,
+     `input_cache_write_tokens` and `output_tokens`, written per run in the saved results file, with a
+     `total_tokens` difference between the two runs of a comparison when both counted. Absent
+     everywhere nothing counted, which replaced a made-up zero.
+     - **No field is named `input_tokens`, deliberately.** Anthropic's API uses that name for the input
+       that was *not* served from its cache; the OpenTelemetry telemetry convention uses the same name
+       for the whole input. Adding cache counts on top of a figure that already includes them roughly
+       doubles the answer — filed as Langfuse issue 12306, closed as the consumer's fault because both
+       producers were behaving as documented. Every field here says what it holds.
+     - **Only the roll-up gets a difference.** How much a model read is stable whether or not the
+       provider's cache was warm, so a difference in it is attributable to the skill. The
+       cached-versus-fresh split is not, so it is reported per run and never differenced.
+   - **Left to do — the spend half.** No money figure is published. Turning these counts into a bill
+     needs per-token-type prices: a cache read costs a fraction of fresh input and an Anthropic cache
+     write costs 1.25× or 2× it, so a single price per token would be wrong in both directions. The
+     counts are published in the shape that makes that computable by whoever has the prices.
 
 10. **[F10]** Judge↔human agreement check (CLI: `skillet calibrate`, name provisional) — FUTURE · Net-new
     - Purpose & user value: Validate the LLM judge against human judgment with a concrete,
@@ -184,6 +202,90 @@ the explicit non-goals so scope stays honest.
       rates vs the 4–8K on-device window; available OS/model-build provenance identifiers.
     - Confidence: Low until research clears — design §14-20 (decided 2026-07-07); Appendix D sources.
 
+13. **[F73]** Finish the binary-resolution chain — the missing `--harness-path` switch — FUTURE · Net-new
+    - Purpose & user value: point one run at one copy of a program without changing your environment
+      or editing a file everyone shares. The resolution order is already specified as a fixed,
+      printable chain — the switch, then `SKILLET_<ID>_BIN`, then `[harness.<id>].path`, then what is
+      on your `PATH` (`skillet-design.md:895`) — and matches the ordinary convention that an explicit
+      switch on the command line beats an environment variable, which beats a file. **Only the top of
+      that chain was never built.** The routine that resolves a program already takes the switch as its
+      first argument; all four callers pass nothing.
+    - Discovered 2026-08-18 by following the tool's own advice: the "could not find it" message named
+      the switch first, so the first fix it offered someone already stuck did not exist. The message
+      now names only the two routes that work, and a test refuses to let the name come back until the
+      switch does (`Tests/EDDCoreTests/RemedyRoutesTests.swift`).
+    - Success metrics:
+      - Every command that resolves a program accepts the switch, and it beats the environment variable.
+      - The message names all three routes again, and the test that forbids the name is retired.
+    - Dependencies: none — five call sites in the measuring, checking, drafting, recording and
+      version-control paths.
+    - Confidence: High — the behaviour is already specified; this is completing it, not designing it.
+
+14. **[F74]** Record a replay file from a live run — FUTURE · Net-new
+    - Purpose & user value: every canned-answer file in this project is written by hand, so the offline
+      tests are checked against text a person invented rather than text a model produced. A `--record`
+      switch on the measuring and proving commands would write the answers and gradings of a real run
+      into a file the offline path can replay — the ordinary "record once, replay for ever" practice for
+      software that calls a model, which keeps a fast free suite honest about real output without paying
+      for it again.
+    - Related sighting, 2026-08-22: a throwaway copy left behind by a killed process stays in the shared
+      temporary area and in version control's own list of copies, with nothing to surface it. `F76`
+      (confine short-lived working directories) covers where the copy lives; a preflight that notices
+      leftovers belongs with it.
+    - Discovered 2026-08-20, doing the first live run of the proving command. That run produced exactly
+      the artifact worth keeping — a real answer that failed a test and a real answer that passed it,
+      with the grader's own reasons — and there was no way to turn it into a fixture except by hand, so
+      it was recorded as prose in `Specs/020-prove-by-ab/plan.md` instead of as a test.
+    - Reinforced 2026-08-21, closing the routing gap in the offline answerer. Which skill a session says
+      it reached for is now stated by the skill's own file rather than baked into the answerer, so an
+      offline test asserts on something it declared. That removes a test passing on a coincidence, but it
+      cannot make the offline answer resemble a real one — the standard remedy is a check run against both
+      the stand-in and the real thing, asserting they agree, and this feature is that check's only
+      practical route.
+    - Success metrics:
+      - A live run can write a file the offline path replays, reproducing that run's verdicts exactly.
+      - At least one offline test is driven by recorded real output rather than invented text.
+      - The recorded file is scrubbed by the same path `capture` uses, so a recording never carries a
+        secret (constitution: redact before write).
+    - Dependencies: the offline answerer and grader already read exactly this shape of file; what is
+      missing is the writer.
+    - Confidence: High — the format exists and is exercised by roughly forty tests; this adds a producer
+      for it.
+
+15. **[F75]** Bring the integration test files under the 300-line cap — FUTURE · Net-new
+    - Purpose & user value: the contributor guide states a 300-line soft cap for test files, and six of
+      seven files driving the built binary exceed it — 1113, 668, 544, 537, 459 and 382 lines. A file
+      that long is read by nobody in full, so a test that has quietly stopped asserting anything is hard
+      to notice, and two tests covering the same ground even harder.
+    - Discovered 2026-08-20 while splitting the two files this feature added (D19). Those are now under
+      the cap; the rest predate it and are left, because splitting six suites is a mechanical change with
+      its own review rather than a line in someone else's feature.
+    - Success metrics:
+      - Every file under `Tests/` is at or below the cap, or carries a recorded reason for exceeding it.
+      - The test count is unchanged by the split, checked before and after.
+      - Shared setup lives in one place per command rather than on whichever suite owns it.
+    - Dependencies: none.
+    - Confidence: High — the pattern is established by D19's split (a `…Fixture` holding shared setup,
+      topic suites beside it).
+
+16. **[F76]** Confine and clean up short-lived working directories — FUTURE · Net-new
+    - Purpose & user value: two paths stage work in the machine's shared temporary area and tidy up on
+      the way out — the recording command's scoring input, and the throwaway copy the proving command
+      measures in. Killed part-way, both leave a folder behind, in a place nobody thinks to look. Moving
+      short-lived work under the project's own ignored scratch folder makes leftovers discoverable and
+      removable, and a check in the free preflight could name any it finds.
+    - Discovered 2026-08-21 in review. Neither leaks anything secret — the recording command redacts
+      before it writes, and the copy holds only committed content — so this is tidiness and
+      discoverability rather than exposure.
+    - Success metrics:
+      - Short-lived working directories live under the project's ignored scratch folder, not the shared
+        temporary area.
+      - The free preflight names leftovers from an interrupted run and says how to clear them.
+      - A copy that outlives its run is already disclosed (D14); the preflight closes the loop for one
+        that outlived the whole process.
+    - Dependencies: none.
+    - Confidence: High — both call sites are one line each; the preflight check is a new row.
+
 ## Non-Goals (explicitly out of scope)
 
 - **Description-optimizer loop** — owned by skill-creator; revisit only if that changes.
@@ -240,3 +342,11 @@ the explicit non-goals so scope stays honest.
   layer, `SKILL-S2xx`). Gives an owner to the F17 deferral of the predecessor CLI's six
   domain-specific checks, which until now was a decision no entry claimed. Output-side sibling
   of F11. Roadmap → v1.22.0.
+- 2026-08-20: MINOR — added **F74** (record a replay file from a live run). Raised by the first live
+  run of `iterate`, which produced real before/after answers worth keeping and no supported way to keep
+  them. Roadmap → v1.23.0.
+- 2026-08-20: MINOR — added **F75** (bring the integration test files under the stated 300-line cap).
+  Raised while splitting the two files F43 added; the other six predate it. Roadmap → v1.24.0.
+- 2026-08-21: MINOR — added **F76** (confine and clean up short-lived working directories). Raised in
+  review alongside F75; tidiness rather than exposure, since neither path stages anything unredacted.
+  Roadmap → v1.25.0.

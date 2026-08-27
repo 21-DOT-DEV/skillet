@@ -79,7 +79,7 @@ func loadConfigWithOrigin(options: GlobalOptions, context: ProjectContext? = nil
     // Carry the decoder's detail: it names the offending key and what was wrong with it. The bare
     // "not valid skillet.yaml" told you a file you can see is broken without saying which of its eight
     // sections broke it. Consistent with every other decode failure here, which all quote the cause.
-    catch { throw EDDError.invalidArtifact(path: resolved.errorPath, reason: "not valid skillet.yaml — \(error)") }
+    catch { throw EDDError.invalidArtifact(path: resolved.errorPath, reason: "not valid skillet.yaml — \(DecodeFailure.describe(error))") }
 }
 
 /// Value-level validation at the trust boundary (F33 security pass): every command reads config through

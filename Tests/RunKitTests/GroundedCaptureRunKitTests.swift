@@ -238,7 +238,8 @@ struct GroundedCaptureRunKitTests {
         #expect(!produced.contains { $0.content?.contains("SECRET") == true })   // and no host bytes leak
     }
 
-    @Test("A regular file that can't be opened (chmod 000) is disclosed as unreadable, never silently dropped")
+    @Test("A regular file that can't be opened (chmod 000) is disclosed as unreadable, never silently dropped",
+          .enabled(if: geteuid() != 0, "permission bits do not constrain the administrator account"))
     func unreadableFileDisclosed() throws {
         let wm = WorkspaceManager()
         let ws = try tempWorkspace(); defer { try? wm.destroy(ws) }
@@ -247,10 +248,6 @@ struct GroundedCaptureRunKitTests {
         try "cannot read me".write(to: locked, atomically: true, encoding: .utf8)
         try fm.setAttributes([.posixPermissions: 0], ofItemAtPath: locked.path)
         defer { try? fm.setAttributes([.posixPermissions: 0o644], ofItemAtPath: locked.path) }   // so teardown can remove it
-        // `chmod 000` only blocks NON-root. A root process (e.g. the Linux CI container) bypasses DAC
-        // and can still open the file, so the "unreadable" scenario isn't constructible there — skip
-        // rather than assert (same "scenario not constructible → early-out" pattern as the hardlink test).
-        guard !fm.isReadableFile(atPath: locked.path) else { return }
 
         let produced = wm.readProducedContents(ws, baseline: baseline, perFileCap: 1 << 16, totalCap: 1 << 20)
         let entry = find(produced, "locked.txt")
@@ -335,7 +332,7 @@ struct GroundedCaptureRunKitTests {
         let base = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString); defer { try? fm.removeItem(at: base) }
         let outcome = try await Runner(adapter: ParseFailingAdapter(), judge: ReplayJudge(["a": true]), evidencePolicy: .groundedDefault)
             .run(skill: ref, evals: [evalCase("e")], k: 1, injection: .only(load: [ref]), base: base)
-        #expect(outcome.evals[0].trials[0].exit == .failed)   // parse threw
+        #expect(outcome.evals[0].trials[0].exit == .error)   // parse threw
         let f = base.appendingPathComponent("eval-0/trial-0/file_contents.json")
         #expect(fm.fileExists(atPath: f.path))
         let decoded = try JSONDecoder().decode([FileContent].self, from: Data(contentsOf: f))

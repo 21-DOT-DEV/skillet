@@ -39,7 +39,7 @@ failures, never imagined ones.
    - Dependencies: proposals (F41), content-anchored `EditApply` engine.
    - Confidence: Medium — design §6.1 `suggest`, §7.3.
 
-3. **[F43]** Prove a proposal by A/B (CLI: `skillet iterate --proposals <f> --apply <indices>`) — PLANNED · Ported
+3. **[F43]** Prove a proposal by A/B (CLI: `skillet iterate <skill> --proposals <name>.json [--edits <n>...]`) — SHIPPED 2026-08-19 · Ported
    - Purpose & user value: Apply a proposal subset into a *throwaway git worktree*
      (the live skill untouched), run the pinned suite at k, and print the per-eval
      `pass^k` delta against the baseline — proving the fix before any human lands
@@ -50,11 +50,10 @@ failures, never imagined ones.
      - Any regression discards the worktree and exits `1`, emitting nothing unless `--keep-worktree`.
    - Dependencies: runner (Phase 1), proposals (F41), worktree lifecycle.
    - Confidence: Medium — design §6.1 `iterate`, §10.
-   - **Under revision (2026-08-16):** the command line and the source of the "before" number above
-     are both superseded by [Specs/020](../Specs/020-prove-by-ab/plan.md) — `--edits` replaces
-     `--apply <indices>`, and both measurements are taken fresh rather than one being read from a
-     recorded run. Neither is settled: they are staged as design §14 items 22 and 23 awaiting
-     sign-off, so this entry is left as written until then rather than pre-empting it.
+   - **Revised and shipped (2026-08-19):** the command line and the source of the "before" number
+     changed — `--edits` replaces `--apply <indices>`, and both measurements are taken in the same
+     invocation rather than one being read from a recorded run. Both were approved as design §14
+     items 22 and 23 and applied; see [Specs/020](../Specs/020-prove-by-ab/plan.md) D6 and D2.
 
 4. **[F44]** Mark evidence proven (CLI: `skillet iterate --mark`) — PLANNED · Net-new
    - Purpose & user value: On a clean, regression-free A/B, advance the linked

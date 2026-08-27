@@ -15,6 +15,7 @@ public struct Linter: Sendable {
         if enabled(Rule.descriptionLength) { checkDescriptionLength(source, into: &diagnostics) }
         if enabled(Rule.bodyBudget) { checkBodyBudget(source, config: config, into: &diagnostics) }
         if enabled(Rule.hasEvals) { checkHasEvals(source, into: &diagnostics) }
+        if enabled(Rule.nameShape) { checkNameShape(source, into: &diagnostics) }
         return diagnostics
     }
 
@@ -23,6 +24,7 @@ public struct Linter: Sendable {
         static let descriptionLength = "SKILL-L001"
         static let bodyBudget = "SKILL-L003"
         static let hasEvals = "SKILL-L009"
+        static let nameShape = "SKILL-L012"
     }
 
     // MARK: - L001 frontmatter / description length
@@ -106,6 +108,50 @@ public struct Linter: Sendable {
         let run = trimmed.prefix { $0 == first }
         guard run.count >= 3 else { return nil }
         return (first, run.count, String(trimmed.dropFirst(run.count)))
+    }
+
+    // MARK: - L012 name shape
+
+    /// **The folder a skill lives in has to be a legal skill name, and has to survive being typed.**
+    ///
+    /// The published rule for a skill's name is lowercase letters, digits and hyphens, no hyphen at
+    /// either end, no doubled hyphen, at most 64 characters — and the name must match the folder. This
+    /// checks the **folder** name, because that is the word this tool prints into the commands it tells
+    /// you to run, and because the two are allowed to disagree here today: a folder called `-demo` whose
+    /// SKILL.md declares `name: demo` passed every check while the printed command was unusable.
+    ///
+    /// **A leading hyphen is the error, the rest are warnings.** Measured: a folder named `-demo` makes
+    /// this tool print `skillet run -demo`, and running that gives *"Unknown option '-demo'"* — the word
+    /// is read as a switch rather than a name. That is a broken recommendation, not a style point. An
+    /// uppercase letter or an underscore is off-spec but harms nothing you can run, so it warns.
+    private func checkNameShape(_ source: SkillSource, into diagnostics: inout [Diagnostic]) {
+        let name = source.name
+        guard !name.isEmpty else { return }   // an unnamed folder is not something this rule can describe
+
+        if name.hasPrefix("-") {
+            diagnostics.append(Diagnostic(
+                id: Rule.nameShape, tier: .error, skill: name,
+                message: "the folder name '\(name)' starts with a hyphen, so commands naming this skill "
+                    + "are read as options rather than as a name",
+                fixHint: "rename the folder so it starts with a letter or a digit — a leading hyphen also "
+                    + "breaks the published skill-name rule"))
+        }
+        // Everything else the published rule forbids. Reported together so one rename settles all of it,
+        // rather than making you fix a name, re-run, and be told about the next fault in the same word.
+        var offSpec: [String] = []
+        if name.range(of: "^[a-z0-9-]+$", options: .regularExpression) == nil {
+            offSpec.append("may only contain lowercase letters, digits and hyphens")
+        }
+        if name.hasSuffix("-") { offSpec.append("may not end with a hyphen") }
+        if name.contains("--") { offSpec.append("may not contain two hyphens in a row") }
+        if name.count > 64 { offSpec.append("is \(name.count) characters, over the 64-character limit") }
+        if !offSpec.isEmpty {
+            diagnostics.append(Diagnostic(
+                id: Rule.nameShape, tier: .warn, skill: name,
+                message: "the folder name '\(name)' \(offSpec.joined(separator: "; and "))",
+                fixHint: "rename the folder to lowercase words joined by single hyphens, e.g. "
+                    + "review-pull-request — a skill's name must match its folder"))
+        }
     }
 
     // MARK: - L009 has-evals

@@ -228,12 +228,21 @@ standard environment: `NO_COLOR`/`TERM` (color), `EDITOR` (`friction add`), `PAG
 
 | Code | Meaning |
 |---|---|
-| `0` | Success; everything measured passed |
+| `0` | Success; everything measured passed. **`iterate` is narrower:** it leaves `0` when no test scored *lower*, which can include a skill whose tests were already failing — see §6.1 |
 | `1` | Measured failure: eval failures, trigger misfires, `iterate` regression |
 | `2` | Usage error (bad flags/arguments) |
 | `3` | Environment error: harness missing, auth failure, `doctor` failure |
 | `4` | Artifact error: corrupt/invalid file against its schema |
-| `5` | Gate violation under `--strict` |
+| `5` | A safety check refused and nothing was done — a dirty repository, an edit that no longer matches, the drafting size ceiling, or a declined cost confirmation |
+*Cost figures carry a third state (2026-08-25).* A reply that reports what it cost in a form that cannot
+be used — a field missing, a figure below none — has the whole session's counts discarded, so a part-read
+total never enters a record. That used to be indistinguishable from a session that reported nothing at all:
+both came out as no figures. The diagnostic trace now states which (`usage_state`: `counted` / `absent` /
+`unreadable`, additive to `skillet.trace/1`), the attempt record carries it, `skillet.run/1` gains an
+additive `cost_unreadable` count, and `run` says so on screen. It is **not** a failure and does not change
+the exit number — the measurements themselves are unaffected; only the cost record is.
+
+| `75` | Nothing could be measured and trying again may work — attempts were never graded (a grader error, a rate limit, a dropped connection, a workspace that could not be prepared) and nothing that *was* graded failed. Deliberately not `3`: that means something is set up wrongly and a retry never fixes it, whereas this usually clears. `sysexits`' "temporary failure"; continuous-integration systems can be told to retry on a specific exit number, which is what makes the distinction useful |
 
 > **`run`'s free lint gate → exit 2.** Because `run` is free-before-paid (constitution V), it runs the
 > shipped error-tier lint (`L001`/`L003`) *before* any spend/probe; an error-tier finding is a
@@ -265,7 +274,7 @@ through `$PAGER` (default `less -FIRX`) only on a TTY.
 
 ### 6.1 Porcelain — the loop
 
-The ten loop verbs map one-to-one onto the methodology spine — six ship today, four are marked `(planned)` and are not yet registered (Discover → Codify → Measure → Interpret → Suggest → Apply → Re-measure) plus its free static gate, named for what the *user* is doing, not for the spine's internals.
+The ten loop verbs map one-to-one onto the methodology spine — seven ship today, three are marked `(planned)` and are not yet registered (Discover → Codify → Measure → Interpret → Suggest → Apply → Re-measure) plus its free static gate, named for what the *user* is doing, not for the spine's internals.
 
 ```
 skillet init        # adopt skillet in a repo
@@ -276,7 +285,7 @@ skillet friction    # (planned) discover: log/inspect human-observed friction
 skillet triage      # interpret: mine the corpus into routed findings
 skillet suggest     # suggest: draft edit proposals from evidence — machine drafts, human reviews
 skillet next        # (planned) the prioritized, gate-aware worklist
-skillet iterate     # (planned) apply (safely): A/B a proposal in a throwaway worktree
+skillet iterate     # prove (safely): measure a proposal before and after, in a throwaway worktree
 skillet report      # (planned) render results for humans (TTY or HTML)
 ```
 
@@ -323,7 +332,7 @@ skillet lint [<skill>...] [--format tty|json|sarif]
 
 Free, instant, no model: static analysis of the skill *source* — `SKILL.md`, frontmatter, `references/` wiring — treated the way SwiftLint/clippy/shellcheck treat code. Stable diagnostic ids (`SKILL-Lxxx`, continuing the existing catalog) with tiers and fix-hints; SARIF output for editors and CI; **exit `1` on any error-tier finding**. Exemptions live in the `[lint]` knob tables — config, never inline pragmas — so suppressions are reviewable in one place.
 
-The shipped catalog (ported; 5 of a planned 12):
+The catalog (4 implemented of a planned 12; `SKILL-L010` and `SKILL-L011` are specified here but not yet in `Linter`):
 
 | ID | Checks | Tier |
 |---|---|---|
@@ -332,6 +341,9 @@ The shipped catalog (ported; 5 of a planned 12):
 | `SKILL-L009` has-evals | `evals.json` exists with ≥3 cases | error/warn |
 | `SKILL-L010` has-trigger-evals | `trigger-eval.json` with ≥3 should-trigger **and** ≥3 should-not | warn |
 | `SKILL-L011` cross-skill-refusal-contract | required headings present (silent unless siblings exist) | warn |
+| `SKILL-L012` skill-name-shape | the skill's **folder** name is a legal skill name: lowercase letters/digits/hyphens, no leading or trailing hyphen, no doubled hyphen, ≤64 chars | error (leading hyphen) / warn |
+
+`SKILL-L012` checks the folder name because that is the word printed into the commands this tool tells you to run, and because the folder and the declared `name` may still disagree — a folder called `-demo` declaring `name: demo` passed every check while `skillet run -demo` failed with *"Unknown option"*. A leading hyphen is error-tier because it breaks a command you were told to run; the rest warn because they are off-spec without breaking anything.
 
 Roadmap rules, framed as *additions* (not existing behavior): name↔directory match, reserved `anthropic-*`/`claude-*` prefixes, third-person what+when description voice, all-caps ALWAYS/NEVER density, reference-extraction candidates, dead reference links.
 
@@ -510,7 +522,7 @@ repeated evidence flag.
 
 The Suggest step — northstar gap #2 made executable. In: the failure taxonomy, the SKILL.md passages cited by failing `expected_behavior` lines, and corrective-turn excerpts from the linked sessions. The Judge is asked for *minimal surgical* edits and emits `EditProposal` objects — `skill_md_lines`, `rationale`, `current_excerpt`, `proposed_text`, `addresses` — to `.skillet/proposals/` (or `--out`). The Proposal (§7.3) is the **output of `suggest`** and the **input of `iterate`**. Nothing is applied by default.
 
-**The `--apply` convention (safe by default).** One verb across `suggest` and `iterate` — *"materialize the proposal(s) into a tree"* — with the target set by the command and the default always off: `suggest --apply [--edits <n>...]` writes the selected proposals into your **working tree** through the content-anchored `EditApply` engine (exact-once anchor match, refuse-on-ambiguity, fail-loud on drift), refusing a dirty tree and **never committing**; `iterate --apply <indices>` materializes them into the **throwaway worktree** for measurement. One concept, different tree — a `plan`/`apply`-style safety default. This is the deliberate P5 amendment (v0.2), not a silent port: the default path still only emits proposals, and `--apply` automates exactly the apply step Appendix A previously told the human to run by hand, still stopping short of the commit.
+**The `--apply` convention (safe by default).** One verb across `suggest` and `iterate` — *"materialize the proposal(s) into a tree"* — with the target set by the command and the default always off: `suggest --apply [--edits <n>...]` writes the selected proposals into your **working tree** through the content-anchored `EditApply` engine (exact-once anchor match, refuse-on-ambiguity, fail-loud on drift), refusing a dirty tree and **never committing**; `iterate --edits <n>...` materializes them into the **throwaway worktree** for measurement — no `--apply` there, because putting the edits into that copy is the command's whole job and there is no mode that skips it (§14-22, approved 2026-08-19). One concept, different tree — a `plan`/`apply`-style safety default. This is the deliberate P5 amendment (v0.2), not a silent port: the default path still only emits proposals, and `--apply` automates exactly the apply step Appendix A previously told the human to run by hand, still stopping short of the commit.
 
 Drafting carries the improvement principles as standing judge instructions — generalize from feedback rather than adding fiddly MUSTs, prefer deleting prose that isn't pulling weight, prefer extraction to `references/` over inline growth, explain the why — under the codify-what-you-discover constraint: `suggest` only drafts against *observed* evidence, never imagined failures. Each proposal records its `motivation` evidence ids, so a proven iterate can advance exactly the evidence that motivated it.
 
@@ -551,27 +563,42 @@ Every line carries the *reason* (which gate, what's missing) and the *exact comm
 #### `skillet iterate`
 
 ```
-skillet iterate <skill> --proposals <file|->
-            [--apply <indices>...] [--runs <k>] [--eval <id>...] [--keep-worktree]
+skillet iterate <skill> --proposals <name>.json [--edits <n>...] [--runs <k>] [--judge <id>]
+            [-n|--dry-run] [--yes] [--no-input] [--keep-worktree] [--json]
 ```
 
-The safe Apply + Re-measure. Reads a *batch* of reviewed proposals (§7.3), materializes the selected subset (`--apply 0 2`; default all) into a **throwaway git worktree** via the content-anchored `EditApply` — the live skill untouched — runs the pinned suite at k, and prints the per-eval pass^k delta (at *observed* k) against the most recent recorded baseline (running one first if none exists):
+Planned, not yet accepted: `--mark`, `--eval`.
+
+`--mark` would advance the linked evidence to `proven` (`F44`, below); `--eval` would narrow which tests
+run, which is the sanctioned way to make this cheaper but narrows what the regression check can see, so
+it needs its own decision. Until they land, the command proves every test and writes no project state.
+
+The safe Apply + Re-measure. Reads a *batch* of reviewed proposals (§7.3), materializes the selected subset (`--edits 0 2`; default all) into a **throwaway git worktree** via the content-anchored `EditApply` — the live skill untouched — runs the pinned suite at k, and prints the per-eval pass^k delta (at *observed* k) against the **unedited skill, measured in the same invocation** — never a stored earlier run, which would differ by more than the edit:
 
 ```
-proposals: fix-density.json — applying [0] of 1  (extract refusal prose to references/, -86 lines)
+iterate — docc-articles
+  draft            fix-density.json
+  edits            0
 
-                               before   after    Δ
-  snippets-compile             3/3      3/3      —
-  cross-skill-refusal          3/3      3/3      —
-  rule-of-three-density        2/3      3/3      ▲ fixed
-  …
-aggregate pass^k               0.88     0.94     ▲   (observed k=3, no contradictions)
+  EVAL                      BEFORE   AFTER    Δ
+  snippets-compile          3/3      3/3      —
+  cross-skill-refusal       3/3      3/3      —
+  rule-of-three-density     2/3      3/3      +0.33 ▲
 
-no regressions · proposal set proven
-→ land it:  skillet suggest docc-articles --proposals fix-density.json --apply --edits 0   (writes your working tree; you commit)
+  average change   +0.11 ± 0.11  (observed k=3)
+  verdict          no test scored lower — provisional until the grader is checked against a person
+→ land it: skillet suggest docc-articles --proposals fix-density.json --apply
 ```
 
-Any regression ⇒ worktree discarded, exit `1`, nothing emitted unless `--keep-worktree` for forensics. `skillet` never applies to the live tree from `iterate` and never commits (P5). On success it can, with `--mark`, advance the linked friction event to `proven` — an explicit, auditable state write whose verdict is **provisional until judge calibration clears** (no unresolved scorer↔judge contradiction on the affected evals, §8). For a `skill_md` edit this also honors the **held-out proof** gate (§8): a sibling eval in the same failure class — *not* the one the edit was drafted from — must pass too, so the proof reflects a generalizing fix rather than an overfit; with no sibling available the mark records `single-eval` and `next` advises authoring one.
+**Every row shows both measurements**, so a reader sees what still fails instead of trusting a summary.
+The error bar is **absent rather than invented** below two comparable evals, and a drop small enough to
+be run-to-run variation is marked `(varies between runs)` — disclosed, never used to excuse it. The
+verdict is labelled **provisional** in every rendering, human and `--json` alike, because how often the
+automatic grader agrees with a person is not measured until `F10` ships.
+
+Any regression ⇒ exit `1` and the worktree is discarded (kept only under `--keep-worktree`, for forensics) — **the table is still printed**, because a reader needs to see which eval dropped and by how much; what is withheld on a regression is the `→ land it:` line. The verdict is **strict**: any eval scoring lower blocks, even one small enough to be run-to-run variation. `skillet` never applies to the live tree from `iterate` and never commits (P5).
+
+**(planned)** On success it will, with `--mark`, advance the linked friction event to `proven` (`F44`) — an explicit, auditable state write whose verdict is **provisional until judge calibration clears** (no unresolved scorer↔judge contradiction on the affected evals, §8). For a `skill_md` edit that mark will also honor the **held-out proof** gate (`F45`, §8): a sibling eval in the same failure class — *not* the one the edit was drafted from — must pass too, so the proof reflects a generalizing fix rather than an overfit; with no sibling available the mark records `single-eval` and `next` advises authoring one. Neither ships today: the command as built proves and reports, and writes no project state at all.
 
 The fix-and-prove loop ties `suggest` and `iterate` together — the machine drafts and proves, you review and commit; a regression sends you back to redraft, never to the live tree:
 
@@ -579,7 +606,7 @@ The fix-and-prove loop ties `suggest` and `iterate` together — the machine dra
 flowchart LR
     S["skillet suggest<br/>draft EditProposals from evidence"]
     R["you review the proposals"]
-    I["skillet iterate --apply<br/>A/B in a throwaway worktree, at k"]
+    I["skillet iterate<br/>A/B in a throwaway worktree, at k"]
     Q{"pass^k delta:<br/>no regression?"}
     L["skillet suggest --apply<br/>writes working tree — you commit"]
 
@@ -653,7 +680,7 @@ repo/
 │   │       ├── trace.json            # normalized (skillet.trace/1)
 │   │       ├── verdicts.json         # judge output + judge_id + judge_prompt_version
 │   │       ├── output.sarif          # deterministic scorers
-│   │       └── metadata.json         # timing, usage, retries, exit class (passed|failed|infra|timeout)
+│   │       └── metadata.json         # timing, usage, retries, exit class (passed|failed|timeout|polluted|error)
 │   ├── proposals/*.json              # suggest drafts: content-anchored EditProposal sets
 │   └── index.sqlite                  # derived accelerator only — delete freely
 └── skills/<skill>/
@@ -680,7 +707,18 @@ The committed `evaluations/` tree is the database (P2). `.skillet/` is an accele
 |---|---|---|
 | `evals.json` — canonical **2.0 object** `{skill_name, evals:[{id, prompt, files?[], expectations[]}]}`; the legacy bare array `[{skills, query, files[], expected_behavior[], timeout_seconds?}]` (+ local field aliases) accepted on read | skill-creator's Python tooling; de-facto standard | Read/write as-is — both container shapes round-trip faithfully (no shape coercion on re-emit). New optional fields only ever *additive* |
 | `trigger-eval.json` — `{query, should_trigger}` pairs | skill-creator's optimizer | Same |
-| `benchmark.json` | The Python eval-viewer reads exact field names | Opaque contract: `skillet` writes byte-level-compatible structure, verified by golden files. `runs[]` are **per-trial, viewer-shaped** (`configuration:"default"` arm label — *not* an object; `run_number`; that trial's `expectations[]`; a `result` whose `passed`/`total`/`pass_rate` count **expectations graded in that trial**, never overloaded with trial counts). skillet's `pass^k` lives in the **additive `consistency` block** (`per_eval[].{eval_id,runs,perfect_passes,pass_power_k,flaky,mean_pass_rate}` + `suite_pass_power_k` + `suite_pass_1` (§14-11) + `meaningful`) — the real skill-creator shape — and that block, not the viewer's `result`, is the **offline recompute source** (P2/D3). Additive: `executor_binary_version` joins `model`/`judge_prompt_version`, so a cross-run pass-rate delta is attributable to a harness change vs a skill change |
+| `benchmark.json` | The Python eval-viewer reads exact field names | Opaque contract: `skillet` writes byte-level-compatible structure, verified by golden files. `runs[]` are **per-trial, viewer-shaped** (`configuration:"default"` arm label — *not* an object; `run_number`; that trial's `expectations[]`; a `result` whose `passed`/`total`/`pass_rate` count **expectations graded in that trial**, never overloaded with trial counts). **Two blocks, two questions — stated because the file does not say so itself.** The viewer-shaped
+`runs[]` above answer *what happened on each attempt*, and store a `result` of zeros for an attempt that
+produced no verdicts at all (a timeout, or one that never got graded) — a shape the external viewer
+requires and which must not change. The `consistency` block below answers *what was measured*, and
+withholds its figures entirely for the same attempt rather than writing zeros. A reader comparing the two
+will see a zero in one and nothing in the other for the same attempt; that is intended, not a
+contradiction. The same split governs the per-arm blocks: `pass_rate` counts only attempts that were
+graded, while `time_seconds` and `tokens` count every attempt that reported them — because an attempt that
+broke down partway still took time and still cost money, and the token figure is the record of what was
+spent. So the three signed differences in `delta` are **not over one population**: the pass-rate
+difference is over graded attempts, the time and token differences over attempts that reported a value.
+skillet's `pass^k` lives in the **additive `consistency` block** (`per_eval[].{eval_id,runs,perfect_passes,pass_power_k,flaky,mean_pass_rate}` + `suite_pass_power_k` + `suite_pass_1` (§14-11) + `meaningful`) — the real skill-creator shape — and that block, not the viewer's `result`, is the **offline recompute source** (P2/D3). Additive: `executor_binary_version` joins `model`/`judge_prompt_version`, so a cross-run pass-rate delta is attributable to a harness change vs a skill change |
 | `*.audit-baseline.sarif` (producer) **and** `*.audit-input.sarif` (consumer) | SARIF 2.1.0 consumers; the audit→articles handoff; the `baseline` drift engine reads the producer side | Real standard; scorers emit valid 2.1.0. Capture renames by role (§6.1); `bundle verify` enforces directionality. The `fixtures verify` invariant (`expected ⊆ actual` + `allowedExtraRuleIds`) is defined over these |
 | Session bundles + `session-meta.json` — `{id, skill, skill_version, model, harness, captured_at, schema_version, sanitization?}` | Existing corpus | **Append-only**: never rename/remove/retype anything; new *files* in the bundle (e.g. `*.trace.json`) are permitted; field additions bump `schema_version`. `"unknown"` is a defined sentinel (counted separately, never poisons diversity readings) |
 
@@ -1020,11 +1058,11 @@ sequenceDiagram
 
 **Trial isolation.** Every trial gets a fresh `Workspace`: fixtures and `files[]` staged in, harness runs, diff captured, sandbox destroyed. No trial sees another's residue; `--keep-worktree`/`--keep-workspace` exist for forensics.
 
-**pass^k, precisely.** Per eval per harness: an eval is **PASS** ⇔ *all its own recorded trials* pass every criterion — evaluated on that eval's recorded set, **not** truncated to observed k. The **aggregate** pass^k is the fraction of evals PASS, reported at the run-level **observed k** — `min(runs)` actually recorded across evals — which diverges from requested k (`--runs`) whenever trials are lost, aborted, or infra-retried (the common case). Consistency is only *meaningful* at observed k ≥ 2; below that, the aggregator reports "variance unmeasurable" rather than a number, and it always re-derives offline from the committed `evaluations/benchmark.json` (reading the additive **`consistency` block** — `per_eval[].{perfect_passes,runs}`, §7.2 — never the viewer's per-run `result`), *not* the gitignored `.skillet/` cache — so the pass^k baseline survives process restarts and a cache wipe (P2/D3). The whole computation is **pure in `EDDCore`** (`PassK`/`RunReport` = `skillet.run/1`). The report also carries **`pass_1`** — the mean per-eval trial pass rate, τ-bench's headline metric (§14-11, adopted) — as the *comparability* companion: well-defined even at k = 1, and a documented reminder that the strict all-trials `pass^k` above is deliberately *conservative* relative to τ-bench's unbiased `E[C(c,k)/C(n,k)]` estimator under mixed recorded counts; `pass^k` remains the reliability gate. Any eval with `0 < passes < recorded` on its own recorded trials is *flaky* and is reported as a hygiene item before any delta is trusted (§8); pass-rate trust is additionally conditioned on zero unresolved scorer↔judge contradictions. `report` shows variance across historical runs so "did it really improve" has an answer beyond one number.
+**pass^k, precisely.** Per eval per harness: an eval is **PASS** ⇔ *all its own recorded trials* pass every criterion — evaluated on that eval's recorded set, **not** truncated to observed k. The **aggregate** pass^k is the fraction of evals PASS, reported at the run-level **observed k** — `min(runs)` actually recorded across evals — which diverges from requested k (`--runs`) whenever trials are lost, aborted, or infra-retried (the common case). Consistency is only *meaningful* at observed k ≥ 2; below that, the aggregator reports "variance unmeasurable" rather than a number, and it always re-derives offline from the committed `evaluations/benchmark.json` (reading the additive **`consistency` block** — `per_eval[].{perfect_passes,runs}`, §7.2 — never the viewer's per-run `result`), *not* the gitignored `.skillet/` cache — so the pass^k baseline survives process restarts and a cache wipe (P2/D3). The whole computation is **pure in `EDDCore`** (`PassK`/`RunReport` = `skillet.run/1`). The report also carries **`pass_1`** — the mean per-eval trial pass rate, τ-bench's headline metric (§14-11, adopted) — as the *comparability* companion — accompanied since 2026-08-24 by the additive **`pass_1_evals`**, the number of evals that figure actually averages, because evals with nothing measured are now excluded from it rather than scored zero, and a mean over a quietly smaller basis is the defect that change was making visible (§14-23). `skillet.run/1` also gains the additive **`ungraded`**: how many attempts produced no result at all, which is what explains a score resting on fewer attempts than were requested. `pass_1` is well-defined even at k = 1, and a documented reminder that the strict all-trials `pass^k` above is deliberately *conservative* relative to τ-bench's unbiased `E[C(c,k)/C(n,k)]` estimator under mixed recorded counts; `pass^k` remains the reliability gate. Any eval with `0 < passes < recorded` on its own recorded trials is *flaky* and is reported as a hygiene item before any delta is trusted (§8); pass-rate trust is additionally conditioned on zero unresolved scorer↔judge contradictions. `report` shows variance across historical runs so "did it really improve" has an answer beyond one number.
 
 **Concurrency & cost.** Shipped `concurrency = 1` because the binding constraint is **host memory, not rate limits**: each harness subprocess is memory-heavy (hundreds of MB resident), the *judge* subprocess competes for the same budget, and a second in-flight task can OOM-kill the judge (exit 137 = SIGKILL by the OOM killer), holing the run with ungradeable trials. Concurrency is bounded by available memory rather than a magic integer — the scheduler should be memory-aware, the judge counts against the executor budget, and `--matrix` multiplies all of it. Rate limits and workspace I/O are secondary. Plans always print trial counts; estimates use adapter-reported usage when available and fall back to trial counts otherwise (§9.3). `confirm_above_trials` guards the wallet on TTY; `--yes` is the script contract (P9).
 
-**The scheduler (RunKit).** Between pure `EDDCore` and one-process `HarnessKit` sits the orchestrator: it expands the plan (evals × k × harnesses × arms) and executes it under the concurrency cap. **F7 ships the basic watchdog** — one hard per-trial `timeout` (config `runs.timeout`), enforced at the `ProcessLauncher` via a task-group race that kills the child on expiry → a `timeout` exit class; the workspace is destroyed either way. **Phase 2 (F18)** layers on the rest: graceful SIGTERM-with-10s-grace-then-SIGKILL escalation, per-eval `timeout_seconds` overrides (§7.2), retry policy, and concurrency > 1 (memory-aware). Retry policy is then skillet's own discipline — deliberately stricter than stock flaky-test tooling, which re-runs *any* failure (and stricter than anything Google's flaky-test posts prescribe; they urge surfacing over suppression, not a retry taxonomy): only *infrastructure* failures are retried — defined as **no-terminal-event** failures (the stream died without a result event: harness crash, auth/network drop, OOM) as distinct from contract failures — up to `infra_retries`, with every retry stamped into trial metadata; a judged FAIL is never retried, because retrying assertions manufactures green. The flip side holds too: an *un*-retried socket drop manufactures false flakiness, polluting the §8 hygiene gate. Trial **exit class** is first-class in run records so aggregation can always tell measurement from noise — `passed | failed | timeout` in F7, with the `infra` class arriving alongside infra-retry in F18.
+**The scheduler (RunKit).** Between pure `EDDCore` and one-process `HarnessKit` sits the orchestrator: it expands the plan (evals × k × harnesses × arms) and executes it under the concurrency cap. **F7 ships the basic watchdog** — one hard per-trial `timeout` (config `runs.timeout`), enforced at the `ProcessLauncher` via a task-group race that kills the child on expiry → a `timeout` exit class; the workspace is destroyed either way. **Phase 2 (F18)** layers on the rest: graceful SIGTERM-with-10s-grace-then-SIGKILL escalation, per-eval `timeout_seconds` overrides (§7.2), retry policy, and concurrency > 1 (memory-aware). Retry policy is then skillet's own discipline — deliberately stricter than stock flaky-test tooling, which re-runs *any* failure (and stricter than anything Google's flaky-test posts prescribe; they urge surfacing over suppression, not a retry taxonomy): only *infrastructure* failures are retried — defined as **no-terminal-event** failures (the stream died without a result event: harness crash, auth/network drop, OOM) as distinct from contract failures — up to `infra_retries`, with every retry stamped into trial metadata; a judged FAIL is never retried, because retrying assertions manufactures green. The flip side holds too: an *un*-retried socket drop manufactures false flakiness, polluting the §8 hygiene gate. Trial **exit class** is first-class in run records so aggregation can always tell measurement from noise — `passed | failed | timeout` in F7, `polluted` in F15, and `error` since 2026-08-24 (§14-23). `error` means *nothing was ever graded* — a grader error, a rate limit, a dropped connection, or a workspace that could not be prepared — so it never counts toward a score and `run` leaves `75` when nothing that *was* graded failed. It is deliberately **not** called `infra`, the name this paragraph previously promised for F18: that name asserts a cause the tool cannot establish, whereas the line actually drawn is the one every major test runner draws — a check that ran and came out negative is a failure, anything that stopped the check running is not. What remains with F18 is the *retry policy* (which errors are worth re-running), which does need a classifier and the data this now collects.
 
 **Env hygiene.** Each adapter declares an environment contract for its subprocess — variables stripped for clean nesting (claude-code strips `CLAUDECODE` so an agent-launched `skillet` doesn't confuse the child harness), variables required, variables passed through. Part of the adapter protocol, not ad-hoc — realized as the explicit environment handed to `swift-subprocess` (§11).
 
@@ -1120,7 +1158,7 @@ skillet (executable) → { IterateKit, AnalysisKit, RunKit, SanitizerKit, Render
 
 **Dependency policy.** `swift-argument-parser`, `swift-yaml` (the 21-DOT-DEV YAML 1.2 parser/emitter for config and evidence frontmatter — it **replaces Yams**, and because config is now YAML there is **no TOML dependency**), `swift-subprocess` (the swiftlang async/await process API; see below), and the standard library; JSON, SARIF, and the frozen boundary formats use Foundation `Codable`, adding no dependency. `swift-yaml` vendors `yaml-cpp` and builds it natively via SwiftPM (no system dependencies, no unsafe flags). All shelling-out is confined to the effectful layers — `EDDCore` spawns nothing — and goes through **`swift-subprocess`**, the *single* sanctioned way to launch a process (no `Foundation.Process`, no raw `posix_spawn`): harness CLIs, the judge, `git` (worktree/status; no libgit2 binding), and the **resolved** secret scanner (`betterleaks`, §6.1 — resolved at runtime from flag/env/config/`PATH`, *not* a SwiftPM binary target; per-platform `.artifactbundle` vendoring deferred, §12 / constitution v1.3.0) all run through it, each adapter's environment contract (§10) supplied as the subprocess's explicit environment and the per-trial watchdog (SIGTERM → grace → SIGKILL, §10) mapped onto its graceful→forceful teardown. SQLite via the system library for the cache only.
 
-Two implementation notes refine this policy. (1) `swift-yaml` has **no tagged release** (pinned by revision), and its `YAML` product **requires C++ interop**, which is **viral to direct importers**; it is confined to the isolated **`ConfigYAML`** target (`.interoperabilityMode(.Cxx)`), which exposes a pure-Swift API decoding into `EDDCore.SkilletConfig` — landed in F6. The pure core (`EDDCore`) and every kit stay free of C++-interop mode by consuming a decoded `SkilletConfig` rather than importing `ConfigYAML`; the F6 interop spike confirmed the one unavoidable consequence — the `skillet` executable, a direct importer, is a `.Cxx` leaf (the kits/core are unaffected). (2) `swift-system` (`FilePath`) rides in transitively via `swift-subprocess`, which is now a shipped dependency used by **`HarnessKit`** (the `ProcessLauncher` seam) as well as the `IntegrationTests` harness; both were already sanctioned, so no amendment is needed. Known-good pins at time of writing: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system` 1.5.0, `swift-yaml` rev `048f714f…`. The direct `swift-system` declaration and its exact pin are **deliberate and kept** — Linux needs the `SystemPackage` product (no SDK `System` module there) and the pin guards the graph against floating to an untested release; removal is a decided deferral behind the SE-0529 stdlib-`FilePath` triggers (§14-12).
+Two implementation notes refine this policy. (1) `swift-yaml` has **no tagged release** (pinned by revision), and its `YAML` product **requires C++ interop**, which is **viral to direct importers**; it is confined to the isolated **`ConfigYAML`** target (`.interoperabilityMode(.Cxx)`), which exposes a pure-Swift API decoding into `EDDCore.SkilletConfig` — landed in F6. The pure core (`EDDCore`) and every kit stay free of C++-interop mode by consuming a decoded `SkilletConfig` rather than importing `ConfigYAML`; the F6 interop spike confirmed the one unavoidable consequence — the `skillet` executable, a direct importer, is a `.Cxx` leaf (the kits/core are unaffected). (2) `swift-system` (`FilePath`) rides in transitively via `swift-subprocess`, which is now a shipped dependency used by **`HarnessKit`** (the `ProcessLauncher` seam) as well as the `IntegrationTests` harness; both were already sanctioned, so no amendment is needed. Known-good pins at time of writing: `swift-argument-parser` 1.6.2, `swift-subprocess` 0.2.1, `swift-system` 1.5.0, `swift-yaml` rev `473252b0…`. The direct `swift-system` declaration and its exact pin are **deliberate and kept** — Linux needs the `SystemPackage` product (no SDK `System` module there) and the pin guards the graph against floating to an untested release; removal is a decided deferral behind the SE-0529 stdlib-`FilePath` triggers (§14-12).
 
 ---
 
@@ -1148,7 +1186,7 @@ Two implementation notes refine this policy. (1) `swift-yaml` has **no tagged re
 
 | Ships in v1 | v1.x | Later / explicitly out |
 |---|---|---|
-| `init`, `doctor`, `lint` (5-rule SKILL-Lxxx catalog), `run` (both axes, `--ab`, matrix), `capture` (claude-code, incl. `--from-checkpoint`/`--preserve-feedback`), `friction` suite, `triage` Track A + contradictions-first, `baseline compare\|matrix`, `suggest` (+`--apply`), `next` (+`--strict`), `iterate` (batch `--apply`), `report` (TTY + HTML, offline re-aggregate), `migrate friction\|knobs`, `fixtures verify`, `grade --run` re-grade, `bundle list\|stats\|backfill` (trace + meta), `hooks install`, harness ban policy + `which --search`, all §6.2 plumbing, **deterministic process assertions over the `Trace`** (F61, §14-9), **scored diagnostic dimensions** (F62, §14-13), **trigger-corpus paraphrase expansion** (F63, §14-15) | `triage --code-feedback` (Track B axial coding), the diff-revert corrective-turn detector, `codex` adapter, `opencode` sessionCapture, fixtures scaffolding (`eval new --fixture`), the 7 roadmap lint rules, skill-security lint rules, skill-bundle integrity lint rules, variance dashboards, `lint --fix`, the **F18 watchdog escalation** (SIGTERM→grace→SIGKILL, per-eval `timeout_seconds`, infra-vs-contract retry / `infra_retries` + the `infra` exit class, flaky-hygiene gating) and **concurrency > 1** (memory-aware — `run` ships the basic per-trial `timeout` + serial `concurrency: 1`), `Trace.usage` parsing in `ClaudeCodeAdapter` (until then: trial-count estimates) | Description-optimizer loop (skill-creator owns it; revisit), watch mode, GitHub Action wrapper, TUI, any auto-commit ever, **a public Swift library / test-trait surface** (§14-18, declined). Phase 8 additions from the July-2026 rounds: the **diagnostic model tier** + Apple FM/PCC provider (F67/F68 — macOS on-device default; PCC never defaults), the general synthetic generator (F64), the aggregation catalog (F65), the integration recipe (F66), the judge↔human agreement check (F10) |
+| `init`, `doctor`, `lint` (4-rule SKILL-Lxxx catalog: `L001`, `L003`, `L009`, `L012`), `run` (both axes, `--ab`, matrix), `capture` (claude-code, incl. `--from-checkpoint`/`--preserve-feedback`), `friction` suite, `triage` Track A + contradictions-first, `baseline compare\|matrix`, `suggest` (+`--apply`), `next` (+`--strict`), `iterate` (`--edits`), `report` (TTY + HTML, offline re-aggregate), `migrate friction\|knobs`, `fixtures verify`, `grade --run` re-grade, `bundle list\|stats\|backfill` (trace + meta), `hooks install`, harness ban policy + `which --search`, all §6.2 plumbing, **deterministic process assertions over the `Trace`** (F61, §14-9), **scored diagnostic dimensions** (F62, §14-13), **trigger-corpus paraphrase expansion** (F63, §14-15) | `triage --code-feedback` (Track B axial coding), the diff-revert corrective-turn detector, `codex` adapter, `opencode` sessionCapture, fixtures scaffolding (`eval new --fixture`), the 7 roadmap lint rules, skill-security lint rules, skill-bundle integrity lint rules, variance dashboards, `lint --fix`, the **F18 watchdog escalation** (SIGTERM→grace→SIGKILL, per-eval `timeout_seconds`, infra-vs-contract retry / `infra_retries`, flaky-hygiene gating — the exit class itself shipped early as `error`, §14-23) and **concurrency > 1** (memory-aware — `run` ships the basic per-trial `timeout` + serial `concurrency: 1`), `Trace.usage` parsing in `ClaudeCodeAdapter` (until then: trial-count estimates) | Description-optimizer loop (skill-creator owns it; revisit), watch mode, GitHub Action wrapper, TUI, any auto-commit ever, **a public Swift library / test-trait surface** (§14-18, declined). Phase 8 additions from the July-2026 rounds: the **diagnostic model tier** + Apple FM/PCC provider (F67/F68 — macOS on-device default; PCC never defaults), the general synthetic generator (F64), the aggregation catalog (F65), the integration recipe (F66), the judge↔human agreement check (F10) |
 | Adapters: `claude-code`, `opencode`, `direct-api`, `replay` | | |
 
 **Provenance honesty.** Two columns of work hide in "v1," and they are not the same risk. **Ported** (a working predecessor exists; the job is faithful translation behind the new seams): the runner, scorers, the SARIF reader and `baseline` drift engine, the contradiction join, capture (incl. checkpoint modes), the 5-rule lint catalog, the binary resolver + denylist, fixture-verify, and the suggest/iterate engines (`SuggestSkillMdEdits`, content-anchored `EditApply`, worktree A/B). **Net-new** (no predecessor; the design's largest fresh surface): the gates engine, structured friction/finding files and the evidence lifecycle, `next`, the multi-harness abstraction beyond claude-code, the unified trigger axis, and version-aware corroboration. The line's logic stands — v1 must demonstrate both differentiators (computable runbook, harness matrix) end-to-end on the full loop — but the schedule should weight the net-new column, because that's where the unknowns live.
@@ -1156,6 +1194,134 @@ Two implementation notes refine this policy. (1) `swift-yaml` has **no tagged re
 ---
 
 ## 14. Open questions
+
+### 14-24 — How to establish that a test would notice if the code it covers broke *(open — adopt, contribute, or build)*
+
+**The question.** A test that cannot fail is decorative, and three were found here in a single week — each
+passing for a reason unrelated to what it claimed to cover: the platform's file copying already refused
+the input, the platform's directory listing already omitted the entry, an earlier check already refused
+the case. Each was found only by deliberately undoing the fix and noticing the test still passed. That
+practice is manual, easily forgotten, and its own failure is silent — four undos in one session changed
+nothing at all and looked exactly like successful checks. The standard remedy is **mutation testing**:
+break the code many small ways automatically and report which breakages no test noticed.
+
+**What was tried, 2026-08-25.** Muter, the established tool for this language, run against this project.
+It did not complete. Five obstacles, measured rather than assumed:
+
+| # | What happens | Status |
+|---|---|---|
+| 1 | The copy it makes inherits stale build products naming the original location, and will not compile | **Workaround:** clear only the compiler-cache directory before running |
+| 2 | Clearing the whole build directory instead removes the fetched dependencies, and the copy tries to download them | **Workaround:** build first, then clear only the cache |
+| 3 | It corrupts any file containing a character wider than one byte — an em-dash produced `\|\|&&` and ate two letters off an identifier | **No workaround.** 128 of 132 files here contain such characters |
+| 4 | It loses an implicit return — `case .auto: ColorPolicy(…)`, a value returned without the word `return` — producing a function that returns nothing | **No workaround.** ~112 such bodies across 36 files |
+| 5 | Applying debug entitlements to the copied binary failed for want of a signing tool | Not a real obstacle — the tool exists at `/usr/bin/codesign`; the sandbox it was run in blocked the call |
+
+**Obstacles 3 and 4 are defects in the tool, not in this project**, and neither is about lacking a syntax
+tree: Muter already depends on Apple's own Swift parser (`swift-syntax`, `from: "601.0.0"`), which
+understands both constructs. The likely causes, diagnosed from symptoms rather than from reading its
+source, and worth confirming there first:
+
+- **Obstacle 3 is a units mismatch.** A syntax tree reports positions as counts of *bytes*; Swift strings
+  are indexed by *characters*. Using the former to cut the latter shifts by the difference — exactly the
+  damage observed, and exactly the width of one em-dash. The proper fix is to rewrite the tree and print
+  it back, rather than splicing text by position at all.
+- **Obstacle 4 is an unhandled shape.** A value returned without the keyword is represented differently
+  from a statement; replacing it as though it were a statement discards its role as the result.
+
+**Rewriting this project's prose to avoid obstacle 3 was considered and rejected.** It would mean editing
+comments in 128 files to accommodate someone else's defect, would leave obstacle 4 untouched, and would
+not make the tool correct — only stop feeding it the input it mishandles, so the next comment containing a
+dash breaks it again.
+
+**The options, for a later decision:**
+
+1. **Contribute the two fixes upstream.** Both are small and locally testable — feed in a file with a wide
+   character, feed in one with an implicit return, check the output compiles. Benefits everyone, changes
+   nothing here. Unpaid work on another project, and two independent defects in the first two files tried
+   suggests more behind them.
+2. **Build a small in-house equivalent.** Only a few mutations are needed to be useful — invert a
+   comparison, flip a logical connector, remove a statement — applied through the same parser this project
+   could depend on, over a named file, running the existing test command. Under this project's control and
+   sized to its needs; another thing to own, and the charter requires an amendment before adding a
+   dependency.
+3. **Neither — keep doing it by hand, targeted.** Break the scoring and comparison code deliberately in a
+   handful of ways and see which tests notice. No tooling, no dependency; a snapshot rather than a
+   standing check, and only covers what someone thought to try.
+
+**Recommended next step before choosing:** a cheap probe — run the tool across ten files and collect the
+distinct failure modes. If it is still these two, option 1 is a contained contribution. If it is five
+different ones, the tool needs more work than a drive-by fix and options 2 or 3 are the honest answer.
+
+*Affected if adopted:* nothing in the shipped tool — this is development tooling. *Evidence:*
+[Specs/020-prove-by-ab/plan.md](Specs/020-prove-by-ab/plan.md), 2026-08-25 entries.
+
+### 14-23 — What a score counts when an attempt was never graded *(implemented; the counting rule needs sign-off)*
+
+**What was wrong.** When grading never happened — the grader errored, a rate limit hit, the connection
+dropped, the program running the model died — the attempt was recorded as `failed`, meaning the skill was
+measured and did badly. The code's own comment on that path read "the trial couldn't be measured" while
+writing the opposite. It fires on ordinary paid runs, not in a corner case, and on a before-and-after
+comparison it can make a good edit look harmful.
+
+**What was built.** A fifth exit class, `TrialExit.error`, for an attempt that produced no verdict; both
+axes route to it; the reason is recorded as `ungradedReason` beside the attempt instead of being discarded
+without even being bound; those attempts leave the score's denominator and are counted in the additive
+`ungraded` field of `skillet.run/1`; and `run` leaves `75` — the `sysexits` "temporary failure, try again
+later" — when nothing that *was* graded failed. `timeout` is unchanged and still counts as a result.
+
+**The line drawn is the standard one and needs no classifier.** A check that ran and came out negative is
+a failure; anything that stopped the check running is an error (JUnit/pytest). This is deliberately *not*
+the `infra` name the §10 note anticipated: "infra" asserts a cause the tool cannot establish, and the
+closest evaluation framework (Inspect AI) uses "error" and treats a sandbox failure as one. Retry policy —
+the genuinely hard part, needing data this tool did not previously collect — stays with F18.
+
+**Why the denominator changed rather than staying put.** Counting a missing observation as a negative
+result is *non-responder imputation*, documented as strongly biasing the answer downward and, where losses
+fall unevenly across the two arms, distorting the difference between them — which is the number this tool
+exists to produce. Complete-case analysis is unbiased where losses are unrelated to the outcome. `ungraded`
+is reported so uneven loss, the case where that assumption fails, is visible.
+
+**Sign-off needed, because this changes what a recorded score means.** Two consequences:
+
+1. **Files written before this cannot be converted.** Older records folded ungraded attempts into the
+   failure count without recording how many there were, so the information needed to recompute them under
+   the new rule was destroyed at write time. Replaying history is the standard mitigation for a changed
+   measure and it is unavailable here.
+2. **Not yet built, and recommended:** record which counting rule produced a score, alongside the existing
+   `model` / `judge_prompt_version` / `executor_binary_version` provenance that exists for exactly this
+   purpose — so a comparison straddling the change can say so instead of silently reporting the difference
+   as the effect of an edit.
+
+**Decided 2026-08-24, not yet built — both assigned to `F18` (the planned phase item for reliability
+handling, `Roadmap/phase-2-measurement-static-gates.md`).**
+
+1. **Output cut short counts as never graded.** The captured session is read one line at a time and any
+   unreadable line is skipped in silence, so a session truncated by the size cap loses its final reply and
+   that reply's token count, and the run grades an earlier reply while under-reporting cost. Chosen over
+   guessing at session shape, because a rule that infers "looks complete" is itself a rule that drifts from
+   the real format. Needs the capture step to report that it truncated, which it does not today.
+2. **A lost write speaks up only where it costs information the run depends on.** Records that carry
+   evidence report a failed write; deleting a temporary folder stays quiet, as it already does. Reporting
+   only under a "more detail" flag was rejected: the loss is discovered after the run, when re-running with
+   more detail cannot recover it. Needs a way for the module that writes those records to report a failure
+   — it deliberately does not depend on the module that prints, so this is a layering decision.
+
+**Newly surfaced, undecided — and an attempted fix was reverted.** With ungraded attempts excluded, a
+check that graded *nothing* still reports `fail 0/0` — a verdict drawn from zero attempts, the same defect
+this project removed at the file layer. `run`'s exit no longer counts it as a failure, so the exit code is
+right; only the row's wording is wrong.
+
+Withholding the verdict (rather than adding a fourth word to the published `pass`/`fail`/`flaky` set) was
+implemented and **reverted**, because it silently breaks a deliberate guard: an eval with **no prompt**
+records *zero trials*, and the run is required to report that as a failure so a malformed eval file cannot
+pass vacuously (`RunnerTests`, "An eval with no prompt records zero trials and FAILs"). Withholding the
+verdict made that eval report nothing **and** dropped it from the failure count — a silent pass for a
+broken file, which is worse than the wording it fixed.
+
+The blocker is that both cases read `0/0` from counts alone: *nothing was attempted* (malformed eval) and
+*attempts happened but none graded* (rate limit). Resolving the wording therefore requires the row to carry
+how many attempts were **made**, separately from how many were **graded** — at which point withholding
+becomes safe and no new status word is needed. That is the next step, not the fourth enum value.
 
 *(The naming question is resolved: D7, title block. Residual diligence noted there: a trademark sanity check against PAN's Skillet family before going public.)*
 
@@ -1211,9 +1377,9 @@ Two implementation notes refine this policy. (1) `swift-yaml` has **no tagged re
 
 ---
 
-22. **`iterate`'s command line: `--edits` to narrow, and no `--apply` (proposed 2026-08-16, awaiting
-    sign-off).** §6.1 above spells this command `--proposals <file|-> [--apply <indices>...]`.
-    [Specs/020](Specs/020-prove-by-ab/plan.md) D6 proposes `--proposals <name>.json` (a bare filename in
+22. **`iterate`'s command line: `--edits` to narrow, and no `--apply`** — proposed 2026-08-16, approved
+    and applied 2026-08-19. §6.1 **used to spell** this command `--proposals <file|-> [--apply <indices>...]`.
+    [Specs/020](Specs/020-prove-by-ab/plan.md) D6 replaced it with `--proposals <name>.json` (a bare filename in
     the drafts folder, as `suggest` already takes), `--edits 0 2` to narrow, and **no `--apply` at all**.
 
     **Why.** `suggest --apply` already means *"write into my real files"*; using the same word here for
@@ -1232,12 +1398,11 @@ Two implementation notes refine this policy. (1) `swift-yaml` has **no tagged re
     ships: §6.1's synopsis above; the **two** worked examples in Appendix A (counted separately, because
     they are edited separately); the ships-in-v1 column of the §13 table, which spells it `iterate` (batch
     `--apply`) and is easy to miss because a search of running text does not reach into a table row; the
-    phase-6 feature entry; and the contributor guide's command list. Nothing is edited until this is
-    signed off.
+    phase-6 feature entry; and the contributor guide's command list. **Applied 2026-08-19** — every place listed now shows the new spelling.
 
-23. **`iterate`'s "before" number: measured now, not read from a stored run (proposed 2026-08-16,
-    awaiting sign-off).** §6.1 above says this command prints deltas *"against the most recent recorded
-    baseline (running one first if none exists)"*. [Specs/020](Specs/020-prove-by-ab/plan.md) D2 proposes
+23. **`iterate`'s "before" number: measured now, not read from a stored run** — proposed 2026-08-16,
+    approved and applied 2026-08-19. §6.1 **used to say** this command prints deltas *"against the most
+    recent recorded baseline (running one first if none exists)"*. [Specs/020](Specs/020-prove-by-ab/plan.md) D2 replaced it with
     measuring **both** arms fresh, in the same invocation, every time.
 
     **Why.** The value of comparing two arms is that exactly one thing differs between them. A stored
@@ -1257,7 +1422,7 @@ Two implementation notes refine this policy. (1) `swift-yaml` has **no tagged re
     **Separate from item 22 on purpose.** That one is what the flags are called; this one is what the
     numbers mean and what a run costs, so they can be accepted or rejected independently.
 
-    **Ripple on approval:** the baseline sentence in §6.1 above. Nothing is edited until sign-off.
+    **Applied 2026-08-19** — the baseline sentence in §6.1 above now says both measurements are taken in the same invocation.
 
 ## Appendix A — A worked session
 
@@ -1293,9 +1458,9 @@ $ skillet run docc-articles --eval rule-of-three-density
 $ skillet suggest docc-articles --from 2026-06-09-rule-of-three-density --out fix-density.json
 drafted 1 EditProposal (SKILL.md:142, content-anchored) → .skillet/proposals/fix-density.json
 nothing applied — review the excerpt → proposed_text, then prove it:
-      → skillet iterate docc-articles --proposals .skillet/proposals/fix-density.json --apply 0
+      → skillet iterate docc-articles --proposals fix-density.json --edits 0
 
-$ skillet iterate docc-articles --proposals .skillet/proposals/fix-density.json --apply 0
+$ skillet iterate docc-articles --proposals fix-density.json --edits 0
 proposals: fix-density.json — applying [0] of 1 in a throwaway worktree
                                before   after    Δ
   rule-of-three-density        0/3      3/3      ▲ fixed

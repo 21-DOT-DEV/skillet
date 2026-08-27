@@ -249,6 +249,24 @@ struct DocsTests {
         }
     }
 
+    /// **What a run tells you to do next names only verbs that exist.** The list is filtered against the
+    /// binary rather than written down, so an unshipped verb is never suggested and a shipped one needs
+    /// no edit. Both halves are pinned here: `iterate` ships and must appear; `next` does not and must
+    /// not — and when it does ship, this test is what says so out loud rather than letting the suggestion
+    /// change unnoticed.
+    @Test("A run suggests only loop verbs the tool answers to")
+    func suggestionsNameOnlyRealCommands() async throws {
+        let registered = try await Self.registeredCommands()
+        #expect(registered.contains("iterate"), "shipped, so it must be suggestable")
+        #expect(!registered.contains("next"),
+                "`next` has shipped, so a run now suggests it — intended behaviour; update this expectation deliberately rather than deleting it")
+
+        let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay", "--yes"])
+        #expect(out.stdout.contains("skillet iterate"), "the shipped verb is offered")
+        #expect(!out.stdout.contains("skillet next"), "an unshipped verb is never offered")
+    }
+
     /// The names the binary actually answers to.
     static func registeredCommands() async throws -> Set<String> {
         let out = try await SkilletHarness().run(["--experimental-dump-help"])
@@ -268,6 +286,40 @@ struct DocsTests {
     /// named there but not registered has to be marked, in the document, with the marker below; the
     /// marker is what turns "this looks out of date" into something a machine settles.
     static let plannedMarker = "(planned)"
+
+    /// **The contributor guide's list of commands is checked against what the tool answers to.**
+    ///
+    /// That page listed nine commands as available which the tool refuses — a reader learning from it was
+    /// sent to verbs that do not exist. The design document has carried the same list correctly, with the
+    /// unshipped ones marked, and a test enforcing it; the guide duplicated the list without either. A
+    /// duplicated list with only one of them checked is a list that drifts.
+    @Test("The contributor guide lists nothing you cannot run, unless it says so")
+    func guideListsNothingYouCannotRun() async throws {
+        let registered = try await Self.registeredCommands()
+        let guide = try DocFile.read("AGENTS.md")
+        // **Only the "answers today" half is checked.** The other half declares itself planned, so its
+        // names are supposed to be absent from the tool. Checking line by line instead was useless: the
+        // heading and the entries share a line, so every entry inherited the word "planned" from the
+        // heading and nothing could ever fail — caught by undoing the fix and watching the test pass.
+        guard let available = guide.range(of: "**Answers today:**"),
+              let planned = guide.range(of: "**Planned, not yet accepted:**",
+                                        range: available.upperBound..<guide.endIndex) else {
+            Issue.record("AGENTS.md no longer separates what the tool answers to from what is planned")
+            return
+        }
+        let claimed = String(guide[available.upperBound..<planned.lowerBound])
+
+        var checked = 0
+        for (offset, phrase) in claimed.split(separator: "`", omittingEmptySubsequences: false).enumerated()
+        where offset % 2 == 1 {
+            guard let name = phrase.split(separator: " ").first.map(String.init),
+                  name.allSatisfy(\.isLetter) else { continue }
+            checked += 1
+            #expect(registered.contains(name),
+                    "`\(name)` is listed as something the tool answers to today, and it does not")
+        }
+        #expect(checked > 0, "the check found nothing to verify, which means it is not reading the section")
+    }
 
     @Test("Every command the design document lists is one the tool answers to, or is marked planned")
     func designListsNothingYouCannotRun() async throws {
@@ -295,24 +347,127 @@ struct DocsTests {
 
     /// The design document's usage line for `suggest` advertised two options the parser refuses, so a
     /// reader following it got a parse error. Same rule as above, applied to option names.
-    @Test("Every option the design document spells out for suggest is one the parser accepts")
-    func designSpellsOnlyRealOptions() async throws {
-        let help = try await SkilletHarness().run(["suggest", "--help"]).stdout
+    ///
+    /// **Every documented command, not one of them.** This check was written for `suggest` alone, and
+    /// the gap showed: the proving command's usage line was corrected when it shipped while the sentence
+    /// directly beneath it still spelled the flag that had just been replaced, through a full green
+    /// suite. Anything with a `#### \`skillet <name>\`` block is compared, so a command cannot be
+    /// documented with flags the tool refuses just because nobody thought to extend the check.
+    static let commandsWithSynopsis = ["suggest", "iterate"]
+
+    @Test("Every option the design document spells out is one the parser accepts",
+          arguments: DocsTests.commandsWithSynopsis)
+    func designSpellsOnlyRealOptions(command: String) async throws {
+        let accepted = try await Self.acceptedOptions(of: command)
         let design = try DocFile.read("skillet-design.md")
-        guard let synopsis = Self.suggestSynopsis(design) else {
-            Issue.record("skillet-design.md has no `skillet suggest` usage block to check"); return
+        guard let synopsis = Self.synopsis(design, for: command) else {
+            Issue.record("skillet-design.md has no `skillet \(command)` usage block to check"); return
         }
         // Everything that looks like an option in the usage line, and the planned ones listed beneath it.
         let named = Set(synopsis.matches(of: /--[a-z][a-z-]+/).map { String($0.output) })
-        let planned = Set(Self.plannedOptions(design))
+        let planned = Set(Self.plannedOptions(design, for: command))
         #expect(!named.isEmpty, "guard against the check silently finding nothing to compare")
         for option in named.subtracting(planned) {
-            #expect(help.contains(option),
-                    "the design document spells `\(option)` in the suggest usage line, but the parser does not accept it — either ship it or list it as planned beneath the block")
+            #expect(accepted.contains(option),
+                    "the design document spells `\(option)` in the \(command) usage line, but the parser does not accept it — either ship it or list it as planned beneath the block")
         }
-        for option in planned where help.contains(option) {
-            Issue.record("`\(option)` is listed as planned but the parser now accepts it — move it into the usage line")
+        for option in planned where accepted.contains(option) {
+            Issue.record("`\(option)` is listed as planned for \(command) but the parser now accepts it — move it into the usage line")
         }
+    }
+
+    /// **The contributor guide names options too, and nothing was comparing them.** Its command-surface
+    /// list gives each command with the switches that distinguish it, and it said the proving command
+    /// takes `--apply` when that command takes `--edits` — while a line sixty rows earlier in the same
+    /// file spelled it correctly. Anyone reading that list to learn the tool would have been sent to a
+    /// switch the parser refuses. The design document had this check; the guide people are pointed at
+    /// first did not.
+    @Test("Every option the contributor guide's command list names is one the parser accepts")
+    func guideSurfaceSpellsOnlyRealOptions() async throws {
+        let guide = try DocFile.read("AGENTS.md")
+        guard let heading = guide.range(of: "### Command surface") else {
+            Issue.record("AGENTS.md has no command-surface list to check"); return
+        }
+        let rest = guide[heading.upperBound...]
+        let block = String(rest[..<(rest.range(of: "\n###")?.lowerBound ?? rest.endIndex)])
+
+        // Only commands the tool answers to today. The list is forward-looking on purpose, so a name it
+        // does not yet register is not an error — and asking about one would trip the shared lookup's own
+        // guard, which reports an unregistered name rather than returning nothing.
+        let registered = try await Self.registeredCommands()
+
+        var checked = 0
+        for match in block.matches(of: /`([a-z][a-z ]*)`\s*\n?\s*\(([^)]*)\)/) {
+            let command = String(match.output.1).trimmingCharacters(in: .whitespaces)
+            guard registered.contains(command) else { continue }
+
+            // Each backticked entry inside the brackets, keeping only those that are a switch and nothing
+            // else. `which --search` is skipped because that switch belongs to a nested command, not to
+            // this one, and comparing it here would report a fault that is not there. A `†` marks a
+            // switch listed as planned rather than shipped, exactly as the design document marks its own.
+            let named = String(match.output.2).matches(of: /`([^`]+)`/).map { String($0.output.1) }
+            let options = named.filter { $0.hasPrefix("--") && !$0.contains(" ") && !$0.hasSuffix("†") }
+            guard !options.isEmpty else { continue }
+
+            let accepted = try await Self.acceptedOptions(of: command)
+            checked += 1
+            for option in options {
+                #expect(accepted.contains(option),
+                        "AGENTS.md's command list says `\(command)` takes `\(option)`, which the parser refuses")
+            }
+        }
+        #expect(checked >= 3, "guard against the check silently finding nothing to compare")
+    }
+
+    /// The reverse blind spot: the usage line is only the *headline*. A flag the parser refuses can sit
+    /// in the prose under it and no check notices — which is exactly what happened, and what this pins.
+    /// Scoped to the paragraphs before the next heading, and only to spellings that look like flags.
+    @Test("No prose under a command's usage line spells an option the parser refuses",
+          arguments: DocsTests.commandsWithSynopsis)
+    func designProseSpellsOnlyRealOptions(command: String) async throws {
+        let accepted = try await Self.acceptedOptions(of: command)
+        let design = try DocFile.read("skillet-design.md")
+        guard let prose = Self.prose(design, for: command) else {
+            Issue.record("skillet-design.md has no `skillet \(command)` section to check"); return
+        }
+        let planned = Set(Self.plannedOptions(design, for: command))
+        let named = Set(prose.matches(of: /--[a-z][a-z-]+/).map { String($0.output) })
+        #expect(!named.isEmpty, "guard against the check silently finding nothing to compare")
+        for option in named.subtracting(planned) where !accepted.contains(option) {
+            Issue.record("the `skillet \(command)` section describes `\(option)`, but the parser does not accept it — correct the prose, or mark it planned beneath the usage block")
+        }
+    }
+
+    /// The long option names a command **accepts**, read from the parser's own structured dump.
+    ///
+    /// **Not `--help`'s text.** Matching against the help *output* silently passes a flag the command
+    /// merely mentions: this command's help names `suggest --apply` when telling you how to land a
+    /// proven edit, so a check reading the text would accept `--apply` as one of *its* flags — which is
+    /// exactly the stale spelling this pair exists to catch. Found by undoing the fix and watching the
+    /// check pass anyway.
+    static func acceptedOptions(of command: String) async throws -> Set<String> {
+        struct Dump: Decodable {
+            struct Name: Decodable { let kind: String; let name: String }
+            struct Argument: Decodable { let names: [Name]? }
+            struct Command: Decodable {
+                let commandName: String?
+                let subcommands: [Command]?
+                let arguments: [Argument]?
+            }
+            let command: Command
+        }
+        let out = try await SkilletHarness().run(["--experimental-dump-help"])
+        let dump = try JSONDecoder().decode(Dump.self, from: Data(out.stdout.utf8))
+        guard let match = (dump.command.subcommands ?? []).first(where: { $0.commandName == command })
+        else {
+            Issue.record("`skillet \(command)` is not a registered command"); return []
+        }
+        let names = Set((match.arguments ?? [])
+            .flatMap { $0.names ?? [] }
+            .filter { $0.kind == "long" }
+            .map { "--" + $0.name })
+        #expect(names.count > 3, "guard against the check silently finding nothing to compare")
+        return names
     }
 
     /// The fenced block under "porcelain" in §6.1 — the list a reader takes as "what I can run".
@@ -322,21 +477,34 @@ struct DocsTests {
         return String(rest[..<(rest.range(of: "\n```")?.lowerBound ?? rest.endIndex)])
     }
 
-    /// The fenced usage line under the `#### \`skillet suggest\`` heading.
-    static func suggestSynopsis(_ design: String) -> String? {
-        guard let heading = design.range(of: "#### `skillet suggest`") else { return nil }
-        let rest = design[heading.upperBound...]
-        guard let open = rest.range(of: "```") else { return nil }
-        let body = rest[open.upperBound...]
+    /// The fenced usage line under a `#### \`skillet <name>\`` heading.
+    static func synopsis(_ design: String, for command: String) -> String? {
+        guard let section = section(design, for: command) else { return nil }
+        guard let open = section.range(of: "```") else { return nil }
+        let body = section[open.upperBound...]
         return String(body[..<(body.range(of: "```")?.lowerBound ?? body.endIndex)])
+    }
+
+    /// Everything under a command's heading, up to the next `####` — its own section and no other's.
+    static func section(_ design: String, for command: String) -> String? {
+        guard let heading = design.range(of: "#### `skillet \(command)`") else { return nil }
+        let rest = design[heading.upperBound...]
+        return String(rest[..<(rest.range(of: "\n#### ")?.lowerBound ?? rest.endIndex)])
+    }
+
+    /// A command's section with its fenced blocks removed — the running text a reader takes as a claim
+    /// about what the tool accepts. Sample *output* lives in fences and is not a claim about flags.
+    static func prose(_ design: String, for command: String) -> String? {
+        guard let section = section(design, for: command) else { return nil }
+        return section.components(separatedBy: "```").enumerated()
+            .filter { $0.offset.isMultiple(of: 2) }.map(\.element).joined(separator: "\n")
     }
 
     /// Options the design document itself declares not-yet-available, read from the line beneath the
     /// usage block so the exemption lives next to the claim it exempts.
-    static func plannedOptions(_ design: String) -> [String] {
-        guard let heading = design.range(of: "#### `skillet suggest`") else { return [] }
-        let rest = design[heading.upperBound...]
-        let window = String(rest.prefix(2_000))
+    static func plannedOptions(_ design: String, for command: String) -> [String] {
+        guard let section = section(design, for: command) else { return [] }
+        let window = String(section.prefix(2_000))
         guard let line = window.range(of: "Planned, not yet accepted:") else { return [] }
         let tail = window[line.upperBound...]
         let sentence = String(tail[..<(tail.range(of: "\n\n")?.lowerBound ?? tail.endIndex)])

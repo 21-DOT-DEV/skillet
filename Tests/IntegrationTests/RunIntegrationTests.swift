@@ -97,6 +97,28 @@ struct RunIntegrationTests {
         #expect(!FileManager.default.fileExists(atPath: benchmarkPath(root)))   // refused before spending
     }
 
+    /// **Which refusal answers first, pinned before the confirmation routine moves.**
+    ///
+    /// Two things are wrong at once here: the run costs more than the configured threshold, and the
+    /// model program cannot be started. The cost refusal must answer, not the program one — that is the
+    /// order both paid commands use today, and a later change that shares this routine between commands
+    /// could reorder the two checks while still leaving the same number behind. Pinning only the number
+    /// would let that through, and a person would start seeing a different error for the same mistake.
+    @Test("With both an over-threshold cost and an unusable model program, the cost refuses first")
+    func spendGateAnswersBeforeReadiness() async throws {
+        let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
+        let broken = root.appendingPathComponent("not-a-program")
+        try "this is not a program".write(to: broken, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: broken.path)
+
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "run", "demo", "--runs", "30", "--no-input"],
+            environment: ["SKILLET_CLAUDE_CODE_BIN": broken.path])
+        #expect(out.exitCode == 2, "the cost is what refused — not the unusable program, which would be 3")
+        #expect(out.stderr.contains("confirm_above_trials"), "and it says so")
+        #expect(!out.stderr.contains("could not be used"), "the program refusal must not be the one shown")
+    }
+
     @Test("Unknown skill → usage error (exit 2)")
     func unknownSkill() async throws {
         let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
@@ -339,6 +361,76 @@ struct RunIntegrationTests {
         #expect(FileManager.default.fileExists(atPath: benchmarkPath(root)))
     }
 
+    /// **Can the grader tell two answers apart?** The failure this guards against is a grader that
+    /// returns the same verdict for everything — every comparison would then read "no change", every
+    /// edit would look safe, and the whole tool would be confidently useless while every offline test
+    /// stayed green, because the stand-in grader is wired to give different verdicts.
+    ///
+    /// Asked **directly**, because that is a property of the grader. An earlier attempt inferred it from
+    /// whether an edited skill scored better, which made the check depend on a model obeying an
+    /// instruction on one sample — an assertion about the model, not about this program, and it went red
+    /// twice while nothing was wrong. Here the same reply is put to two expectations: one it must meet
+    /// and one it cannot. If both land the same way, grading is not discriminating.
+    @Test("Live claude-code smoke: grading distinguishes a met expectation from an impossible one",
+          .tags(.slow),
+          .enabled(if: ProcessInfo.processInfo.environment["SKILLET_LIVE_SMOKE"] != nil))
+    func liveGraderDiscriminates() async throws {
+        let root = try Fixture.makeRunRepo(
+            judgeModel: "sonnet",                // the alias a real claude binary accepts
+            evalsRaw: #"""
+            {"skill_name":"demo","evals":[
+             {"id":"met","prompt":"Reply with exactly the single word: hello",
+              "expectations":["the reply contains the word hello"]},
+             {"id":"impossible","prompt":"Reply with exactly the single word: hello",
+              "expectations":["the entire reply is written in Japanese script"]}]}
+            """#)
+        defer { Fixture.remove(root) }
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "run", "demo", "--yes", "--runs", "1", "--json"])
+        let payload = try #require(try JSONSerialization.jsonObject(with: Data(out.stdout.utf8)) as? [String: Any],
+                                   "no machine-readable result: \(out.stderr)")
+        let behavior = (payload["behavior"] as? [String: Any]) ?? payload
+        let rows = try #require(behavior["evals"] as? [[String: Any]])
+        let byId = Dictionary(uniqueKeysWithValues: rows.compactMap { row in
+            (row["id"] as? String).map { ($0, row) }
+        })
+        // Recorded first: a grader that errored on both would otherwise read as "did not discriminate".
+        #expect(byId["met"]?["recorded"] as? Int == 1, "the met expectation was never graded")
+        #expect(byId["impossible"]?["recorded"] as? Int == 1, "the impossible expectation was never graded")
+        #expect(byId["met"]?["passes"] as? Int == 1, "a reply saying hello must satisfy \"contains hello\"")
+        #expect(byId["impossible"]?["passes"] as? Int == 0,
+                "a reply saying hello cannot be entirely Japanese — a pass here means grading is not reading the answer")
+    }
+
+    /// **Two versions of a skill must be able to measure differently, offline.**
+    ///
+    /// The stand-in that answers instead of a model used to produce text from the question alone, and the
+    /// stand-in grader decided pass or fail from the criterion's wording alone — so the same tests against
+    /// two *different* versions of a skill always scored identically. That makes it impossible to check,
+    /// without paying, a command whose job is to measure a skill, change it, and measure again. The
+    /// answer now carries a marker taken from the skill, and a recorded verdict may be keyed on it.
+    @Test("Editing a skill can change its measured result, with no model involved")
+    func editedSkillMeasuresDifferently() async throws {
+        let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
+        let skill = root.appendingPathComponent("skills/demo/SKILL.md")
+        // Fails when the skill carries `before`, passes when it carries `after`. Same criterion both times.
+        let map = try Fixture.writeReplayMap(["did the thing @ before": false,
+                                              "did the thing @ after": true], in: root)
+
+        var results: [Int32] = []
+        for marker in ["before", "after"] {
+            let body = try String(contentsOf: skill, encoding: .utf8)
+                .replacingOccurrences(of: "\nreplay-marker: before", with: "")
+                .replacingOccurrences(of: "\nreplay-marker: after", with: "")
+            try (body + "\nreplay-marker: \(marker)\n").write(to: skill, atomically: true, encoding: .utf8)
+            let out = try await SkilletHarness().run(
+                ["-C", root.path, "run", "demo", "--replay", "--replay-map", map, "--yes"])
+            results.append(out.exitCode)
+        }
+        #expect(results == [1, 0],
+                "the same tests must fail against one version and pass against the other — got \(results)")
+    }
+
     // MARK: - the hidden test-only options
 
     @Test("The offline switch is refused unless the suite enabled it")
@@ -350,10 +442,16 @@ struct RunIntegrationTests {
         #expect(out.stderr.contains("--replay is a test-only option"))
     }
 
-    /// The offline switch swaps real grading for canned verdicts, so a verdict file outside the project
-    /// must not be honoured. A given-but-unusable map falls back to failing every criterion, which is
-    /// what distinguishes "ignored" from "read".
-    @Test("A canned-verdict file outside the project is not read")
+    /// The offline switch swaps real grading for a file of recorded answers, so a file outside the project
+    /// must not be honoured.
+    ///
+    /// **It is refused rather than ignored, and that expectation flipped for a reason.** This used to
+    /// require that an outside file be silently passed over, leaving every check to fail — which looks
+    /// like safe behaviour and is not. Every check failing is indistinguishable from a run where the skill
+    /// genuinely failed everything, and in the proving command it means both measurements fail
+    /// identically, nothing scores lower than anything else, and the edit is declared proven with an
+    /// offer to apply it. Reproduced end to end before the change. Refusing says what happened.
+    @Test("A file of recorded answers outside the project is refused, not quietly passed over")
     func replayMapCannotEscapeTheProject() async throws {
         let root = try Fixture.makeRunRepo(evals: [("e1", ["X"])]); defer { Fixture.remove(root) }
         let elsewhere = try Fixture.makeTempDirectory(); defer { Fixture.remove(elsewhere) }
@@ -362,6 +460,138 @@ struct RunIntegrationTests {
 
         let out = try await SkilletHarness().run(
             ["-C", root.path, "run", "demo", "--replay", "--replay-map", outside.path])
-        #expect(out.exitCode == 1, "the outside file must be ignored, so the criterion fails")
+        #expect(out.exitCode == 4, "named a file it cannot use, so it stops rather than grading on nothing")
+        #expect(!out.stdout.contains("PASS"), "and nothing outside the project decided any result")
+    }
+
+    /// A relative name means "inside the project", the same as the draft file the proving command reads.
+    /// It used to mean "relative to wherever you happened to be standing", so running from another folder
+    /// looked somewhere else entirely — and, before the refusal above, said nothing when it found nothing.
+    @Test("A relative name for recorded answers is found from any working directory")
+    func replayMapIsProjectRelative() async throws {
+        let root = try Fixture.makeRunRepo(evals: [("e1", ["X"])]); defer { Fixture.remove(root) }
+        _ = try Fixture.writeReplayMap(["X": true], in: root)
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "run", "demo", "--replay", "--replay-map", "replay-map.json"])
+        #expect(out.exitCode == 0, "found inside the project, so the recorded pass is honoured: \(out.stderr)")
+    }
+}
+
+/// **A results file that cannot be scored is refused before anything is spent, not carried forward.**
+///
+/// A run keeps whichever half of the results file it did not measure this time — copying it forward
+/// unchanged is how measuring one thing cannot destroy the record of the other. The half being copied was
+/// never checked, while the reader that scores the file refuses a count that is not a whole number or a
+/// test named twice. So a file with either fault was carried straight through, the run finished
+/// successfully, and what it left behind could not be scored by this tool's own reader.
+///
+/// Refused at the start rather than at the moment of writing, because writing happens after the
+/// measurement — by then the money is spent, and refusing would throw the results away. Refused rather
+/// than quietly dropped, because dropping loses the committed record of the half that did not run.
+@Suite("A results file that cannot be scored stops the run before it costs anything", .tags(.integration))
+struct CarriedRecordValidityTests {
+    /// A project whose committed results file already holds an entry with the given count for its
+    /// routing check — the half a behaviour-only run carries forward untouched.
+    private func repoWithCommittedCount(_ runs: String) throws -> URL {
+        let root = try Fixture.makeRunRepo()
+        let record = root.appendingPathComponent("skills/demo/evaluations/benchmark.json")
+        try #"""
+        {"metadata":{"skill_name":"demo","runs_per_configuration":1},
+         "runs":[],
+         "consistency":{"k":1,"meaningful":false,"suite_pass_power_k":1,"flaky_eval_ids":[],
+           "per_eval":[{"eval_id":"t","axis":"trigger","runs":\#(runs),"perfect_passes":1,
+                        "pass_power_k":1,"flaky":false,"mean_pass_rate":1}]},
+         "run_summary":{}}
+        """#.write(to: record, atomically: true, encoding: .utf8)
+        return root
+    }
+
+    @Test("A count that is not a whole number stops the run, naming the entry")
+    func unscorableRecordStopsTheRun() async throws {
+        let root = try repoWithCommittedCount("2.5"); defer { Fixture.remove(root) }
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay"])
+        #expect(out.exitCode == 4, "the file is not valid, and that is what stops it: \(out.stderr)")
+        #expect(out.stderr.contains("2.5"), "and it says which value: \(out.stderr)")
+    }
+
+    /// **Nothing is overwritten by the refusal.** The point of stopping early is that the existing record
+    /// survives for the person to correct, rather than being replaced by a run that could not use it.
+    @Test("The existing file is left exactly as it was")
+    func existingFileUntouched() async throws {
+        let root = try repoWithCommittedCount("2.5"); defer { Fixture.remove(root) }
+        let record = root.appendingPathComponent("skills/demo/evaluations/benchmark.json")
+        let before = try String(contentsOf: record, encoding: .utf8)
+        _ = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay"])
+        #expect(try String(contentsOf: record, encoding: .utf8) == before)
+    }
+
+    /// **A file that is not a results file at all is replaced, and the run says so first.**
+    ///
+    /// Two situations that look alike are handled differently on purpose. A file that reads as a results
+    /// file but holds something unscorable carries real history the person can repair, so it stops the
+    /// run. A file that does not read as one carries no history to lose, and is replaced — deliberately,
+    /// because refusing instead would let anyone stop every future run by dropping a broken file into
+    /// place. What was missing was saying so: replacing it silently means the results for whichever half
+    /// did not run this time disappear with no word.
+    @Test("A file that is not a results file is announced before anything is spent",
+          arguments: [#"["not","an","object"]"#, #""just a string""#, "not json at all"])
+    func unreadableRecordIsAnnounced(contents: String) async throws {
+        let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
+        try contents.write(to: root.appendingPathComponent("skills/demo/evaluations/benchmark.json"),
+                           atomically: true, encoding: .utf8)
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay"])
+        #expect(out.exitCode == 0, "it heals rather than refusing: \(out.stderr)")
+        #expect(out.stderr.contains("not a readable results file"),
+                "and it says so before spending: \(out.stderr)")
+        #expect(out.stderr.contains("will be lost"), "including what that costs")
+    }
+
+    /// An ordinary run says nothing of the sort — the note has to mean something when it appears.
+    @Test("An ordinary run does not announce a replacement")
+    func ordinaryRunSaysNothing() async throws {
+        let root = try Fixture.makeRunRepo(); defer { Fixture.remove(root) }
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay"])
+        #expect(!out.stderr.contains("not a readable results file"))
+    }
+
+    /// The other half, so the check cannot be satisfied by refusing everything: an ordinary committed
+    /// record still carries forward untouched, which is what it is there to do.
+    @Test("An ordinary committed record still carries forward")
+    func validRecordStillCarries() async throws {
+        let root = try repoWithCommittedCount("2"); defer { Fixture.remove(root) }
+        let out = try await SkilletHarness().run(["-C", root.path, "run", "demo", "--replay"])
+        #expect(out.exitCode == 0, "\(out.stderr)")
+        let after = try String(contentsOf: root.appendingPathComponent("skills/demo/evaluations/benchmark.json"),
+                               encoding: .utf8)
+        #expect(after.contains("\"axis\" : \"trigger\""), "the half that did not run this time is still there")
+    }
+}
+
+/// **The two fields added this round are checked in the output people actually parse.**
+///
+/// Both were asserted only on the in-memory value, never on the text the command prints, so nothing
+/// stopped a later change to how that text is written from dropping them silently. `pass_1_evals` says how
+/// many checks the softer average covers — without it, excluding unmeasurable checks would quietly shrink
+/// the basis of that figure with no way to tell. `ungraded` says how many attempts produced no result at
+/// all, which is what explains a score resting on fewer attempts than were asked for.
+@Suite("The run's machine-readable output carries the counts it now depends on", .tags(.integration))
+struct RunOutputCountsTests {
+    @Test("Both counts appear, and describe the run")
+    func countsAppearInTheOutput() async throws {
+        let root = try Fixture.makeRunRepo(evals: [("e1", ["X"]), ("e2", ["Y"])])
+        defer { Fixture.remove(root) }
+        let map = try Fixture.writeReplayMap(["X": true, "Y": false], in: root)
+        let out = try await SkilletHarness().run(
+            ["-C", root.path, "run", "demo", "--replay", "--replay-map", map, "--runs", "2", "--json"])
+
+        let payload = try #require(try JSONSerialization.jsonObject(with: Data(out.stdout.utf8)) as? [String: Any],
+                                   "the run must print readable output: \(out.stdout)\(out.stderr)")
+        #expect(payload["schema"] as? String == "skillet.run/1")
+        #expect(payload["pass_1_evals"] as? Int == 2, "both checks were measured, so the average covers both")
+        #expect(payload["ungraded"] as? Int == 0, "every attempt was graded on this run")
+        // One check passes and one fails, so the softer average is a half — proving the field describes
+        // this run rather than being a constant that happens to be present.
+        #expect((payload["pass_1"] as? Double).map { abs($0 - 0.5) < 0.001 } == true,
+                "pass_1 was \(String(describing: payload["pass_1"]))")
     }
 }

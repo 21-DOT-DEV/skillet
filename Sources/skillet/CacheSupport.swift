@@ -39,6 +39,24 @@ enum CacheSupport {
                     fix: "remove or rename that file so a folder can take its place, then re-run")
             }
         }
+        // **The entry itself, not what it points at.** Asking "does a file exist here" follows a link and
+        // answers about its destination, so a link pointing at nothing answers "no" and the write below
+        // goes ahead. Measured on this platform, that write replaces the link rather than following it, so
+        // the outcome is safe here — but that is undocumented, differs between systems, and this project
+        // supports one it is not tested on. The folder this sits in is already checked this way and the
+        // entry inside it was not, which is the same rule holding one level up and not the next.
+        //
+        // Checked *here* rather than beside the write: everything in the block below is reported as "the
+        // machine would not let us write", and a link someone put there is a broken layout to fix in the
+        // project, not a failing disk.
+        let ignoreFile = cache.appendingPathComponent(".gitignore")
+        if SafeFile.isSymlink(ignoreFile) {
+            throw EDDError.invalidArtifact(
+                path: relativeLabel(ignoreFile, from: projectRoot),
+                reason: "is a link, and skillet will not write through or over one",
+                fix: "delete the link and re-run — what keeps this cache out of version control has to be "
+                    + "a real file, or it could be pointed somewhere else entirely")
+        }
         // Keep the cache self-ignoring even when this is the first skillet command run in a repo, so a
         // written artifact is never left committable (constitution VI). Self-ignoring is deliberate: the
         // `*` covers this file too, which is the convention generated cache folders use.
@@ -51,8 +69,18 @@ enum CacheSupport {
             let ignore = cache.appendingPathComponent(".gitignore")
             if !FileManager.default.fileExists(atPath: ignore.path) {
                 try FileManager.default.createDirectory(at: cache, withIntermediateDirectories: true)
-                try "# Created by skillet automatically — this whole folder is a rebuildable cache.\n*\n"
-                    .write(to: ignore, atomically: true, encoding: .utf8)
+                // **Created through the shared routine, not by hand.** Asking whether the file is there
+                // and then writing it are two steps, and the name can change between them. The routine
+                // used everywhere else here makes "create this only if it is absent" a single step the
+                // operating system settles, and reports the lost race as an ordinary "file exists" —
+                // which, for this file, means somebody else already wrote what we were going to write.
+                do {
+                    try FileCreate.exclusively(
+                        "# Created by skillet automatically — this whole folder is a rebuildable cache.\n*\n",
+                        at: ignore)
+                } catch let error as NSError where error.code == NSFileWriteFileExistsError {
+                    // Already there; nothing to do and nothing wrong.
+                }
             }
             try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
         } catch {

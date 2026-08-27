@@ -46,6 +46,7 @@ struct DoctorCommand: AsyncParsableCommand {
             var rows: [DoctorReport.Row] = [
                 .pass(check: DoctorReport.Check.config, message: origin.human)
             ]
+            rows.append(Self.runSettingsRow(config?.runs ?? .init()))
 
             let skillsRoot = config?.project?.skillsRoot ?? "skills"
             let discovered = SkillScanner().scan(skillsRoot: root.appendingPathComponent(skillsRoot))
@@ -84,7 +85,7 @@ struct DoctorCommand: AsyncParsableCommand {
             let report = DoctorReport(rows: rows)
             // Zero skills with a healthy project means init already ran — suggest authoring, not init.
             let nextSteps = report.healthy
-                ? [selected.first.map { "skillet run \($0.lastPathComponent)" }
+                ? [selected.first.map { ShellWord.command("skillet run", $0.lastPathComponent) }
                     ?? "add a skill under \(projectRelativePath(skillsRoot, "<name>"))/ (SKILL.md + evaluations/evals.json), then re-run skillet doctor"]
                 : []
             Console.emit(try renderer.renderDoctor(report, nextSteps: nextSteps))
@@ -267,6 +268,24 @@ struct DoctorCommand: AsyncParsableCommand {
 
     /// The free lint gate as doctor rows: error tier fails (exit 3 here — command-contextual, like
     /// `run`'s exit-2 recolor), warn tier shows without failing.
+    /// The measurement numbers, checked **through the very routine the paid commands use** — not a
+    /// second opinion that could drift from it. A free preflight that disagrees with what the paid path
+    /// enforces is worse than no preflight, because it tells you the setup is fine and then it isn't.
+    static func runSettingsRow(_ runs: SkilletConfig.Runs) -> DoctorReport.Row {
+        do {
+            let approved = try SpendGate.approveSettings(runs, runsFlag: nil)
+            return .pass(
+                check: DoctorReport.Check.runSettings,
+                message: "k=\(approved.k), timeout=\(runs.timeout), "
+                    + "max_output_bytes=\(approved.outputLimitBytes), "
+                    + "confirm_above_trials=\(approved.confirmAboveTrials)")
+        } catch let error as EDDError {
+            return .failure(check: DoctorReport.Check.runSettings, message: error.message, remedy: error.remedy)
+        } catch {
+            return .failure(check: DoctorReport.Check.runSettings, message: "\(error)", remedy: "check the runs: block in skillet.yaml")
+        }
+    }
+
     static func lintRows(skill: String, directory: URL, config: SkilletConfig.Lint) throws -> [DoctorReport.Row] {
         let report = try lintSkillDirectory(directory, config: config)
         // Presence-guaranteed (review round 2): a clean catalog still emits its row, so a JSON

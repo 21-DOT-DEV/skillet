@@ -1,4 +1,10 @@
 import Testing
+import Subprocess
+#if canImport(System)
+import System
+#else
+import SystemPackage
+#endif
 import Foundation
 @testable import RenderKit
 
@@ -40,17 +46,19 @@ struct ShellWordTests {
     /// in comes out as exactly one word.
     @Test("Whatever goes in comes back as one word",
           arguments: ["My Skill", "it's", "a;b", "plain", "a b c", "'", ""])
-    func roundTripsAsOneWord(name: String) throws {
+    ///
+    /// **Started the one sanctioned way, like every other program this project runs.** Foundation's own
+    /// way of starting a program was used here, and on Linux it now and then takes down the entire test
+    /// binary — not this check, the whole run — while it counts the files the process has open, which it
+    /// does by reading a listing that other threads are changing underneath it. Seen once on 2026-08-27;
+    /// the next identical run passed, which is what a race looks like.
+    func roundTripsAsOneWord(name: String) async throws {
         let script = "printf '%s' " + ShellWord.quoted(name)
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", script]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        try process.run()
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        #expect(String(decoding: data, as: UTF8.self) == name,
+        let result = try await Subprocess.run(
+            .path(FilePath("/bin/sh")),
+            arguments: ["-c", script],
+            output: .string(limit: 1 << 16))
+        #expect(result.standardOutput == name,
                 "the shell must hand the command exactly the name that went in")
     }
 }

@@ -54,7 +54,7 @@ Contributing, security disclosure, and code of conduct are handled at the org le
 
 ## Commands (true now — verified against the binary by the test suite)
 
-- `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`).
+- `swift build` — build the package (resolves `swift-argument-parser`, `swift-subprocess`, `swift-system`, `swift-yaml`; also `swift-clocks` and the two it brings with it, which are fetched but built into the tests only, never into `skillet`).
 - `swift test` — run the unit + integration suites (all green in CI; the count lives in the run output, not here). The integration suite drives
   the built binary, which `swift test` builds first; filter with tags, e.g. `swift test --skip slow`.
 - `.build/debug/skillet` — the CLI: try `skillet`, `skillet --json`, `skillet -C <dir>`, `skillet init`,
@@ -110,6 +110,16 @@ from the first commit.
   formats use Foundation `Codable` (no added dependency). Secret scanning uses `betterleaks` (MIT),
   **resolved** from the `sanitize` config / `SKILLET_BETTERLEAKS_BIN` / `PATH` (per-platform
   `.artifactbundle` vendoring deferred — constitution v1.3.0). The cache MAY use system SQLite.
+  **Test-only** (constitution v1.4.0): `swift-clocks` and the two packages it pulls in with it,
+  `swift-concurrency-extras` and `xctest-dynamic-overlay` — three packages, all MIT. `swift-clocks` is pinned
+  exactly in the manifest; the other two are pinned by the committed lockfile (`Package.resolved`), because
+  pinning `swift-clocks` alone leaves them asked for as "this version or newer" and a resolve then takes
+  whatever was published most recently. Naming them in the manifest instead makes the build tool warn on
+  every build that they are unused, so the lockfile carries it. They supply a clock
+  whose time a test moves by hand, so a wait can be checked without waiting. Attached to the
+  `HarnessKitTests` and `RunKitTests` targets only and to no shipped target: building `skillet` on its own
+  fetches them while working out the package graph and then compiles and links none of them. Shipped code
+  takes the standard library's `Clock` and defaults to the real one, so behaviour is unchanged.
 - **Dependency notes (implementation reality):** `swift-yaml` has **no tagged release**, so it is
   **pinned by revision** (`473252b…`). Its `YAML` product needs **C++ interop**, which is **viral to
   direct importers** — so it is confined to the isolated **`ConfigYAML`** target

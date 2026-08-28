@@ -77,7 +77,13 @@ public struct SubprocessLauncher: ProcessLauncher {
     /// exhaust memory; generous so a normal `stream-json` session isn't truncated into a false failure.
     static let defaultOutputLimit = 64 << 20
 
-    public init() {}
+    /// Where the watchdog's wait below is timed. Defaults to the real clock that only counts forward, so
+    /// nothing about launching a process changes; a test hands in one whose time it moves by hand, so the
+    /// timeout can be made to fire at a chosen moment instead of by racing a real child against a real
+    /// wait — a race the busier machine wins (charter 1.4.0).
+    let clock: any Clock<Duration>
+
+    public init(clock: any Clock<Duration> = ContinuousClock()) { self.clock = clock }
 
     public func run(
         _ executable: String,
@@ -109,7 +115,7 @@ public struct SubprocessLauncher: ProcessLauncher {
         // cancels the loser — cancelling the child task makes swift-subprocess terminate the process.
         return try await withThrowingTaskGroup(of: ProcessOutput?.self) { group in
             group.addTask { try await Self.runOnce(executable, arguments, input, workingDirectory, environment, limit) }
-            group.addTask { try await Task.sleep(for: timeout); return nil }   // nil sentinel = timed out
+            group.addTask { [clock] in try await clock.sleep(for: timeout); return nil }   // nil sentinel = timed out
             defer { group.cancelAll() }
             let first = try await group.next() ?? nil
             if let output = first { return output }

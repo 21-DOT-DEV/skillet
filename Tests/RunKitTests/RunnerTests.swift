@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import Clocks
 import EDDCore
 import TraceKit
 import HarnessKit
@@ -710,28 +711,69 @@ struct SetupFailureIsNotAResultTests {
 /// would report a run lasting milliseconds as one lasting hours, or the reverse.
 @Suite("Elapsed time is measured on a clock that only counts forward")
 struct ElapsedTimeTests {
-    @Test("A known short interval converts to the right number of seconds")
-    func shortIntervalConvertsCorrectly() async throws {
-        let start = ContinuousClock.now
-        try await Task.sleep(for: .milliseconds(60))
-        let measured = Runner.seconds(since: start)
+    /// **Nothing waits here, so there is one right answer and this says what it is.** The time is moved on
+    /// by hand, which is the whole of what a stopwatch can observe. The comparisons allow a hair's breadth
+    /// either side because a fraction of a second in the smallest unit the clock counts in runs past the
+    /// range a `Double` holds exactly — that slack is a millionth of a millionth, far tighter than any
+    /// mistake worth catching. What stood here waited sixty thousandths of a second and then
+    /// judged the answer — and every judgement of a real wait is partly a judgement of how busy the
+    /// machine is. Once that was true, a build machine took six seconds over that wait and the shared
+    /// branch went red (Specs/020 §10, round fifty-three).
+    @Test("A stopwatch reports exactly the time that passed on the clock it was handed")
+    func stopwatchReportsItsOwnClocksTime() async {
+        let clock = TestClock()
+        let watch = Runner.Stopwatch(clock)
+        #expect(watch.seconds == 0, "no time has passed yet")
+        await clock.advance(by: .milliseconds(60))
+        #expect(abs(watch.seconds - 0.06) <= 0.06 * 1e-12,
+                "sixty thousandths of a second, not sixty seconds and not a sixteen-thousandth: \(watch.seconds)")
+        await clock.advance(by: .seconds(3))
+        #expect(abs(watch.seconds - 3.06) <= 3.06 * 1e-12,
+                "a stopwatch keeps running; it does not restart at each reading: \(watch.seconds)")
+    }
 
-        #expect(measured > 0, "time moved forward")
-        // Generous either side of 60ms — this is checking the scale is right, not the scheduler's accuracy.
-        #expect(measured > 0.03, "an exponent too small would report this as very nearly nothing: \(measured)")
-        #expect(measured < 5.0, "an exponent too large would report a fraction of a second as minutes: \(measured)")
+    /// **The one check here that uses a real clock, and it has to exist.** Everything else drives a clock
+    /// this file moves by hand, and all of it would carry on passing if the clock used when nobody supplies
+    /// one were a clock that never moved — at which point every attempt would be recorded as having taken
+    /// no time at all, and the figure this tool exists to publish would be zero everywhere. This asserts
+    /// only that *some* time went by, never how much, so a busy machine cannot upset it.
+    @Test("The clock used when nobody supplies one is a real one that moves on its own")
+    func defaultClockIsARealTickingOne() async throws {
+        let watch = Runner(adapter: ReplayAdapter(), judge: ReplayJudge([:])).startTiming()
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(watch.seconds > 0, "a clock that never moved would record every attempt as taking no time")
+    }
+
+    /// Nothing here waits, so none of it depends on how busy the machine is. Each span has an exactly
+    /// known length, and the slips worth worrying about — a conversion off by three or by nine decimal
+    /// places — miss every one of these by an enormous margin in whichever direction they go wrong.
+    @Test("Spans of known length convert to the right number of seconds, without waiting for any of them")
+    func knownSpansConvertCorrectly() {
+        let cases: [(Duration, Double, String)] = [
+            (.nanoseconds(1), 1e-9, "a billionth of a second"),
+            (.milliseconds(60), 0.06, "sixty thousandths of a second"),
+            (.seconds(3), 3.0, "three seconds"),
+            (.seconds(90), 90.0, "a minute and a half"),
+            // Both halves of the sum have to arrive: whole seconds are carried separately from the
+            // fraction, and dropping the fraction would answer 3600 here and pass everything above.
+            (.seconds(3600) + .milliseconds(500), 3600.5, "an hour and half a second")
+        ]
+        for (span, expected, what) in cases {
+            let got = Runner.seconds(of: span)
+            #expect(abs(got - expected) <= abs(expected) * 1e-12,
+                    "\(what): should be about \(expected) seconds, came back as \(got)")
+        }
     }
 
     @Test("Sub-second precision survives; it is not rounded to whole seconds")
-    func subSecondPrecisionSurvives() async throws {
-        let start = ContinuousClock.now
-        try await Task.sleep(for: .milliseconds(40))
-        let measured = Runner.seconds(since: start)
-        // **The property is that fractions survive, not that the machine was quick.** Asserting the
-        // measurement stayed under a second failed on a loaded build machine, where a forty-millisecond
-        // wait took two seconds — the test was measuring how busy the machine was, which is not what it
-        // is for. A value carrying a fraction is what "not rounded to whole seconds" actually means.
-        #expect(measured != 0, "dropping the fractional part would make every quick attempt read as zero")
+    func subSecondPrecisionSurvives() async {
+        let clock = TestClock()
+        let watch = Runner.Stopwatch(clock)
+        await clock.advance(by: .milliseconds(40))
+        let measured = watch.seconds
+        // Stated exactly rather than by waiting and hoping. Throwing the fraction away answers 0 here.
+        #expect(abs(measured - 0.04) <= 0.04 * 1e-12,
+                "forty thousandths of a second must survive as forty thousandths: \(measured)")
         #expect(measured != measured.rounded(), "a whole number would mean the fraction was discarded")
     }
 }

@@ -967,6 +967,188 @@ verifying them.
 
 ## 10. Status log
 
+- **2026-08-27 — fifty-sixth round: pinning one borrowed package to an exact version does not pin what
+  that package itself borrows.**
+
+  A review flagged that the build had picked up a release of `xctest-dynamic-overlay` published **two days
+  earlier**. Checked against the source rather than taken on trust, and it is right: the tag was published
+  2026-08-25 and the build resolved to it on 2026-08-27.
+
+  **Why an exact pin did not prevent it.** `swift-clocks` is pinned to exactly 1.1.0. But `swift-clocks`
+  asks for the two packages *it* needs as "this version or newer", and nothing in this project overrode
+  that — so a resolve takes whatever was published most recently, however recently that was. The exactness
+  bought nothing for the two packages standing behind the one that was named. Both are now held at
+  `swift-concurrency-extras` 1.4.1 (released 2026-07-24) and `xctest-dynamic-overlay` 1.11.0 (2026-07-09) —
+  both, not only the one flagged, since the other floats in exactly the same way and merely happened to
+  land on an older release that day. Every borrowed package is now at least a month old: 79, 49 and 34 days.
+
+  **Held by the committed lockfile, not by the manifest, and the difference cost a round to find.** The
+  review's suggested fix was to name the two in the manifest with exact versions. That does pin them — and
+  it makes the build tool print, on every build on both machines, that a declared dependency is unused,
+  because there is no way to say "this version, but I do not use it directly". This project builds clean,
+  so two permanent warnings is the wrong trade. The lockfile is what a build actually reads; a version
+  hand-written into it survives a resolve, which was checked rather than assumed. So the versions are held
+  there, and moving off them takes a deliberate update that shows up as a change to a committed file — the
+  same protection model chosen one round earlier for the dependency surface: a person reading a diff.
+  One trap found the hard way while proving that: writing a version into the lockfile **by hand** is not a
+  way to pin anything. The tool quietly replaced the made-up commit identifier with the real one for that
+  version, and the version itself reverted on a later run without saying so. The safe route is to let the
+  tool write the entry — name the version in the manifest, resolve, then take the name back out — and then
+  read the file to confirm, rather than trusting that a restore did what it looked like it did.
+
+  **A second crash, unrelated, found because these runs were repeated.** One run on Linux died outright —
+  not a check failing, the whole run — inside the system library's own way of starting another program,
+  while it counted the files the process had open by reading a listing that other threads were changing
+  underneath it. The next identical run passed, which is what a race looks like. The cause was the single
+  place in this project that started a program the system library's way instead of the one sanctioned way
+  everything else uses, which the charter requires; it was a check that runs a real shell to read its own
+  quoting back. Moved onto the sanctioned way, that being the only such place left. Seven Linux runs since,
+  all clean.
+
+  **And a third, in my own work from the previous round.** The check that the watchdog ends an overrunning
+  program was claimed as immune to a busy machine. It is not: it moved the clock forward once, and the wait
+  it needed to move past is set up *inside* the call, so if that had not happened yet the clock advanced
+  over an empty schedule and the real program won the race. It failed exactly that way once. It now keeps
+  the clock moving until the call finishes, which cannot miss. Thirty consecutive runs since, all passing.
+
+  **The rule the review cited does not exist in this project.** It called seven days "the dependency
+  vetting window"; nothing in the charter, the contributor notes or the design document sets any minimum
+  age. So this was decided on its merits rather than by pointing at a rule. Holding off on a brand-new
+  release is genuine current practice — the automated update tools ship it as
+  [Renovate's minimum release age](https://docs.renovatebot.com/key-concepts/minimum-release-age/) and as
+  Dependabot's cooldown, which became a **three-day default on 14 July 2026** — and three to five days is
+  the usual recommendation. Two days is inside even the shortest of those. The seven-day figure appears to
+  be the reviewer's own; the concern behind it is mainstream.
+
+  **Kept in proportion.** All three packages are test-only and reach nothing that ships, so nobody running
+  the released program was exposed. The exposure was to developer machines and the shared build machine
+  while the suite runs — real, but much narrower than the wording suggested.
+
+- **2026-08-27 — fifty-fifth round: loose ends after taking on a testing-only dependency, and a guard
+  that was built, reviewed, and taken back out.**
+
+  **Documents that list what this project depends on.** Three do. Two were updated when the dependency was
+  taken on; the design document was not, so it still described a set of outside code that no longer matched
+  the build description. Its policy section, its list of known-good versions, its version marker and its own
+  revision history now agree with the others. The roadmap's "Dependencies" section turned out to be about
+  the order phases are built in, not outside code, so it correctly needed nothing — checked, not assumed.
+
+  **One small hazard closed.** Only `.build/` was ignored, so a second build folder made while testing the
+  other platform was swept into a commit as four embedded repositories. Folders named alongside it are now
+  ignored too.
+
+  **A guard was built for the promise about testing-only code, and then removed on review.** The written
+  rule says three packages attach to tests and reach nothing that ships. A step on the shared build machine
+  was added to re-check that on every change. On review it did not earn its place: the only thing it
+  guards against is somebody deliberately editing the build description to attach a testing-only clock to
+  shipped code, which is a single visible line in a small file that a person reads before anything is
+  committed, and which nobody has a reason to write. Against that, it cost two new files in a new folder,
+  and a hardcoded list of names with nothing tying it to the written rule it claimed to enforce — the same
+  "written in one place, silently missing from its twin" fault this effort has spent days removing, freshly
+  introduced. It also only ever checked those three names, so a brand-new unapproved package in shipped code
+  would have passed it: narrower than the rule, while reading as broader. The sentence claiming the promise
+  is "checked on every change" was removed along with it, rather than keeping a script alive to make a
+  sentence true. Worth stating plainly, because it is the general lesson: a claim about *behaviour* earns a
+  check that fails when the behaviour breaks; a claim about *policy* can be a rule that a person enforces
+  when reading a change, and dressing the second up as the first buys confidence rather than safety.
+
+  **Two facts kept from the attempt, both of which cost time to find.** First, the package tool cannot be
+  asked anything from inside the test suite: it takes a lock on the package while the suite runs, so a
+  check written as a test waits on a lock the test itself is holding, and the run never finishes. Pointing
+  it at a different build folder does not help — the lock is on the package. Second, the toolchain image
+  the Linux build machine runs in has neither Python nor `jq`, so a check written in either passes on one
+  machine and cannot start at all on the other. Both were found by running them, not by reasoning about
+  them.
+
+- **2026-08-27 — fifty-fourth round: checks stop waiting for time to pass and start moving it by hand,
+  under a charter amendment.**
+
+  Rounds fifty-one and fifty-three each fixed a check that judged how long a real wait took, which is
+  really a judgement of how busy the machine is. Both fixes made the judgements *safe against* a busy
+  machine. This round removes the waiting instead, which is the stronger thing and the settled Swift
+  practice. **Charter 1.3.0 → 1.4.0** sanctions it.
+
+  **The dependency is three packages, not one.** `swift-clocks` brings `swift-concurrency-extras` and
+  `xctest-dynamic-overlay` with it; all three are MIT and all three are named in the charter, because
+  naming only the one asked for would understate what was actually taken on. They attach to two test
+  targets and to nothing that ships. Building the released program on its own into an empty folder
+  fetches all three while the package graph is worked out and then compiles and links **none** of them,
+  leaving no trace behind — checked, not assumed. Shipped code takes the standard library's own clock and
+  falls back to the real one, so no run behaves differently.
+
+  **How a run gets its clock.** A clock held as *some clock or other* cannot be asked for a moment in
+  time — the kind has to be known. So the kind is captured once, where it is still known, as "make me a
+  stopwatch", and the rest of the file only ever starts stopwatches. The watchdog that ends an overrunning
+  program takes a clock the same way.
+
+  **Four checks rewritten, one added, one deletion.**
+  - *The watchdog.* It used to start a program that sleeps three seconds and give the watchdog two tenths
+    of a second to beat it — a fifteen-fold margin, and so a claim the machine would not be busy. It is
+    now given **ten minutes**, far longer than the program lives, which is what makes it honest: on a real
+    clock the program would always win and the check would fail, so the only way it can pass is if the
+    watchdog truly waits on the clock handed to it. Put the wait back on a real clock and it fails after
+    3.0 seconds — the program winning, exactly as predicted. It takes four thousandths of a second now.
+  - *The slow grader.* The grader moves the clock on rather than waiting on it. Waiting would hang: the
+    run is stopped inside the grader, and a wait that has not been reached yet cannot be pushed past ahead
+    of time, so nothing is left to move the clock. Moving it on directly makes the same amount of time
+    pass, which is all the code being checked can see. The figure recorded for the attempt must now be
+    **exactly nothing**, rather than merely far enough below the whole call.
+  - *The two conversion checks.* Both waited and then judged. Both now move the clock a stated amount and
+    say what the answer must be.
+  - *Added, and the suite needs it.* Everything above drives a clock moved by hand, and all of it would go
+    on passing if the clock used when nobody supplies one never moved — at which point every attempt would
+    be recorded as taking no time and the very figure this tool publishes would be zero everywhere. One
+    check uses the real clock and asserts only that *some* time went by, never how much.
+  - *Deleted.* The helper that read the real clock had no caller left in shipped code once the stopwatch
+    arrived; only its own checks kept it alive.
+
+  **A mistake of mine, caught by my own check.** I asserted the answer for sixty thousandths of a second
+  as an exact figure. A fraction of a second counted in the clock's smallest unit runs past the range the
+  number format holds exactly, so it came back a millionth of a millionth of a millionth high. The
+  comparisons now allow that much slack, which is still far tighter than any mistake worth catching.
+
+  **Verified.** Each change undone in turn makes its own check fail, including the new one. Twenty
+  consecutive runs of the two rewritten checks on a deliberately loaded machine, all passing. Both
+  machines: **1125 checks in 177 groups**, nothing from the compiler.
+
+- **2026-08-27 — fifty-third round: the shared branch went red, in a check sitting ten lines from the one
+  I had just rewritten for exactly this mistake.**
+
+  A check waited sixty thousandths of a second and then insisted the answer came back under five seconds.
+  The build machine took **six seconds** to finish that wait. Round fifty-one fixed a check of precisely
+  this shape and wrote the reason out beside it; the one directly above it kept the same ceiling and was
+  left alone. Both machines now pass **1124 checks in 177 groups** with nothing to report from the
+  compiler.
+
+  **A ceiling on a measured wait is a statement about the machine, not about the code.** The floor is
+  different and is sound: waiting sixty thousandths of a second guarantees *at least* that much time
+  passed, on any machine, however busy. A delay can only push the answer up, never down. So the floor
+  stays and the ceiling goes.
+
+  **The reason a ceiling was reached for at all was a design mistake underneath.** The sum that turns a
+  measured span into a number of seconds was written inside the same call that reads the clock, so the
+  only way to exercise the sum was to wait and then judge the answer — and judging the answer from above
+  means judging the machine. The sum is now its own call. The direction the ceiling was meant to guard,
+  a span of a fraction of a second reported as minutes, is covered against spans of exactly known length
+  with no waiting anywhere in it, so no machine can influence the result. One of those spans is an hour
+  and half a second: whole seconds and the fraction are carried separately, and quietly dropping the
+  fraction answers every other case correctly.
+
+  **Sweeping for the same mistake elsewhere turned up one more, not yet failing.** That a slow grader's
+  half-second stays out of the time recorded for an attempt was being demonstrated by the recorded time
+  coming in under four tenths of a second — again a claim that the machine was quick, waiting to go red
+  the first time it wasn't. It now compares the recorded figure against the time the whole call took: the
+  grader's half-second is inside one and must be outside the other, so a gap of at least that much has to
+  separate them. A delay anywhere lands in both figures and leaves the gap untouched. This was the only
+  other one; the shipped program has no comparison of this kind at all, and the rest of the checks have
+  no ceiling on any measured span.
+
+  **Verified by reproducing the failure rather than arguing about it.** Loading the machine to sixteen
+  stretched a sixty-thousandths wait by only a tenth — nowhere near what the build machine did, so on its
+  own that proved little and is recorded here as such. Making the wait itself take 6.1 seconds reproduces
+  the failure exactly: the old ceiling fails, the rewritten check passes. Undoing each fix in turn makes
+  its own check fail — the scale of the sum, and the grader's time leaking into the recorded figure.
+
 - **2026-08-27 — fifty-second round: both machines now run the same checks and finish silent, and the
   test rig no longer guesses where the program it is testing lives.**
 

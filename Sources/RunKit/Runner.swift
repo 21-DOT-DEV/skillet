@@ -21,12 +21,20 @@ public struct Runner {
     /// Whether each trial captures produced-file contents for the judge (F16). `.listingOnly` (default)
     /// is the text-judge path — no content read, no cost; `.withContents` is set for the grounded judge.
     let evidencePolicy: EvidencePolicy
+    /// How to start timing an attempt. Held as "make me a stopwatch" rather than as the clock itself,
+    /// because a clock kept as *some clock or other* cannot hand out a moment on demand — the kind of clock
+    /// has to be captured at the one point it is still known, which is here. Defaults to the real clock
+    /// that only counts forward, so nothing about a run changes; a test hands in one whose time it moves by
+    /// hand, which is the only way to check that the grader's time is left out without also depending on
+    /// how busy the machine is (charter 1.4.0).
+    let startTiming: @Sendable () -> Stopwatch
 
-    public init(adapter: any HarnessAdapter, judge: any Judge, workspaces: WorkspaceManager = WorkspaceManager(), evidencePolicy: EvidencePolicy = .listingOnly) {
+    public init(adapter: any HarnessAdapter, judge: any Judge, workspaces: WorkspaceManager = WorkspaceManager(), evidencePolicy: EvidencePolicy = .listingOnly, clock: some Clock<Duration> = ContinuousClock()) {
         self.adapter = adapter
         self.judge = judge
         self.workspaces = workspaces
         self.evidencePolicy = evidencePolicy
+        self.startTiming = { Stopwatch(clock) }
     }
 
     /// A completed run: the pure report plus per-eval trial detail. The command builds + writes the
@@ -122,7 +130,7 @@ public struct Runner {
         var trace: Trace?
         var verdicts: [Verdict] = []
         var fileContents: [FileContent]?   // F16: hoisted so it is persisted for replay/re-grade on every exit path
-        let started = ContinuousClock.now
+        let watch = startTiming()
         // Wall-clock of the harness execution ONLY (F15 → the canonical `time_seconds` stats):
         // stamped immediately after adapter.run returns and reused on the parse/judge error paths,
         // so grader/parser time never leaks into the arms' time Δ (review round 2). When
@@ -131,7 +139,7 @@ public struct Runner {
         do {
             let produced = try await adapter.run(TaskSpec(query: prompt, files: eval.files), in: workspace, skills: injection)
             raw = produced
-            harnessSeconds = Self.seconds(since: started)
+            harnessSeconds = watch.seconds
             let executionSeconds = harnessSeconds
             let parsed = try adapter.parseTrace(produced)
             trace = parsed
@@ -182,7 +190,7 @@ public struct Runner {
             // timed out, so there is usually no session to have counted. Written as the session's own
             // counts rather than as nothing, so that if a session *is* readable the spending is recorded
             // instead of being decided by which exit happened to be taken.
-            return TrialResult(exit: exit, verdicts: [], durationSeconds: harnessSeconds ?? Self.seconds(since: started),
+            return TrialResult(exit: exit, verdicts: [], durationSeconds: harnessSeconds ?? watch.seconds,
                                tokens: trace?.usage, tokensUnreadable: trace?.usageState == .unreadable)
         } catch {
             // **Recorded as never-graded, which is what the line below always said it was.** This comment
@@ -195,7 +203,7 @@ public struct Runner {
             // read, so a grading failure leaves a fully readable session whose counts are a true record of
             // what was spent. The file kept beside the attempt for inspection already had them; what the
             // run adds up did not, so that spending vanished from every total.
-            return TrialResult(exit: .error, verdicts: [], durationSeconds: harnessSeconds ?? Self.seconds(since: started),
+            return TrialResult(exit: .error, verdicts: [], durationSeconds: harnessSeconds ?? watch.seconds,
                                tokens: trace?.usage, tokensUnreadable: trace?.usageState == .unreadable)
         }
     }
@@ -347,9 +355,24 @@ public struct Runner {
     /// wall-clock reading used to *measure* an interval rather than to *record a moment* should be this
     /// instead. It is slower to read than the alternatives by a wide margin, which does not matter: it is
     /// read twice per attempt, around work that takes seconds.
-    static func seconds(since start: ContinuousClock.Instant) -> Double {
-        let elapsed = ContinuousClock.now - start
-        return Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
+    /// Started at a moment on a given clock; tells you how much of that clock's time has passed since.
+    struct Stopwatch: Sendable {
+        private let span: @Sendable () -> Duration
+        init(_ clock: some Clock<Duration>) {
+            let start = clock.now
+            self.span = { start.duration(to: clock.now) }
+        }
+        /// How much time has passed, in seconds.
+        var seconds: Double { Runner.seconds(of: span()) }
+    }
+
+    /// A span of time as a number of seconds. Kept separate from the reading of the clock above so the
+    /// arithmetic can be checked against spans of known length. With the two joined together the only way
+    /// to exercise it was to wait and then bound the answer — and a ceiling on a measured wait is really a
+    /// claim about how busy the machine is, which is what made the check that used to do this fail on a
+    /// loaded build machine and turn the shared branch red.
+    static func seconds(of elapsed: Duration) -> Double {
+        Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) * 1e-18
     }
 
     private func writeForensics(trialDir: URL, evalId: String, raw: String?, trace: Trace?, verdicts: [Verdict], exit: TrialExit, fileContents: [FileContent]? = nil, ungradedReason: String? = nil) {

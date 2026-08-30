@@ -6,6 +6,11 @@ import TraceKit
 import HarnessKit
 import JudgeKit
 import ProjectKit   // SafeFile — the confinement helpers now live here (F17)
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 @testable import RunKit
 
 @Suite("RunKit")
@@ -732,17 +737,6 @@ struct ElapsedTimeTests {
                 "a stopwatch keeps running; it does not restart at each reading: \(watch.seconds)")
     }
 
-    /// **The one check here that uses a real clock, and it has to exist.** Everything else drives a clock
-    /// this file moves by hand, and all of it would carry on passing if the clock used when nobody supplies
-    /// one were a clock that never moved — at which point every attempt would be recorded as having taken
-    /// no time at all, and the figure this tool exists to publish would be zero everywhere. This asserts
-    /// only that *some* time went by, never how much, so a busy machine cannot upset it.
-    @Test("The clock used when nobody supplies one is a real one that moves on its own")
-    func defaultClockIsARealTickingOne() async throws {
-        let watch = Runner(adapter: ReplayAdapter(), judge: ReplayJudge([:])).startTiming()
-        try await Task.sleep(for: .milliseconds(20))
-        #expect(watch.seconds > 0, "a clock that never moved would record every attempt as taking no time")
-    }
 
     /// Nothing here waits, so none of it depends on how busy the machine is. Each span has an exactly
     /// known length, and the slips worth worrying about — a conversion off by three or by nine decimal

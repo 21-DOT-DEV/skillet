@@ -120,6 +120,18 @@ from the first commit.
   `HarnessKitTests` and `RunKitTests` targets only and to no shipped target: building `skillet` on its own
   fetches them while working out the package graph and then compiles and links none of them. Shipped code
   takes the standard library's `Clock` and defaults to the real one, so behaviour is unchanged.
+- **No tunable timing margins in tests** (constitution v1.5.0, a **MUST NOT**): never wait a length of time
+  picked so one thing finishes before another. Anything time-dependent takes a `Clock` defaulting to the real
+  one, and tests hand in a controlled one wherever the code is reachable in-process. Where it is not — tests
+  that run the built `skillet` binary — the stand-in must **never finish on its own** (`tail -f /dev/null`;
+  note `sleep infinity` is unsupported on macOS) and the test carries `.timeLimit`, so a limit that stops
+  firing fails rather than hangs. This is the usual never-answers-versus-merely-slow distinction; only the
+  second is a race. Measured, not stylistic: the same behaviour failed 5 of 10 runs under load when checked
+  against a real idling program, and passed 15 of 15 under twice the load with a controlled clock and no
+  program. A fixed wait in a test, or a stand-in with a duration, is a regression. Waiting *until a condition
+  holds* — re-checking at intervals, giving up after a bound — is the approved replacement, not a
+  loophole: it returns the moment the condition holds, so a slow machine takes longer and still gets the
+  right answer.
 - **Dependency notes (implementation reality):** `swift-yaml` has **no tagged release**, so it is
   **pinned by revision** (`473252b…`). Its `YAML` product needs **C++ interop**, which is **viral to
   direct importers** — so it is confined to the isolated **`ConfigYAML`** target

@@ -31,7 +31,7 @@ private actor RecordingLauncher: ProcessLauncher {
     }
 }
 
-@Suite("BetterleaksScanner")
+@Suite("BetterleaksScanner", .timeLimit(.minutes(1)))
 struct BetterleaksScannerTests {
     private func scanner(_ launcher: any ProcessLauncher) -> BetterleaksScanner {
         BetterleaksScanner(binaryPath: "/opt/betterleaks", launcher: launcher)
@@ -134,7 +134,8 @@ struct BetterleaksScannerTests {
 
     static func resolveBetterleaks() async -> String? {
         guard let out = try? await SubprocessLauncher().run(
-            "/usr/bin/which", ["betterleaks"], workingDirectory: nil, timeout: .seconds(5), environment: nil, outputLimitBytes: nil),
+            // No limit: five seconds was a guess about how quickly `which` runs. The group carries a bound.
+            "/usr/bin/which", ["betterleaks"], workingDirectory: nil, timeout: nil, environment: nil, outputLimitBytes: nil),
               out.exitCode == 0 else { return nil }
         let p = out.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
         return p.isEmpty ? nil : p

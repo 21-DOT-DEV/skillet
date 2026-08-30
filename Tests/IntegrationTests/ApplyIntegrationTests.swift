@@ -504,12 +504,22 @@ struct ApplyIntegrationTests {
     /// to print the same sentence. The documented trap is the reverse of this — a program that could not
     /// start reported as a timeout — which sends you tuning limits on something that was never going to
     /// run. The time limit is lowered here so the test costs a second rather than two minutes.
-    @Test("Running out of time says so, and points at the setting that raises the limit")
+    /// The bound turns a broken time limit into a reported failure rather than a hang: the stand-in below
+    /// never finishes on its own, so if the limit stopped firing there would be nothing to end the run.
+    @Test("Running out of time says so, and points at the setting that raises the limit", .timeLimit(.minutes(1)))
     func timeLimitIsItsOwnAnswer() async throws {
         let (root, draft) = try await Self.makeRepo(); defer { Fixture.remove(root) }
         let elsewhere = try Fixture.makeTempDirectory(); defer { Fixture.remove(elsewhere) }
         let slow = elsewhere.appendingPathComponent("slow-git")
-        try "#!/bin/sh\nsleep 3\n".write(to: slow, atomically: true, encoding: .utf8)
+        // **A stand-in that never finishes, not one that is merely slow.** It used to idle for three
+        // seconds against a one-second limit — a three-to-one margin, i.e. a bet that the machine would not
+        // be busy, and the tightest such bet left in this project. Four other checks made the same bet and
+        // lost (Specs/020 §10, rounds fifty-three to fifty-eight). Testing a time limit against something
+        // that never answers, rather than something slow, is the standard way round: there is no race, so
+        // there is no number that can be wrong. `tail -f /dev/null` is the usual way to spell "blocks until
+        // killed" — it burns no processor, and unlike `sleep infinity` it exists on both platforms this
+        // project builds for.
+        try "#!/bin/sh\nexec tail -f /dev/null\n".write(to: slow, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: slow.path)
         let before = try Self.skillText(root)
 

@@ -88,6 +88,31 @@ evidence lifecycle, `next`), and documents expected behavior as executable asser
 - **MUST NOT** combine multiple unrelated features in one spec.
 - **MUST NOT** mark a task complete while its tests fail, are missing, or pass without ever
   having failed.
+- **MUST NOT** have a test wait a length of time picked so that one thing finishes before another —
+  a margin that can be tuned. Such a test does not report whether the code works, it reports how busy
+  the machine is, and it passes everywhere until the one machine that matters is loaded. Concretely:
+  - Code whose behaviour depends on time **MUST** accept a clock (the standard library's `Clock`,
+    defaulting to the real one), and tests **MUST** supply one they control, wherever that code is
+    reachable in the same process.
+  - Where it is not reachable — a test that runs the built binary, whose clock is beyond reach — the
+    stand-in it is given **MUST** be one that never finishes on its own (`tail -f /dev/null`, *not* a
+    sleep long enough to win), so there is no race to lose, and the test **MUST** carry a time limit so
+    that a limit which stops firing fails the test instead of hanging it. Real time passing is fine
+    here: it is the behaviour under test, not a guess about speed. (`sleep infinity` is not portable —
+    it fails on macOS.)
+
+  Waiting until a stated condition holds, re-checking at intervals and giving up after a bound, is
+  **allowed and preferred** — it returns as soon as the condition holds, so a slower machine takes
+  longer and still gets the right answer, and reaching the bound reports that the thing never happened
+  rather than losing a race. That is the standard replacement for a fixed wait, not an exception to
+  this rule.
+
+  This is the standard distinction between testing against something that **never answers** and
+  something that is merely **slow**; only the second creates a race. Measured on 2026-08-29 on one
+  machine: the identical behaviour checked by starting a real program that idles failed **5 times in
+  10** under load; checked with a controlled clock and no program it passed **15 out of 15** under
+  twice the load (Specs/020 §10, rounds fifty-three to fifty-eight, which record four consecutive
+  attempts to make a racing check reliable, and why none of them could be).
 - **SHOULD** develop outside-in, from the user's (or operating agent's) perspective first.
 - **MAY** add property-based tests for pure functions (gates engine, scorers, aggregation).
 
@@ -492,11 +517,22 @@ constitution is the development-principle layer. They are kept in sync, not dupl
 
 ## Version History
 
-**Version**: 1.4.0
+**Version**: 1.5.0
 **Ratified**: 2026-06-18
-**Last Amended**: 2026-08-27
+**Last Amended**: 2026-08-29
 
 **Changelog**:
+- **1.5.0** (2026-08-29): MINOR amendment (Principle II, spec- and test-driven development) — a new
+  **MUST NOT**: no test may wait a length of time picked so one thing finishes before another. Time-dependent
+  code takes a clock and defaults to the real one; tests supply a controlled one where the code is reachable
+  in-process, and where it is not (tests driving the built binary) the stand-in must be one that never
+  finishes, under a time limit. This follows the standard distinction between testing against something that
+  never answers and something merely slow — only the second is a race. Rationale is measured, not asserted:
+  the same behaviour failed 5 of 10 runs under load when checked by starting a real idling program, and
+  passed 15 of 15 under twice the load when checked with a controlled clock and no program. Two checks were
+  removed and one stand-in replaced to comply; no tunable timing margin remains anywhere. No principle added,
+  removed, or weakened. Ripples the design doc §12 and AGENTS.md; the enabling dependency was sanctioned in
+  v1.4.0.
 - **1.4.0** (2026-08-27): MINOR amendment (Principle VI, dependency hygiene) — `swift-clocks` (MIT) and
   the two packages it pulls in transitively, `swift-concurrency-extras` and `xctest-dynamic-overlay`
   (both MIT), are sanctioned as **test-only** dependencies: three packages, not one. All three are linked

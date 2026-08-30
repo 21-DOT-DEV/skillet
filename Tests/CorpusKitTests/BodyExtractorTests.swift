@@ -1,6 +1,11 @@
 import Testing
 import Foundation
 @testable import CorpusKit
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 @Suite("BodyExtractor — confined, safe body reads")
 struct BodyExtractorTests {

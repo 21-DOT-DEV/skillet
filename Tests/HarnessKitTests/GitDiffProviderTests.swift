@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import HarnessKit
 
-@Suite("GitDiffProvider — tolerant workspace diff")
+@Suite("GitDiffProvider — tolerant workspace diff", .timeLimit(.minutes(1)))
 struct GitDiffProviderTests {
     private let launcher = SubprocessLauncher()
     /// **Available to the test's own condition, so a missing program reports as *not run*.**
@@ -18,8 +18,10 @@ struct GitDiffProviderTests {
     @discardableResult
     private func git(_ args: [String], in dir: URL) async throws -> Int32 {
         guard let g = gitPath else { return -1 }
+        // No limit: thirty seconds of real time was a guess about how quickly `git` runs, not a statement
+        // about anything being checked here. The group carries a bound instead.
         return try await launcher.run(g, ["-C", dir.path] + args, workingDirectory: dir.path,
-                                      timeout: .seconds(30), environment: nil, outputLimitBytes: nil).exitCode
+                                      timeout: nil, environment: nil, outputLimitBytes: nil).exitCode
     }
     private func repo() async throws -> URL {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

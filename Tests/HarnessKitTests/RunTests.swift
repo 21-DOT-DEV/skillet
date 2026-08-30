@@ -3,7 +3,12 @@ import Foundation
 import Clocks
 import EDDCore
 import TraceKit
-import HarnessKit
+@testable import HarnessKit   // givingUpAfter is an internal helper, deliberately not public API
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#endif
 
 @Suite("claude-code run (seam)")
 struct RunTests {
@@ -102,7 +107,7 @@ struct RunTests {
 
 /// Exercises the *real* `SubprocessLauncher` against ubiquitous posix binaries — the only way to prove
 /// the F7 cwd / timeout / environment additions actually reach (and bound) the child process.
-@Suite("SubprocessLauncher (real process)")
+@Suite("SubprocessLauncher (real process)", .timeLimit(.minutes(1)))
 struct SubprocessLauncherTests {
     @Test("Captures stdout + exit code (no watchdog path)")
     func echoes() async throws {
@@ -135,50 +140,99 @@ struct SubprocessLauncherTests {
         #expect(out.stdout.contains("SKILLET_TEST_VAR=hello123"))
     }
 
+    /// The limit stays in the picture — this check is about a program finishing before it — but it is
+    /// measured on a clock this check never moves, so it can never fire however busy the machine is. Ten
+    /// seconds of real time used to stand here, which was a bet that the machine would finish a `/bin/echo`
+    /// within ten seconds; generous, but still a guess about speed rather than a statement about the code.
     @Test("A child that wins the race returns its real output, watchdog notwithstanding")
     func underTimeoutReturns() async throws {
-        let out = try await SubprocessLauncher().run("/bin/echo", ["fast"], workingDirectory: nil, timeout: .seconds(10), environment: nil, outputLimitBytes: nil)
+        let out = try await SubprocessLauncher(clock: TestClock()).run(
+            "/bin/echo", ["fast"], workingDirectory: nil, timeout: .seconds(10),
+            environment: nil, outputLimitBytes: nil)
         #expect(out.stdout == "fast\n")
     }
 
-    /// **The watchdog is made to fire, not raced into firing.** This used to start a child that sleeps for
-    /// three seconds and give the watchdog two tenths of a second to beat it — a fifteen-fold margin, and so
-    /// a claim that the machine would not be busy. A sibling check making the same kind of claim with an
-    /// eighty-fold margin lost it on a build machine on 2026-08-27 — written up in `Specs/020-prove-by-ab/
-    /// plan.md` §10, the round labelled fifty-three, which names the run and the figures. The clock here is
-    /// one the check moves by hand, so the watchdog's wait ends exactly when this says so, whatever else the
-    /// machine is doing.
+    /// **Nothing is started here and nothing waits.** The work is a wait on a clock nobody ever moves,
+    /// which is simply a wait that never ends. The watchdog's clock reports the time up the instant it is
+    /// asked. So the outcome is settled by construction rather than by one side being slower than the
+    /// other, and there is no elapsed time anywhere for a busy machine to stretch.
     ///
-    /// The ten minutes is deliberate and is what makes this check honest. It is far longer than the child
-    /// lives, so on a real clock the child would always win and this would fail — the only way it can pass
-    /// is if the watchdog really is waiting on the clock handed to it. Put the wait back on a real clock and
-    /// this stops passing rather than merely getting slower.
-    @Test("A child that overruns the watchdog is killed and surfaces timedOut")
-    func overTimeoutThrows() async throws {
-        let clock = TestClock()
-        async let call: ProcessOutput = SubprocessLauncher(clock: clock).run(
-            "/bin/sleep", ["3"], workingDirectory: nil, timeout: .seconds(600),
-            environment: nil, outputLimitBytes: nil)
-        // **The clock has to keep moving, not be moved once.** The watchdog sets up its wait *inside* the
-        // call, and moving the clock before that has happened moves it over an empty schedule — nothing to
-        // wake, so the real child wins the race this check exists to prevent, and the check fails for a
-        // reason that has nothing to do with the code. Seen doing exactly that on 2026-08-27. Moving the
-        // clock over and over cannot miss it: whenever the wait appears, the next turn carries the clock
-        // past it. An hour a turn, so one turn is always enough once it is there.
-        let keepTimeMoving = Task {
-            while !Task.isCancelled {
-                await clock.advance(by: .seconds(3600))
-                await Task.yield()
-            }
-        }
-        defer { keepTimeMoving.cancel() }
+    /// Three earlier versions of this raced a real ten-minute program against a clock and each lost in a
+    /// different way — the last of them failing five times in ten under load (Specs/020 §10, rounds
+    /// fifty-three, fifty-four, fifty-seven). All three existed only because giving up after a while used
+    /// to be welded to starting a program, so the giving-up could not be checked on its own. It can now.
+    @Test("Work that outlasts the watchdog is abandoned, and the caller is told the time ran out")
+    func givingUpReportsTimedOut() async throws {
+        let neverArrives = TestClock()      // never moved on, so anything waiting on it waits for good
         do {
-            _ = try await call
-            Issue.record("the watchdog should have ended the child, but the call came back normally")
+            _ = try await SubprocessLauncher.givingUpAfter(.seconds(1), on: ImmediateClock()) {
+                try await neverArrives.sleep(for: .seconds(1))
+                return "the work finished, which it cannot"
+            }
+            Issue.record("the watchdog should have given up on work that never finishes")
         } catch let error as ProcessError {
-            guard case .timedOut = error else {
+            guard case .timedOut(let waited) = error else {
                 Issue.record("expected the watchdog's own error, got \(error)"); return
             }
+            #expect(waited == .seconds(1), "the report must say how long it waited before giving up")
+        }
+    }
+
+
+    /// **That a program this tool walks away from is actually ended.** Nothing checked this before: the
+    /// deleted check that claimed it in its title only ever confirmed the caller was told the time had run
+    /// out. If ending it ever stopped working, this tool would abandon model programs that keep running —
+    /// and those are billed by the minute, which is a poor look for a tool that reports spending.
+    ///
+    /// Walking away is what a time limit does under the covers, so that is what is triggered here directly,
+    /// which also keeps the steps in order: a limit that reports the time up at once would end the program
+    /// before it had managed to record anything. No duration is guessed at any point — each step asks
+    /// repeatedly whether a condition holds and gives up after a number of tries, which is a different
+    /// thing from waiting out a chosen length of time.
+    /// The bound matters here: the program under this check never finishes by itself, so if walking away
+    /// stopped ending it, there would be nothing left to end the run. The bound turns that into a reported
+    /// failure instead of a run that never finishes.
+    @Test("A program this tool walks away from is actually ended, not left running", .timeLimit(.minutes(1)))
+    func abandonedChildIsActuallyEnded() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let note = dir.appendingPathComponent("pid")
+        let script = dir.appendingPathComponent("blocks")
+        try "#!/bin/sh\necho $$ > '\(note.path)'\nexec tail -f /dev/null\n"
+            .write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+
+        let running = Task {
+            try await SubprocessLauncher().run(script.path, [], workingDirectory: nil,
+                                               timeout: nil, environment: nil, outputLimitBytes: nil)
+        }
+        // If the program never records its number, this waits until the check's own time limit ends it.
+        try await Self.keepAsking { FileManager.default.fileExists(atPath: note.path) }
+
+        let noted = try String(contentsOf: note, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)
+        let pid = try #require(pid_t(noted), "the recorded number was not readable")
+        #expect(kill(pid, 0) == 0, "the program should still be running at this point")
+
+        running.cancel()
+        _ = await running.result
+        // Stops answering → it has been ended and cleared away. If it never stops answering — the program
+        // was left running, which is the failure this check exists for — the time limit ends the check.
+        try await Self.keepAsking { kill(pid, 0) != 0 }
+    }
+
+    /// Asks `condition` over and over until it holds, pausing briefly between attempts.
+    ///
+    /// **There is no attempt count, deliberately.** A first version gave up after five hundred attempts —
+    /// about five seconds — and that turned out to be a bet on machine speed exactly like the ones this
+    /// project spent days removing: it held when this check ran on its own and was exceeded when the whole
+    /// suite ran at once and starting a program took longer. The only bound now is the time limit on the
+    /// check itself, so there is one number in play instead of two that can disagree, and it is a failure
+    /// bound rather than a race. Being told to stop is passed on rather than swallowed — that is how the
+    /// time limit ends this, and it is why a run that was stopped says so instead of inventing a failure.
+    private static func keepAsking(_ condition: () -> Bool) async throws {
+        while !condition() {
+            try await Task.sleep(for: .milliseconds(10))
         }
     }
 
@@ -189,8 +243,11 @@ struct SubprocessLauncherTests {
     func pipesStdin() async throws {
         let payload = "github_token = ghp_skilletSyntheticCanaryDoNotUse123456\nsecond line\n"
         let out = try await SubprocessLauncher().run(
+            // No limit: this is about what reaches the program's input, and a limit here would only be a
+            // guess about how quickly `/bin/cat` runs. The group carries a bound, so a program that never
+            // returns fails this check rather than stopping the whole run.
             "/bin/cat", [], input: Data(payload.utf8),
-            workingDirectory: nil, timeout: .seconds(10), environment: nil, outputLimitBytes: nil)
+            workingDirectory: nil, timeout: nil, environment: nil, outputLimitBytes: nil)
         #expect(out.stdout == payload)
         #expect(out.exitCode == 0)
     }

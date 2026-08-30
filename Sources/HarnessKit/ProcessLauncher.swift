@@ -111,15 +111,35 @@ public struct SubprocessLauncher: ProcessLauncher {
         guard let timeout else {
             return try await Self.runOnce(executable, arguments, input, workingDirectory, environment, limit)
         }
-        // Watchdog: race the child against a sleeper. Whichever finishes first wins; exiting the group
-        // cancels the loser — cancelling the child task makes swift-subprocess terminate the process.
-        return try await withThrowingTaskGroup(of: ProcessOutput?.self) { group in
-            group.addTask { try await Self.runOnce(executable, arguments, input, workingDirectory, environment, limit) }
-            group.addTask { [clock] in try await clock.sleep(for: timeout); return nil }   // nil sentinel = timed out
+        return try await Self.givingUpAfter(timeout, on: clock) {
+            try await Self.runOnce(executable, arguments, input, workingDirectory, environment, limit)
+        }
+    }
+
+    /// Runs `work`, abandoning it if `timeout` passes on `clock` first — and reporting that as
+    /// `ProcessError.timedOut` rather than as whatever half-finished state the work was left in.
+    ///
+    /// **Separate from starting a program on purpose.** Giving up after a while and starting a program are
+    /// two different jobs, and welding them together meant the only way to check the giving-up was to start
+    /// a real program that runs longer than the check does — which reads as nonsense, needs a paragraph to
+    /// explain, and drags real elapsed time into something that has none. Apart, the giving-up can be
+    /// checked with no program and no waiting at all (Specs/020 §10, round fifty-eight).
+    ///
+    /// Whichever of the two finishes first wins; leaving cancels the loser, and cancelling the work is what
+    /// makes a started program actually stop.
+    static func givingUpAfter<T: Sendable>(
+        _ timeout: Duration,
+        on clock: any Clock<Duration>,
+        _ work: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T?.self) { group in
+            group.addTask { try await work() }
+            group.addTask { try await clock.sleep(for: timeout); return nil }   // nil sentinel = gave up
             defer { group.cancelAll() }
-            let first = try await group.next() ?? nil
-            if let output = first { return output }
-            throw ProcessError.timedOut(after: timeout)
+            guard let finished = try await group.next() ?? nil else {
+                throw ProcessError.timedOut(after: timeout)
+            }
+            return finished
         }
     }
 

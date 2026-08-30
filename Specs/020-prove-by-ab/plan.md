@@ -967,6 +967,209 @@ verifying them.
 
 ## 10. Status log
 
+- **2026-08-29 — sixtieth round: four more findings from review; two were wrong about what would happen,
+  and both had a smaller true version underneath.**
+
+  **"This will not build on the Linux machine" — it does.** Ran it there: builds and passes. The two
+  low-level names it flags (asking the system whether a program is still running) are available on Linux
+  today only because the general-purpose library re-exports them as a convenience — a convenience that has
+  been added, argued over and changed before, and that Apple's own system-APIs package says it will not
+  remove the need to work around. Eight files here already declare the dependency explicitly; **three did
+  not**, not one — the reported file plus two that predate this work. All three now do. Nothing changes
+  today; the build simply stops depending on a courtesy.
+
+  **"A cancelled wait keeps polling for about five seconds" — measured at 0.058 seconds.** A wait that has
+  been told to stop returns at once, so the loop drains in milliseconds. The true version is smaller and
+  real: the helper ignored being told to stop, kept asking, and then reported *"the thing never happened"* —
+  untrue, since it was never waited for. It now passes that on, so a run that was stopped says so instead of
+  inventing a failure.
+
+  **"Nothing verifies the child is really ended" — that is what last round added,** and removing the
+  mechanism makes it fail rather than pass. Nothing to do.
+
+  **Three unexplained figures in the piece that talks to the model tool** — sixty seconds to ask its
+  version, thirty to ask whether the user is signed in, sixty for its help text. Against health-check
+  practice, where one to two seconds is normal, sixty looks absurd. It is not: these answer "is this tool
+  usable at all", and on a first run the tool may still be setting itself up, where giving up early would
+  tell a new user their tool is broken when it is merely starting. The figures survive scrutiny; the reason
+  existed nowhere. They are now named and carry it. Deliberately **not** made adjustable — every real case
+  for adjustable limits comes from limits that were too *tight*, and nothing here has been too slow.
+
+  **And the suite caught me making the same mistake again, one round after writing the rule against it.**
+  The waiting helper added last round gave up after five hundred attempts — about five seconds. That held
+  when its check ran on its own and was exceeded the moment the whole suite ran at once and starting a
+  program took longer, so the check failed reporting "the program never recorded its number" when the
+  program was merely slow to start. A cap like that is a bet on machine speed wearing the clothes of a
+  failure bound. The check already carried a one-minute limit, so there were two bounds and the tighter one
+  was the wrong one. The inner cap is gone: the time limit is now the only bound. Confirmed both ways —
+  the suite passes, and leaving the program running makes the check fail at 60.0 seconds rather than hang.
+
+  **A fourth figure in the same file was a different thing entirely:** ten minutes, which is the published
+  default for the per-attempt limit and *is* adjustable. Only the link between the code and the published
+  setting was missing, and now it is stated.
+
+- **2026-08-29 — fifty-ninth round: four findings from review, all real, one of them materially narrower
+  than reported.**
+
+  **The stopping promise was not broken — two sentences were.** The report said the product description
+  promises a polite stop, a pause, then a forceful one, while the program only does the forceful one. The
+  second half is true and confirmed at the source: the library that starts programs takes a list of
+  stopping steps, always appends the forceful step to whatever it is given, and is given nothing — so an
+  empty list *is* an immediate forceful stop. But the description already scopes the polite sequence
+  correctly, as a **planned** item (F18) that has not shipped, and lists it under what is deferred. Only two
+  sentences described it as though it were current: a comment beside a setting, and a passing clause in the
+  section on borrowed code. Both now say plainly what happens today. The planned item stays planned.
+
+  **Deliberately not adding the pause.** A pause before forcing a stop is a length of time, and it happens
+  inside the borrowed library, which will not take a clock this project controls — so nothing could check
+  it without sitting through it. That is the thing four earlier rounds were spent removing. What is given
+  up is the last fragment of the transcript for a run that already failed and is never graded.
+
+  **Four checks were giving a real program a real time limit** — ten seconds twice, thirty once, five once.
+  Every one of those was a duration picked so the program would finish first: generous, never yet failed,
+  and still a guess about machine speed. Where the limit belongs in what is being checked, it now sits on a
+  clock that is never moved, so it is present and can never fire. Where it was beside the point, it is gone.
+  Each of the three groups involved now carries a bound, which is what the removed limits were incidentally
+  providing.
+
+  **A promise with no coverage at all now has some.** Nothing checked that a program this tool walks away
+  from is actually ended — the deleted check that claimed it in its title only ever confirmed the caller was
+  told. If that broke, model programs would keep running after being abandoned, and they are billed while
+  they run. The new check has the program record the number the system knows it by and then never finish,
+  triggers the walking-away directly, and then asks repeatedly whether it is gone. Undo it — never ask it to
+  stop — and it fails after 12.8 seconds instead of hanging, because it carries a bound.
+
+  **Two dead ends on the way there, both worth knowing.** Making the limit fire at once killed the program
+  *before* it could record anything, so nothing was left to check — the limit fires too early to be the way
+  in. And asking repeatedly while only yielding, without pausing, never saw the program start at all: a loop
+  that only yields keeps a worker thread to itself and holds up the very work it waits for. That is the same
+  fault as the clock-pushing loop from round fifty-seven, in a new place.
+
+  **So the rule was sharpened a second time.** As written it forbade *all* fixed waiting, which also
+  forbade the standard replacement for it: waiting **until a condition holds**, re-checking at intervals,
+  giving up after a bound. That returns the moment the condition holds, so a slow machine takes longer and
+  still gets the right answer, and reaching the bound reports that the thing never happened rather than
+  losing a race. It is now written as allowed and preferred.
+
+  **And the sweeping claim from the previous round was false and is now true and specific.** "No real
+  waiting anywhere" was wrong — it was written from a search too narrow to match the ways waiting is
+  actually spelled here. It now says no check waits a *fixed* length of time, and names the two places
+  where real time deliberately passes.
+
+- **2026-08-29 — fifty-eighth round: waiting removed from the checks entirely, and the rule written down.**
+
+  Four rounds were spent trying to make one check reliable while it waited on real time. Each attempt was
+  a smaller version of the same mistake, and the last still failed on the shared build machine. This round
+  stops fixing it and removes the waiting.
+
+  **The measurement that settled it,** taken on one machine with the same load recipe. The same behaviour,
+  checked by starting a real program that idles: **5 failures in 10**. Checked with a clock the check
+  controls and no program at all, under **twice** the load: **15 passes out of 15**. That is not a tuning
+  difference; the two are different kinds of check.
+
+  **What made the second kind possible.** Giving up on work after a set time used to be welded to starting
+  a program, so the only way to reach the giving-up was to start one. Splitting the giving-up into its own
+  small piece — same logic, moved — means it can be checked with nothing running and no time passing: the
+  work is a wait on a clock nobody ever moves, and the watchdog's clock reports the time up the moment it
+  is asked. The outcome is settled by construction rather than by one side being slower.
+
+  **Two checks deleted.** The one that started a real five-second program, whose only subject was a single
+  line of wiring, and the one that waited twenty thousandths of a second to confirm the clock used by
+  default really moves. The second is now close to unreachable by accident: clocks that do not move come
+  from the borrowed clock library, which is attached to checks only and cannot be reached from the shipped
+  program at all. **No check anywhere now waits a fixed length of time.** Two places still let real time
+  pass, both deliberately and neither a guess: one runs the built program to see it enforce its own limit,
+  and one waits *until* an abandoned program has gone, re-checking and giving up after a bound.
+
+  **Written into the binding rules (charter 1.4.0 → 1.5.0)** rather than left as folklore, with the
+  measurement attached so the next person does not have to rediscover it: no check may wait on real
+  elapsed time, nor start a program that idles, to observe behaviour that depends on time; such code takes
+  a clock and defaults to the real one, and checks hand in one they control.
+
+  **One more racing check, found only after the rule was written — and it was the tightest of the lot.**
+  A check runs the built program with its time limit set to one second and hands it a stand-in `git` that
+  idles for three: a three-to-one margin, tighter than the fifteen-to-one one that had already been
+  failing. It was missed because the idling is written inside a line of text that gets saved as a script,
+  so searching for the usual spellings did not find it. The behaviour it covers lives in the program's own
+  module, which no check can reach directly, so it can only be exercised by running the program from
+  outside — where its clock cannot be swapped.
+
+  **Which is a recognised situation with a recognised answer:** test a time limit against something that
+  **never answers**, not something that is merely **slow**. Only the second is a race. The stand-in is now
+  `tail -f /dev/null`, the usual way to spell "blocks until killed" — no duration, nothing to tune, no
+  processor burned, and unlike `sleep infinity` it works on both platforms this project builds for
+  (`sleep infinity` fails outright on macOS). The check carries a one-minute bound so that a limit which
+  stops firing fails the run instead of hanging it: removing the limit from the program makes it fail after
+  60.4 seconds rather than never returning.
+
+  **So the rule was sharpened before it landed.** As first written it banned *real elapsed time*, which
+  would have forbidden checking the built program's own limits at all — the program has its own clock and
+  the check is outside it. It now bans *a length of time picked so one thing finishes before another*: a
+  margin that can be tuned. That is what every failure here had in common, and it is the line the wider
+  practice draws too.
+
+  **Still unclaimed:** nothing verifies that a program abandoned by the watchdog is actually stopped. The
+  check's old title claimed it; that check is gone, so the claim is gone too, but the promise in the design
+  document (stop it gently, then forcibly) remains untested.
+
+- **2026-08-28 — fifty-seventh round: the same check failed again on the shared build machine, with my fix
+  for it already in place. Failing to reproduce it was the finding.**
+
+  The check that an overrunning program is stopped by the watchdog lost on the shared build machine again,
+  this time with the previous round's fix merged. Then it survived roughly **fifty** local attempts without
+  failing once: thirty of the check alone, six with the machine's task scheduling squeezed to a single
+  thread, six full runs on one machine and five more on the other with the processor count cut to two. At
+  that point the useful conclusion is not "tune it further" — a fault that cannot be provoked in fifty
+  tries and still fails in the wild is telling you the shape is wrong.
+
+  **The shape was wrong twice, the same way.** Both earlier versions needed something *outside* the call to
+  happen soon enough: the first needed the machine to be quick enough for a two-tenths-of-a-second watchdog
+  to beat a three-second program; the second needed this check to push the clock forward *after* the
+  waiting had been set up inside the call, and there is no moment it can know that has happened. Whenever
+  the push came too early there was nothing to push past, and the program won. Neither version could
+  guarantee anything; both merely made losing unlikely, on the machine they were written on.
+
+  **Nothing is raced now.** The clock handed to the watchdog answers every wait the instant it is asked, so
+  the watchdog's wait is over before the program under it has managed anything, on any machine, with
+  nothing outside having to intervene. The ten-minute watchdog is what keeps the check honest — far longer
+  than the program lives, so one waiting on a real clock loses to the program every time and the check
+  fails. Confirmed by doing exactly that: put the wait back on a real clock and it fails after 30.0
+  seconds, the program winning. The check itself now finishes in **four thousandths of a second**; the run
+  that failed on the build machine took 6.9.
+
+  **Neither number in it is a margin, which took a second pass to get right.** The first attempt at this
+  left the program under the watchdog running for half a minute and called that "margin" — which is
+  precisely the thing being removed, since a machine stalled for longer would still lose. The check is now
+  given a minute to finish, and the program under it runs for ten, so the program cannot win by outlasting
+  anything: the minute runs out first and says the check timed out, instead of the program quietly
+  finishing and the check drawing the wrong conclusion from it. The ten-minute watchdog is a tripwire
+  rather than a timing knob — on a real clock it outlives the program, so the program wins and the check
+  fails, which is what makes it prove the clock is really being used. Confirmed both ways: passes in four
+  thousandths of a second, and fails at 60.3 seconds when the clock is taken back out.
+
+  **Reproduced, then measured — the earlier "cannot reproduce it" no longer holds.** The recipe: start four
+  busy processes per processor, **let the load build for about a minute** (this is the part that was
+  missed — the first four attempts ran while the load was still climbing and all passed, which is what
+  produced the false conclusion that it could not be reproduced), then run the whole suite over and over.
+  Under that, the old version failed **five times out of ten**. The new version, run the same way against a
+  machine loaded *twice* as heavily, failed **none out of ten**, with the suite taking 19 to 45 seconds
+  instead of its usual 17 — so the load was genuinely biting, not just a large number on a display.
+
+  **What was actually going wrong.** The old version kept a loop running that pushed the clock forward and
+  yielded, over and over. On a machine with plenty of processors that is harmless. On a small busy one it
+  occupies one of the few worker threads shared by all waiting work — including the very wait it existed to
+  push past. So it starved what it was serving, while the program it was racing ran outside that pool and
+  finished on time regardless. That explains every observation: it needs few processors *and* sustained
+  load, it never showed on a sixteen-processor machine, and the failing run took 6.9 seconds for a
+  three-second program.
+
+  **Still unclaimed:** the check's own title says the overrunning program "is killed", and nothing in it
+  verifies that; it checks only that the caller is told the time ran out.
+
+  **Swept for the same shape elsewhere.** Three other places move a clock by hand, and none is exposed:
+  two step a stopwatch along in a straight line with nothing else running, and the third moves the clock
+  from *inside* the code being checked, so there is no outside timing to get wrong.
+
 - **2026-08-27 — fifty-sixth round: pinning one borrowed package to an exact version does not pin what
   that package itself borrows.**
 

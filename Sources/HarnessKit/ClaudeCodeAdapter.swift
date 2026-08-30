@@ -42,6 +42,8 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         resolver: BinaryResolver? = nil,
         denylist: Denylist = .claudeCodeSeed,
         environment: [String: String] = ProcessInfo.processInfo.environment,
+        // Ten minutes, mirroring the documented default for the per-attempt limit in the settings file
+        // (`runs.timeout: "10m"`). Unlike the figures below this one is adjustable — a real run overrides it.
         timeout: Duration = .seconds(600),
         outputLimitBytes: Int? = nil
     ) {
@@ -63,7 +65,7 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         // A pinned-but-unreachable binary (bad path/permissions) is "not found", not an opaque crash.
         let output: ProcessOutput
         do {
-            output = try await launcher.run(resolved.path, ["--version"], workingDirectory: nil, timeout: .seconds(60), environment: nil, outputLimitBytes: nil)
+            output = try await launcher.run(resolved.path, ["--version"], workingDirectory: nil, timeout: Patience.describingItself, environment: nil, outputLimitBytes: nil)
         } catch {
             throw EDDError.harnessNotFound(harness: "claude-code", reason: nil)
         }
@@ -121,7 +123,7 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
     /// (non-zero exit, unreachable, unparseable) is treated as not-authenticated.
     private func isAuthenticated(binary: String) async -> Bool {
         guard let output = try? await launcher.run(
-            binary, ["auth", "status", "--json"], workingDirectory: nil, timeout: .seconds(30), environment: nil, outputLimitBytes: nil
+            binary, ["auth", "status", "--json"], workingDirectory: nil, timeout: Patience.checkingSignIn, environment: nil, outputLimitBytes: nil
         ), output.exitCode == 0 else {
             return false
         }
@@ -223,6 +225,25 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
     /// auth or the config dir.
     static let isolationFlag = "--disable-slash-commands"
 
+    /// How long to wait for the model tool to answer a question that costs nothing and calls no model —
+    /// its version, its help text, whether the user is signed in.
+    ///
+    /// **Deliberately generous, and this is the reason.** A health check on a running service would use a
+    /// second or two, and by that standard these are enormous. But these are not that: they answer "is this
+    /// tool usable at all", and the first time someone runs it the tool may still be setting itself up.
+    /// Giving up early there reports "your tool is broken" to somebody whose tool is merely starting — the
+    /// worst possible false alarm, at the first moment a new user meets this program. Waiting too long only
+    /// costs time in the rare case where the tool is genuinely stuck, and something has already gone wrong
+    /// by then. Not adjustable: nothing has yet been too slow for these, and the day something is, that
+    /// case is the justification for a setting.
+    enum Patience {
+        /// Asking the tool to describe itself — its version or its help text. Purely local.
+        static let describingItself = Duration.seconds(60)
+        /// Asking whether the user is signed in. Reads a stored credential and may reach the network, but
+        /// makes no model call and costs nothing.
+        static let checkingSignIn = Duration.seconds(30)
+    }
+
     /// The $0 `--ab` preflight (F15, §9.2): prove the resolved binary supports the isolation switch
     /// before any paid baseline trial — flag support shifts across harness versions (the denylist
     /// class), so it is checked per run, never assumed. The per-trial pollution tripwire (RunKit)
@@ -235,7 +256,7 @@ public struct ClaudeCodeAdapter: HarnessAdapter {
         }
         let output: ProcessOutput
         do {
-            output = try await launcher.run(resolved.path, ["--help"], workingDirectory: nil, timeout: .seconds(60), environment: nil, outputLimitBytes: nil)
+            output = try await launcher.run(resolved.path, ["--help"], workingDirectory: nil, timeout: Patience.describingItself, environment: nil, outputLimitBytes: nil)
         } catch {
             throw EDDError.baselineNotIsolable(
                 harness: "claude-code",
